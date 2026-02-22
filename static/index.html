@@ -498,6 +498,12 @@
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
+            <select id="sortOrder" onchange="renderBoard()" style="background:var(--bg-card);border:1px solid var(--border);border-radius:0.375rem;padding:0.375rem;color:var(--text-primary);font-size:0.8rem">
+                <option value="manual">Manual</option>
+                <option value="newest">Newest First</option>
+                <option value="oldest">Oldest First</option>
+                <option value="priority">Priority</option>
+            </select>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -715,6 +721,17 @@
                         c.title.toLowerCase().includes(filter) || 
                         (c.description && c.description.toLowerCase().includes(filter))
                     );
+                }
+                
+                // Apply sort
+                const sortOrder = document.getElementById('sortOrder')?.value || 'manual';
+                if (sortOrder === 'newest') {
+                    columnCards.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+                } else if (sortOrder === 'oldest') {
+                    columnCards.sort((a, b) => new Date(a.created_at) - new Date(b.created_at));
+                } else if (sortOrder === 'priority') {
+                    const priorityOrder = { high: 0, medium: 1, low: 2 };
+                    columnCards.sort((a, b) => (priorityOrder[a.priority] ?? 1) - (priorityOrder[b.priority] ?? 1));
                 }
                 
                 const colDiv = document.createElement('div');

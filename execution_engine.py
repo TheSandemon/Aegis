@@ -1,7 +1,7 @@
 """
 Aegis Unified Execution Engine
-Consolidates SubprocessAdapter, DockerAdapter, AgentProcess tracking,
-health polling, log streaming, and rate limiting into a single module.
+Factory-pattern architecture: Templates are read-only installed agent code,
+Instances are isolated working copies that can run concurrently.
 """
 
 import os
@@ -10,6 +10,7 @@ import asyncio
 import time
 import shutil
 import logging
+import secrets
 from pathlib import Path
 from typing import Optional, Callable, Coroutine, Any
 from datetime import datetime
@@ -17,8 +18,19 @@ from abc import ABC, abstractmethod
 
 logger = logging.getLogger("aegis.engine")
 
+# Legacy compat
 AGENTS_DIR = Path(__file__).parent / "agents"
 AGENTS_DIR.mkdir(exist_ok=True)
+
+# Factory directories
+AEGIS_DATA = Path(__file__).parent / "aegis_data"
+TEMPLATES_DIR = AEGIS_DATA / "templates"
+INSTANCES_DIR = AEGIS_DATA / "instances"
+INSTANCES_STATE_FILE = AEGIS_DATA / "instances.json"
+
+AEGIS_DATA.mkdir(exist_ok=True)
+TEMPLATES_DIR.mkdir(exist_ok=True)
+INSTANCES_DIR.mkdir(exist_ok=True)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -26,11 +38,15 @@ AGENTS_DIR.mkdir(exist_ok=True)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 class AgentProcess:
-    """Tracks a single running agent process with full metadata."""
+    """Tracks a single running agent/instance process with full metadata."""
 
     def __init__(self, agent_id: str, pid: int, process,
-                 card_id: Optional[int] = None, color: str = "#6366f1"):
-        self.agent_id = agent_id
+                 card_id: Optional[int] = None, color: str = "#6366f1",
+                 instance_id: Optional[str] = None,
+                 instance_name: Optional[str] = None):
+        self.agent_id = agent_id          # template id (e.g. openclaw-core)
+        self.instance_id = instance_id    # unique instance id (e.g. openclaw-core-a1b2)
+        self.instance_name = instance_name  # user-chosen name (e.g. Frontend-Coder)
         self.pid = pid
         self.process = process
         self.status = "running"
@@ -43,6 +59,8 @@ class AgentProcess:
     def to_dict(self) -> dict:
         return {
             "agent_id": self.agent_id,
+            "instance_id": self.instance_id,
+            "instance_name": self.instance_name,
             "pid": self.pid,
             "status": self.status,
             "card_id": self.card_id,
@@ -62,7 +80,8 @@ class ExecutionAdapter(ABC):
 
     @abstractmethod
     async def create_process(self, agent_id: str, agent_config: dict,
-                             card: dict, env: dict) -> Optional[asyncio.subprocess.Process]:
+                             card: dict, env: dict,
+                             instance_dir: Optional[Path] = None) -> Optional[asyncio.subprocess.Process]:
         ...
 
     @abstractmethod
@@ -73,18 +92,22 @@ class ExecutionAdapter(ABC):
 class SubprocessAdapter(ExecutionAdapter):
     """Runs agents as bare-metal subprocesses."""
 
-    async def create_process(self, agent_id, agent_config, card, env):
+    async def create_process(self, agent_id, agent_config, card, env,
+                             instance_dir=None):
         command = agent_config.get("binary", "")
         if not command:
-            # Try execution config from registry
             exec_config = agent_config.get("execution", {})
             command = exec_config.get("command", "")
         if not command:
             logger.error(f"No command configured for agent '{agent_id}'")
             return None
 
-        working_dir = agent_config.get("execution", {}).get("working_dir", ".")
-        working_dir = Path(working_dir).resolve()
+        # Instance dir takes priority over config working_dir
+        if instance_dir and instance_dir.exists():
+            working_dir = instance_dir
+        else:
+            working_dir = agent_config.get("execution", {}).get("working_dir", ".")
+            working_dir = Path(working_dir).resolve()
 
         process = await asyncio.create_subprocess_shell(
             command,
@@ -116,11 +139,12 @@ class DockerAdapter(ExecutionAdapter):
         self._docker_available = shutil.which("docker") is not None
         self._containers: dict[int, str] = {}  # card_id -> container_name
 
-    async def create_process(self, agent_id, agent_config, card, env):
+    async def create_process(self, agent_id, agent_config, card, env,
+                             instance_dir=None):
         if not self._docker_available:
             logger.warning("Docker not available — falling back to subprocess")
             fallback = SubprocessAdapter()
-            return await fallback.create_process(agent_id, agent_config, card, env)
+            return await fallback.create_process(agent_id, agent_config, card, env, instance_dir)
 
         image = agent_config.get("docker_image", "")
         if not image:
@@ -130,7 +154,6 @@ class DockerAdapter(ExecutionAdapter):
         card_id = card.get("id", 0)
         container_name = f"aegis-{agent_id}-{card_id}"
 
-        # Build workspace mounts from MCP config
         try:
             from main import CONFIG
             mcp_workspaces = CONFIG.get("mcp", {}).get("workspaces", [])
@@ -193,12 +216,12 @@ class DockerAdapter(ExecutionAdapter):
 
 class ExecutionEngine:
     """
-    Unified execution engine that replaces both ExecutionManager and AgentProcessManager.
-    Single entry point for starting, stopping, and tracking agents.
+    Unified execution engine with factory-pattern instance support.
+    Keyed by instance_id so multiple instances of the same template can run.
     """
 
     def __init__(self, broadcaster=None, prompts_per_minute: int = 1):
-        self.active: dict[str, AgentProcess] = {}  # agent_id -> AgentProcess
+        self.active: dict[str, AgentProcess] = {}  # instance_id -> AgentProcess
         self.broadcaster = broadcaster
         self._subprocess = SubprocessAdapter()
         self._docker = DockerAdapter()
@@ -237,17 +260,21 @@ class ExecutionEngine:
             except (asyncio.CancelledError, Exception):
                 pass
 
-    # ─── Run Agent ────────────────────────────────────────────────────────────
+    # ─── Run Agent (Instance-aware) ───────────────────────────────────────────
 
     async def run_agent(self, card_id: int, agent_id: str, agent_config: dict,
-                        card: dict, store, registry_entry: Optional[dict] = None) -> dict:
+                        card: dict, store, registry_entry: Optional[dict] = None,
+                        instance_id: Optional[str] = None,
+                        instance_name: Optional[str] = None) -> dict:
         """
-        Start an agent, track its process, stream logs, and broadcast status.
-        This is the single entry point that replaces both ExecutionManager.run_agent
-        and AgentProcessManager.start_agent.
+        Start an agent process. If instance_id is provided, uses the instance's
+        isolated directory as cwd. Otherwise falls back to legacy behavior.
         """
-        if agent_id in self.active and self.active[agent_id].status == "running":
-            return {"error": f"Agent '{agent_id}' is already running", "status": "already_running"}
+        # Use instance_id as the key, fall back to agent_id for legacy
+        key = instance_id or agent_id
+
+        if key in self.active and self.active[key].status == "running":
+            return {"error": f"'{key}' is already running", "status": "already_running"}
 
         # Merge execution config from registry if available
         merged_config = {**agent_config}
@@ -269,8 +296,14 @@ class ExecutionEngine:
         env["AEGIS_CARD_TITLE"] = card.get("title", "")
         env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
         env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
+        if instance_id:
+            env["AEGIS_INSTANCE_ID"] = instance_id
+            env["AEGIS_INSTANCE_NAME"] = instance_name or ""
 
         adapter = self._get_adapter(merged_config)
+
+        # Resolve instance directory
+        inst_dir = INSTANCES_DIR / instance_id if instance_id else None
 
         try:
             # Update card status
@@ -278,25 +311,31 @@ class ExecutionEngine:
             if self.broadcaster:
                 await self.broadcaster({"type": "card_updated", "card": store.get_card(card_id)})
 
-            process = await adapter.create_process(agent_id, merged_config, card, env)
+            process = await adapter.create_process(agent_id, merged_config, card, env, inst_dir)
             if not process:
                 store.update_card(card_id, status="error")
                 return {"error": "Failed to create process", "status": "error"}
 
             # Track the process
-            agent_proc = AgentProcess(agent_id, process.pid, process, card_id, color)
-            self.active[agent_id] = agent_proc
+            agent_proc = AgentProcess(
+                agent_id, process.pid, process, card_id, color,
+                instance_id=instance_id, instance_name=instance_name
+            )
+            self.active[key] = agent_proc
 
             # Start log streaming
+            log_tag = instance_id or agent_id
             asyncio.create_task(self._stream_logs(agent_proc, process.stdout, "STDOUT", card_id, store))
             asyncio.create_task(self._stream_logs(agent_proc, process.stderr, "STDERR", card_id, store))
 
-            logger.info(f"Started agent '{agent_id}' (PID: {process.pid}) for card {card_id}")
+            logger.info(f"Started '{key}' (PID: {process.pid}) for card {card_id}")
 
             if self.broadcaster:
                 await self.broadcaster({
                     "type": "agent_started",
                     "agent_id": agent_id,
+                    "instance_id": instance_id,
+                    "instance_name": instance_name,
                     "pid": process.pid,
                     "card_id": card_id,
                     "color": color
@@ -308,7 +347,7 @@ class ExecutionEngine:
             return agent_proc.to_dict()
 
         except Exception as e:
-            logger.error(f"Failed to start agent '{agent_id}': {e}")
+            logger.error(f"Failed to start '{key}': {e}")
             store.update_card(card_id, status="error")
             if self.broadcaster:
                 await self.broadcaster({"type": "card_updated", "card": store.get_card(card_id)})
@@ -478,25 +517,27 @@ class ExecutionEngine:
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# INSTALLATION HELPER
+# TEMPLATE INSTALLATION (Marketplace -> templates/)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 async def install_agent(agent_id: str, registry_entry: dict) -> dict:
-    """Clones an agent repo and runs setup commands."""
+    """Installs an agent template to aegis_data/templates/ (also keeps legacy agents/ compat)."""
     install_config = registry_entry.get("installation", {})
     method = install_config.get("method", "")
     github_url = registry_entry.get("github_url", "")
     setup_commands = install_config.get("setup_commands", [])
 
-    agent_dir = AGENTS_DIR / agent_id
+    template_dir = TEMPLATES_DIR / agent_id
+    # Also update legacy dir
+    legacy_dir = AGENTS_DIR / agent_id
 
-    if agent_dir.exists():
-        return {"status": "already_installed", "path": str(agent_dir)}
+    if template_dir.exists():
+        return {"status": "already_installed", "path": str(template_dir)}
 
     try:
         if method == "git_clone" and github_url:
             proc = await asyncio.create_subprocess_exec(
-                "git", "clone", github_url, str(agent_dir),
+                "git", "clone", github_url, str(template_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE
             )
@@ -508,7 +549,7 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
             results = []
             for cmd in setup_commands:
                 setup_proc = await asyncio.create_subprocess_shell(
-                    cmd, cwd=str(agent_dir),
+                    cmd, cwd=str(template_dir),
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE
                 )
@@ -519,8 +560,8 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                     "output": s_out.decode(errors="replace")[:500]
                 })
 
-            logger.info(f"Installed agent '{agent_id}' to {agent_dir}")
-            return {"status": "installed", "path": str(agent_dir), "setup_results": results}
+            logger.info(f"Installed template '{agent_id}' to {template_dir}")
+            return {"status": "installed", "path": str(template_dir), "setup_results": results}
 
         elif method == "npm_global":
             results = []
@@ -537,10 +578,10 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                     "output": s_out.decode(errors="replace")[:500]
                 })
 
-            agent_dir.mkdir(parents=True, exist_ok=True)
-            (agent_dir / ".installed").write_text(datetime.now().isoformat())
+            template_dir.mkdir(parents=True, exist_ok=True)
+            (template_dir / ".installed").write_text(datetime.now().isoformat())
 
-            return {"status": "installed", "path": str(agent_dir), "setup_results": results}
+            return {"status": "installed", "path": str(template_dir), "setup_results": results}
 
         else:
             return {"status": "unsupported_method", "method": method}
@@ -548,3 +589,89 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
     except Exception as e:
         logger.error(f"Installation error for '{agent_id}': {e}")
         return {"status": "error", "error": str(e)}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# INSTANCE MANAGEMENT (Factory Pattern)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def load_instances() -> list[dict]:
+    """Load persisted instance state from instances.json."""
+    if INSTANCES_STATE_FILE.exists():
+        try:
+            return json.loads(INSTANCES_STATE_FILE.read_text())
+        except Exception as e:
+            logger.error(f"Failed to load instances.json: {e}")
+    return []
+
+
+def save_instances(instances: list[dict]):
+    """Persist instance state to instances.json."""
+    INSTANCES_STATE_FILE.write_text(json.dumps(instances, indent=2))
+
+
+def create_instance(template_id: str, instance_name: str,
+                    registry_entry: Optional[dict] = None) -> dict:
+    """
+    Create a new instance from an installed template.
+    Copies template files into a unique instance directory.
+    """
+    # Check template exists
+    template_dir = TEMPLATES_DIR / template_id
+    # Also check legacy agents/ dir
+    if not template_dir.exists():
+        template_dir = AGENTS_DIR / template_id
+    if not template_dir.exists():
+        return {"error": f"Template '{template_id}' is not installed"}
+
+    # Generate unique instance id
+    suffix = secrets.token_hex(2)  # 4 hex chars
+    instance_id = f"{template_id}-{suffix}"
+    instance_dir = INSTANCES_DIR / instance_id
+
+    # Copy template → instance
+    try:
+        shutil.copytree(str(template_dir), str(instance_dir))
+    except Exception as e:
+        return {"error": f"Failed to copy template: {e}"}
+
+    # Build instance metadata
+    instance = {
+        "instance_id": instance_id,
+        "template_id": template_id,
+        "instance_name": instance_name,
+        "created_at": datetime.now().isoformat(),
+        "path": str(instance_dir),
+        "enabled": True,
+        "icon": registry_entry.get("icon", "🤖") if registry_entry else "🤖",
+        "color": "#6366f1",
+    }
+
+    # Persist
+    instances = load_instances()
+    instances.append(instance)
+    save_instances(instances)
+
+    logger.info(f"Created instance '{instance_name}' ({instance_id}) from template '{template_id}'")
+    return instance
+
+
+def delete_instance(instance_id: str) -> dict:
+    """Delete an instance and its files."""
+    instances = load_instances()
+    instance = next((i for i in instances if i["instance_id"] == instance_id), None)
+    if not instance:
+        return {"error": f"Instance '{instance_id}' not found"}
+
+    # Remove files
+    instance_dir = INSTANCES_DIR / instance_id
+    if instance_dir.exists():
+        shutil.rmtree(str(instance_dir), ignore_errors=True)
+
+    # Remove from state
+    instances = [i for i in instances if i["instance_id"] != instance_id]
+    save_instances(instances)
+
+    logger.info(f"Deleted instance '{instance_id}'")
+    return {"success": True, "instance_id": instance_id}
+

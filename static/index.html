@@ -1,37 +1,154 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <meta name="description" content="Aegis — Multi-Agent Kanban Orchestrator with real-time agent monitoring, DAG workflows, and telemetry.">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+    <meta name="description"
+        content="Aegis — Multi-Agent Kanban Orchestrator with real-time agent monitoring, DAG workflows, and telemetry.">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
     <title>Aegis - Multi-Agent Kanban</title>
     <link rel="stylesheet" href="/static/css/aegis.css">
     <style>
         /* Header — kept inline since it's structural */
-        header { display:flex; justify-content:space-between; align-items:center; padding:0.5rem 1rem; background:var(--bg-column); border-bottom:1px solid var(--border); height:56px; }
-        .header-left { display:flex; align-items:center; gap:1rem; }
-        .header-left h1 { font-size:1.1rem; font-weight:700; }
-        .header-left h1 span { background:linear-gradient(135deg,#6366f1,#818cf8); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
-        .connection-status { display:flex; align-items:center; gap:0.375rem; font-size:0.75rem; color:var(--text-secondary); }
-        .status-dot { width:8px; height:8px; border-radius:50%; background:#ef4444; }
-        .status-dot.connected { background:#22c55e; box-shadow:0 0 8px #22c55e; }
-        .status-dot.connecting { background:#f59e0b; animation:pulse 1s infinite; }
-        .header-actions { display:flex; align-items:center; gap:0.5rem; }
-        .search-wrapper { position:relative; }
-        .header-search { background:var(--bg-dark); border:1px solid var(--border); border-radius:0.375rem; padding:0.375rem 0.75rem; color:var(--text-primary); font-size:0.8rem; width:180px; }
-        .search-clear { position:absolute; right:6px; top:50%; transform:translateY(-50%); background:none; border:none; color:var(--text-secondary); cursor:pointer; display:none; font-size:1rem; }
-        .search-clear.visible { display:block; }
-        .shortcut-hint { font-size:0.65rem; color:var(--text-secondary); }
-        button { background:var(--accent); color:white; border:none; padding:0.4rem 0.75rem; border-radius:0.375rem; cursor:pointer; font-size:0.8rem; font-weight:500; transition:background 0.2s; }
-        button:hover { background:var(--accent-hover); }
-        button.secondary { background:var(--bg-dark); color:var(--text-secondary); border:1px solid var(--border); }
-        button.secondary:hover { color:var(--text-primary); border-color:var(--accent); }
-        button.danger { background:#ef4444; }
-        button.danger:hover { background:#dc2626; }
-        .loading-spinner { text-align:center; padding:2rem; color:var(--text-secondary); }
+        header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.5rem 1rem;
+            background: var(--bg-column);
+            border-bottom: 1px solid var(--border);
+            height: 56px;
+        }
+
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .header-left h1 {
+            font-size: 1.1rem;
+            font-weight: 700;
+        }
+
+        .header-left h1 span {
+            background: linear-gradient(135deg, #6366f1, #818cf8);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.375rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #ef4444;
+        }
+
+        .status-dot.connected {
+            background: #22c55e;
+            box-shadow: 0 0 8px #22c55e;
+        }
+
+        .status-dot.connecting {
+            background: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+
+        .header-actions {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .search-wrapper {
+            position: relative;
+        }
+
+        .header-search {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.375rem 0.75rem;
+            color: var(--text-primary);
+            font-size: 0.8rem;
+            width: 180px;
+        }
+
+        .search-clear {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: none;
+            font-size: 1rem;
+        }
+
+        .search-clear.visible {
+            display: block;
+        }
+
+        .shortcut-hint {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+        }
+
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.4rem 0.75rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+
+        button:hover {
+            background: var(--accent-hover);
+        }
+
+        button.secondary {
+            background: var(--bg-dark);
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        button.secondary:hover {
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        button.danger {
+            background: #ef4444;
+        }
+
+        button.danger:hover {
+            background: #dc2626;
+        }
+
+        .loading-spinner {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
+
 <body>
     <header>
         <div class="header-left">
@@ -47,7 +164,8 @@
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
-                <input type="text" class="header-search" id="searchInput" placeholder="Search... (/)" oninput="filterCards()">
+                <input type="text" class="header-search" id="searchInput" placeholder="Search... (/)"
+                    oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
@@ -60,13 +178,17 @@
     <div class="app-container">
         <aside class="agent-menu">
             <div class="agent-menu-header">
-                <h2>Team Agents</h2>
-                <div class="connection-status">
-                    <div class="status-dot" id="wsStatus"></div>
-                    <span id="wsStatusText">...</span>
+                <h2>Workers</h2>
+                <button onclick="openCreateWorkerModal()" style="font-size:0.75rem;padding:0.25rem 0.5rem;">+
+                    Create</button>
+            </div>
+            <div id="agentCardsList">
+                <div class="empty-state" style="padding:2rem 1rem;">
+                    <div class="empty-state-icon" style="font-size:2rem;">🏗️</div>
+                    <div class="empty-state-text" style="font-size:0.8rem;">No workers yet.<br>Create one from an
+                        installed template.</div>
                 </div>
             </div>
-            <div id="agentCardsList"></div>
         </aside>
 
         <!-- Board View -->
@@ -78,22 +200,35 @@
         <!-- Telemetry View -->
         <div class="telemetry-view" id="telemetryView">
             <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">📊 Telemetry Dashboard</h2>
-            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">Real-time LLM usage, agent activity, and cost metrics.</p>
-            <div id="telemetryContent"><div class="empty-state"><div class="empty-state-icon">📊</div><div class="empty-state-text">Loading telemetry...</div></div></div>
+            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">Real-time LLM usage, agent
+                activity, and cost metrics.</p>
+            <div id="telemetryContent">
+                <div class="empty-state">
+                    <div class="empty-state-icon">📊</div>
+                    <div class="empty-state-text">Loading telemetry...</div>
+                </div>
+            </div>
         </div>
     </div>
 
     <!-- Marketplace Modal -->
     <div class="modal-overlay" id="marketplaceModal">
         <div class="modal" style="max-width:800px;width:95%;">
-            <div class="modal-header"><h3>🏪 Agent Marketplace</h3><button class="modal-close" onclick="closeModal('marketplaceModal')">&times;</button></div>
+            <div class="modal-header">
+                <h3>🏪 Agent Marketplace</h3><button class="modal-close"
+                    onclick="closeModal('marketplaceModal')">&times;</button>
+            </div>
             <div class="modal-body">
                 <div class="tab-bar">
                     <button class="active" onclick="switchMarketTab('registry', this)">Registry</button>
                     <button onclick="switchMarketTab('runtimes', this)">Active Runtimes</button>
                 </div>
-                <div class="tab-content active" id="tab-registry"><div class="marketplace-grid" id="registryGrid">Loading...</div></div>
-                <div class="tab-content" id="tab-runtimes"><div id="runtimesList">No active runtimes</div></div>
+                <div class="tab-content active" id="tab-registry">
+                    <div class="marketplace-grid" id="registryGrid">Loading...</div>
+                </div>
+                <div class="tab-content" id="tab-runtimes">
+                    <div id="runtimesList">No active runtimes</div>
+                </div>
             </div>
         </div>
     </div>
@@ -101,13 +236,21 @@
     <!-- New Card Modal -->
     <div class="modal-overlay" id="newCardModal">
         <div class="modal">
-            <div class="modal-header"><h3>New Card</h3><button class="modal-close" onclick="closeModal('newCardModal')">&times;</button></div>
+            <div class="modal-header">
+                <h3>New Card</h3><button class="modal-close" onclick="closeModal('newCardModal')">&times;</button>
+            </div>
             <div class="modal-body">
-                <div class="form-group"><label>Title *</label><input type="text" id="cardTitle" placeholder="What needs to be done?"></div>
-                <div class="form-group"><label>Description</label><textarea id="cardDescription" placeholder="Additional details..."></textarea></div>
+                <div class="form-group"><label>Title *</label><input type="text" id="cardTitle"
+                        placeholder="What needs to be done?"></div>
+                <div class="form-group"><label>Description</label><textarea id="cardDescription"
+                        placeholder="Additional details..."></textarea></div>
                 <div class="form-group"><label>Column</label><select id="cardColumn"></select></div>
                 <div class="form-group"><label>Priority</label>
-                    <select id="cardPriority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select>
+                    <select id="cardPriority">
+                        <option value="low">Low</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="high">High</option>
+                    </select>
                 </div>
             </div>
             <div class="modal-footer">
@@ -120,14 +263,23 @@
     <!-- Card Detail Modal -->
     <div class="modal-overlay" id="cardDetailModal">
         <div class="modal">
-            <div class="modal-header"><h3>Card Details</h3><button class="modal-close" onclick="closeModal('cardDetailModal')">&times;</button></div>
+            <div class="modal-header">
+                <h3>Card Details</h3><button class="modal-close"
+                    onclick="closeModal('cardDetailModal')">&times;</button>
+            </div>
             <div class="modal-body">
                 <div class="form-group"><label>Title</label><input type="text" id="detailTitleInput"></div>
                 <div class="form-group"><label>Description</label><textarea id="detailDescription"></textarea></div>
-                <div class="form-group"><label>Assignee</label><select id="detailAssignee"><option value="">Unassigned</option></select></div>
+                <div class="form-group"><label>Assignee</label><select id="detailAssignee">
+                        <option value="">Unassigned</option>
+                    </select></div>
                 <div class="form-group"><label>Column</label><select id="detailColumn"></select></div>
                 <div class="form-group"><label>Priority</label>
-                    <select id="detailPriority"><option value="low">Low</option><option value="normal" selected>Normal</option><option value="high">High</option></select>
+                    <select id="detailPriority">
+                        <option value="low">Low</option>
+                        <option value="normal" selected>Normal</option>
+                        <option value="high">High</option>
+                    </select>
                 </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
                     <label>Live Terminal</label>
@@ -137,8 +289,10 @@
             <div class="modal-footer">
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
                 <div style="flex:1"></div>
-                <button id="approveBtn" style="display:none;background:#22c55e;" onclick="approveCurrentCard()">✓ Approve</button>
-                <button id="stopAgentBtn" class="danger secondary small" style="display:none;" onclick="stopCurrentAgent()">Stop Agent</button>
+                <button id="approveBtn" style="display:none;background:#22c55e;" onclick="approveCurrentCard()">✓
+                    Approve</button>
+                <button id="stopAgentBtn" class="danger secondary small" style="display:none;"
+                    onclick="stopCurrentAgent()">Stop Agent</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
             </div>
@@ -148,23 +302,62 @@
     <!-- Settings Modal -->
     <div class="modal-overlay" id="settingsModal">
         <div class="modal" style="max-width:550px;">
-            <div class="modal-header"><h3>⚙️ Settings</h3><button class="modal-close" onclick="closeModal('settingsModal')">&times;</button></div>
+            <div class="modal-header">
+                <h3>⚙️ Settings</h3><button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+            </div>
             <div class="modal-body">
-                <div class="settings-section"><h4>🤖 Agents</h4><div id="agentConfigs"></div></div>
-                <div class="settings-section"><h4>📊 Configuration</h4>
-                    <div class="form-group"><label>Polling Rate (ms)</label><input type="number" id="configPollingRate" min="1000" max="60000" step="1000"></div>
-                    <div class="form-group"><label>Max Concurrent Agents</label><input type="number" id="configMaxAgents" min="1" max="16"></div>
-                    <div class="form-group"><label>Toast Duration (seconds)</label><input type="number" id="configToastDuration" min="1" max="10" step="1"></div>
+                <div class="settings-section">
+                    <h4>🤖 Agents</h4>
+                    <div id="agentConfigs"></div>
+                </div>
+                <div class="settings-section">
+                    <h4>📊 Configuration</h4>
+                    <div class="form-group"><label>Polling Rate (ms)</label><input type="number" id="configPollingRate"
+                            min="1000" max="60000" step="1000"></div>
+                    <div class="form-group"><label>Max Concurrent Agents</label><input type="number"
+                            id="configMaxAgents" min="1" max="16"></div>
+                    <div class="form-group"><label>Toast Duration (seconds)</label><input type="number"
+                            id="configToastDuration" min="1" max="10" step="1"></div>
                 </div>
             </div>
-            <div class="modal-footer"><button class="secondary" onclick="closeModal('settingsModal')">Close</button><button onclick="saveSettings()">Save Changes</button></div>
+            <div class="modal-footer"><button class="secondary"
+                    onclick="closeModal('settingsModal')">Close</button><button onclick="saveSettings()">Save
+                    Changes</button></div>
+        </div>
+    </div>
+
+    <!-- Create Worker Modal -->
+    <div class="modal-overlay" id="createWorkerModal">
+        <div class="modal" style="max-width:500px;">
+            <div class="modal-header">
+                <h3>🏗️ Create Worker</h3><button class="modal-close"
+                    onclick="closeModal('createWorkerModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Template</label>
+                    <select id="workerTemplate">
+                        <option value="">Select a template...</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Worker Name</label>
+                    <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('createWorkerModal')">Cancel</button>
+                <button onclick="createWorkerInstance()">Create Worker</button>
+            </div>
         </div>
     </div>
 
     <div class="toast-container" id="toastContainer"></div>
 
-    <footer style="text-align:center;padding:0.75rem;color:var(--text-secondary);font-size:0.75rem;border-top:1px solid var(--border);margin-top:auto;">
-        <a href="https://github.com/TheSandemon/Aegis" target="_blank" style="color:var(--text-secondary);text-decoration:none;">Aegis on GitHub</a>
+    <footer
+        style="text-align:center;padding:0.75rem;color:var(--text-secondary);font-size:0.75rem;border-top:1px solid var(--border);margin-top:auto;">
+        <a href="https://github.com/TheSandemon/Aegis" target="_blank"
+            style="color:var(--text-secondary);text-decoration:none;">Aegis on GitHub</a>
     </footer>
 
     <script src="/static/js/websocket.js"></script>
@@ -172,4 +365,5 @@
     <script src="/static/js/telemetry.js"></script>
     <script src="/static/js/board.js"></script>
 </body>
+
 </html>

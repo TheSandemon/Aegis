@@ -643,6 +643,7 @@
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
+            <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh board (R)">🔄 Refresh</button>
         </div>
     </header>
 
@@ -1202,6 +1203,10 @@
             } else if (e.key === '/') {
                 e.preventDefault();
                 document.getElementById('searchInput').focus();
+            } else if (e.key === 'r' || e.key === 'R') {
+                e.preventDefault();
+                loadCards();
+                showToast('Refreshing...');
             }
         });
 

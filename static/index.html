@@ -183,6 +183,28 @@
             font-size: 0.7rem;
         }
 
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 50vh;
+            color: var(--text-secondary);
+        }
+        
+        .loading-spinner::after {
+            content: '';
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
         .board {
             display: flex;
             gap: 1rem;
@@ -603,6 +625,7 @@
         </div>
     </header>
 
+    <div class="loading-spinner" id="loadingSpinner"></div>
     <div class="board" id="board"></div>
 
     <!-- New Card Modal -->
@@ -722,6 +745,7 @@
             await loadCards();
             connectWebSocket();
             renderBoard();
+            document.getElementById('loadingSpinner').style.display = 'none';
         }
 
         async function loadConfig() {

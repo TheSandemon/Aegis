@@ -28,6 +28,15 @@
             --done: #22c55e;
         }
         
+        [data-theme="light"] {
+            --bg-dark: #f4f4f5;
+            --bg-card: #ffffff;
+            --bg-column: #e4e4e7;
+            --border: #d4d4d8;
+            --text-primary: #18181b;
+            --text-secondary: #71717a;
+        }
+        
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-dark);
@@ -499,6 +508,7 @@
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
+            <button class="secondary" onclick="toggleTheme()" id="themeBtn">🌙</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
     </header>
@@ -621,8 +631,23 @@
         let terminalRefreshInterval = null;
         let searchFilter = '';
         
+        function toggleTheme() {
+            const html = document.documentElement;
+            const current = html.getAttribute('data-theme');
+            const isLight = current === 'light';
+            html.setAttribute('data-theme', isLight ? 'dark' : 'light');
+            document.getElementById('themeBtn').textContent = isLight ? '🌙' : '☀️';
+            localStorage.setItem('theme', isLight ? 'dark' : 'light');
+        }
+        
+        function loadTheme() {
+            const saved = localStorage.getItem('theme') || 'dark';
+            document.documentElement.setAttribute('data-theme', saved);
+            document.getElementById('themeBtn').textContent = saved === 'light' ? '☀️' : '🌙';
+        }
+        
         async function init() {
-            await loadConfig();
+            loadTheme();
             populateColumnSelects();
             await loadCards();
             connectWebSocket();

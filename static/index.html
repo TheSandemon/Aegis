@@ -650,6 +650,171 @@
         .empty-state-text {
             font-size: 0.8rem;
         }
+
+        /* Marketplace */
+        .marketplace-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+            gap: 1rem;
+            padding: 1rem 0;
+        }
+
+        .agent-card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.25rem;
+            transition: all 0.2s;
+        }
+
+        .agent-card:hover {
+            border-color: var(--accent);
+            transform: translateY(-2px);
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.3);
+        }
+
+        .agent-card-header {
+            display: flex;
+            align-items: center;
+            gap: 0.75rem;
+            margin-bottom: 0.75rem;
+        }
+
+        .agent-icon {
+            font-size: 2rem;
+        }
+
+        .agent-card-info h4 {
+            margin: 0;
+            font-size: 1rem;
+            color: var(--text);
+        }
+
+        .agent-card-info small {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .agent-card-desc {
+            color: var(--text-secondary);
+            font-size: 0.8rem;
+            line-height: 1.4;
+            margin-bottom: 1rem;
+        }
+
+        .agent-card-actions {
+            display: flex;
+            gap: 0.5rem;
+            flex-wrap: wrap;
+        }
+
+        .agent-card-actions button {
+            font-size: 0.75rem;
+            padding: 0.4rem 0.8rem;
+        }
+
+        .badge {
+            display: inline-block;
+            font-size: 0.65rem;
+            padding: 0.15rem 0.5rem;
+            border-radius: 99px;
+            font-weight: 600;
+            text-transform: uppercase;
+        }
+
+        .badge-installed {
+            background: rgba(34, 197, 94, 0.15);
+            color: #22c55e;
+        }
+
+        .badge-running {
+            background: rgba(245, 158, 11, 0.15);
+            color: #f59e0b;
+            animation: soft-pulse 2s infinite;
+        }
+
+        .badge-stopped {
+            background: rgba(113, 113, 122, 0.15);
+            color: #71717a;
+        }
+
+        .tab-bar {
+            display: flex;
+            gap: 0.25rem;
+            border-bottom: 1px solid var(--border);
+            margin-bottom: 1rem;
+        }
+
+        .tab-bar button {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            padding: 0.6rem 1rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }
+
+        .tab-bar button.active {
+            color: var(--accent);
+            border-bottom-color: var(--accent);
+        }
+
+        .tab-bar button:hover {
+            color: var(--text);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .runtime-row {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            padding: 0.75rem;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            margin-bottom: 0.5rem;
+        }
+
+        .runtime-row .agent-icon {
+            font-size: 1.5rem;
+        }
+
+        .runtime-info {
+            flex: 1;
+        }
+
+        .runtime-info h4 {
+            margin: 0;
+            font-size: 0.9rem;
+            color: var(--text);
+        }
+
+        .runtime-info small {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        .runtime-logs {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 0.75rem;
+            margin-top: 0.5rem;
+            max-height: 200px;
+            overflow-y: auto;
+            font-family: 'JetBrains Mono', monospace;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+        }
     </style>
 </head>
 
@@ -669,6 +834,7 @@
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
+            <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh board (R)">🔄
                 Refresh</button>
@@ -677,6 +843,28 @@
 
     <div class="loading-spinner" id="loadingSpinner"></div>
     <div class="board" id="board"></div>
+
+    <!-- Marketplace Modal -->
+    <div class="modal-overlay" id="marketplaceModal">
+        <div class="modal" style="max-width:800px;width:95%;">
+            <div class="modal-header">
+                <h3>🏪 Agent Marketplace</h3>
+                <button class="modal-close" onclick="closeModal('marketplaceModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="tab-bar">
+                    <button class="active" onclick="switchMarketTab('registry', this)">Registry</button>
+                    <button onclick="switchMarketTab('runtimes', this)">Active Runtimes</button>
+                </div>
+                <div class="tab-content active" id="tab-registry">
+                    <div class="marketplace-grid" id="registryGrid">Loading...</div>
+                </div>
+                <div class="tab-content" id="tab-runtimes">
+                    <div id="runtimesList">No active runtimes</div>
+                </div>
+            </div>
+        </div>
+    </div>
 
     <!-- New Card Modal -->
     <div class="modal-overlay" id="newCardModal">
@@ -1273,6 +1461,177 @@
                 });
             }
         });
+
+        // ═══════════════════════════════════════════════════════
+        // MARKETPLACE & ACTIVE RUNTIMES
+        // ═══════════════════════════════════════════════════════
+
+        let registryData = [];
+
+        async function openMarketplaceModal() {
+            document.getElementById('marketplaceModal').classList.add('active');
+            await loadRegistry();
+        }
+
+        function switchMarketTab(tabId, btn) {
+            document.querySelectorAll('.tab-bar button').forEach(b => b.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            btn.classList.add('active');
+            document.getElementById('tab-' + tabId).classList.add('active');
+            if (tabId === 'runtimes') loadActiveRuntimes();
+        }
+
+        async function loadRegistry() {
+            try {
+                const res = await fetch('/api/registry');
+                registryData = await res.json();
+                renderRegistry(registryData);
+            } catch (e) {
+                document.getElementById('registryGrid').textContent = 'Failed to load registry';
+            }
+        }
+
+        function renderRegistry(agents) {
+            const grid = document.getElementById('registryGrid');
+            grid.innerHTML = agents.map(a => `
+                <div class="agent-card">
+                    <div class="agent-card-header">
+                        <span class="agent-icon">${a.icon || '🤖'}</span>
+                        <div class="agent-card-info">
+                            <h4>${escapeHtml(a.name)}</h4>
+                            <small>v${a.version} · ${a.license}</small>
+                        </div>
+                        ${a.installed ? '<span class="badge badge-installed">Installed</span>' : ''}
+                        ${a.runtime_status === 'running' ? '<span class="badge badge-running">Running</span>' : ''}
+                    </div>
+                    <div class="agent-card-desc">${escapeHtml(a.description)}</div>
+                    <div class="agent-card-actions">
+                        <a href="${a.support_url}" target="_blank" style="text-decoration:none;">
+                            <button class="secondary" style="font-size:0.75rem;">⭐ Star on GitHub</button>
+                        </a>
+                        ${!a.installed ? `<button onclick="installAgent('${a.id}')">📥 Install</button>` : ''}
+                        ${a.installed && a.runtime_status !== 'running' ? `<button onclick="startAgent('${a.id}')" style="background:#22c55e;">▶ Start</button>` : ''}
+                        ${a.runtime_status === 'running' ? `<button class="danger" onclick="stopAgent('${a.id}')">⏹ Stop</button>` : ''}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function installAgent(agentId) {
+            showToast(`Installing ${agentId}...`);
+            try {
+                const res = await fetch(`/api/agents/install/${agentId}`, { method: 'POST' });
+                const data = await res.json();
+                if (data.status === 'installed' || data.status === 'already_installed') {
+                    showToast(`✅ ${agentId} installed!`);
+                } else {
+                    showToast(`⚠️ Install: ${data.status}`);
+                }
+                await loadRegistry();
+            } catch (e) {
+                showToast('Install failed');
+            }
+        }
+
+        async function startAgent(agentId) {
+            showToast(`Starting ${agentId}...`);
+            try {
+                const res = await fetch(`/api/agents/start/${agentId}`, { method: 'POST' });
+                if (res.ok) {
+                    showToast(`▶ ${agentId} started!`);
+                } else {
+                    const err = await res.json();
+                    showToast(`⚠️ ${err.detail || 'Start failed'}`);
+                }
+                await loadRegistry();
+            } catch (e) {
+                showToast('Start failed');
+            }
+        }
+
+        async function stopAgent(agentId) {
+            try {
+                const res = await fetch(`/api/agents/stop/${agentId}`, { method: 'POST' });
+                if (res.ok) {
+                    showToast(`⏹ ${agentId} stopped`);
+                } else {
+                    const err = await res.json();
+                    showToast(`⚠️ ${err.detail || 'Stop failed'}`);
+                }
+                await loadRegistry();
+            } catch (e) {
+                showToast('Stop failed');
+            }
+        }
+
+        async function loadActiveRuntimes() {
+            try {
+                const res = await fetch('/api/agents/active');
+                const runtimes = await res.json();
+                const container = document.getElementById('runtimesList');
+
+                if (runtimes.length === 0) {
+                    container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💤</div><div class="empty-state-text">No active runtimes. Install and start an agent from the Registry tab.</div></div>';
+                    return;
+                }
+
+                container.innerHTML = runtimes.map(r => {
+                    const agent = registryData.find(a => a.id === r.agent_id) || {};
+                    return `
+                        <div class="runtime-row">
+                            <span class="agent-icon">${agent.icon || '🤖'}</span>
+                            <div class="runtime-info">
+                                <h4>${agent.name || r.agent_id}</h4>
+                                <small>PID: ${r.pid} · Status: <span class="badge badge-${r.status}">${r.status}</span> · Logs: ${r.log_count}</small>
+                            </div>
+                            ${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopAgent('${r.agent_id}')">⏹ Stop</button>` : ''}
+                        </div>
+                        <div class="runtime-logs" id="logs-${r.agent_id}">Loading logs...</div>
+                    `;
+                }).join('');
+
+                // Load logs for each runtime
+                for (const r of runtimes) {
+                    loadRuntimeLogs(r.agent_id);
+                }
+            } catch (e) {
+                document.getElementById('runtimesList').textContent = 'Failed to load runtimes';
+            }
+        }
+
+        async function loadRuntimeLogs(agentId) {
+            try {
+                const res = await fetch(`/api/agents/${agentId}/logs?tail=50`);
+                const data = await res.json();
+                const logEl = document.getElementById(`logs-${agentId}`);
+                if (logEl) {
+                    logEl.innerHTML = data.logs.length > 0
+                        ? data.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('')
+                        : 'No output yet...';
+                    logEl.scrollTop = logEl.scrollHeight;
+                }
+            } catch (e) { /* ignore */ }
+        }
+
+        // Handle agent log WebSocket messages
+        const originalHandleMsg = handleWebSocketMessage;
+        function handleWebSocketMessage(data) {
+            // Handle agent-specific events
+            if (data.type === 'agent_log') {
+                const logEl = document.getElementById(`logs-${data.agent_id}`);
+                if (logEl) {
+                    const entry = document.createElement('div');
+                    entry.textContent = data.entry;
+                    logEl.appendChild(entry);
+                    logEl.scrollTop = logEl.scrollHeight;
+                }
+            } else if (data.type === 'agent_started' || data.type === 'agent_stopped' || data.type === 'agent_status_changed') {
+                // Refresh runtimes if panel is visible
+                if (document.getElementById('tab-runtimes').classList.contains('active')) {
+                    loadActiveRuntimes();
+                }
+            }
+        }
     </script>
     <footer
         style="text-align:center;padding:1rem;color:var(--text-secondary);font-size:0.75rem;border-top:1px solid var(--border);margin-top:auto;">

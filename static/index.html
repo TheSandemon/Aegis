@@ -283,6 +283,8 @@
         .status-completed { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
         .status-blocked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
         
+        .card-priority { margin-right: 0.25rem; }
+        
         .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
         .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
         .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
@@ -541,6 +543,12 @@
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
+            <select id="priorityFilter" class="header-search" style="width:100px;" onchange="filterCards()">
+                <option value="">All Priority</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+            </select>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -579,6 +587,15 @@
                     <label>Column</label>
                     <select id="cardColumn"></select>
                 </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="cardPriority">
+                        <option value="none">None</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('newCardModal')">Cancel</button>
@@ -612,6 +629,15 @@
                 <div class="form-group">
                     <label>Column</label>
                     <select id="detailColumn"></select>
+                </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="detailPriority">
+                        <option value="none">None</option>
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
                 </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
                     <label>Live Terminal</label>
@@ -666,6 +692,7 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let priorityFilter = '';
         
         async function init() {
             await loadConfig();
@@ -748,6 +775,7 @@
         function filterCards() {
             searchFilter = document.getElementById('searchInput').value;
             document.getElementById('searchClear').classList.toggle('visible', searchFilter.length > 0);
+            priorityFilter = document.getElementById('priorityFilter').value;
             renderBoard();
         }
         
@@ -787,6 +815,11 @@
                     );
                 }
                 
+                // Apply priority filter
+                if (priorityFilter) {
+                    columnCards = columnCards.filter(c => (c.priority || 'none') === priorityFilter);
+                }
+                
                 const colDiv = document.createElement('div');
                 colDiv.className = 'column';
                 colDiv.dataset.column = column;
@@ -822,6 +855,12 @@
             else if (card.status === 'completed') statusClass = 'status-completed';
             else if (card.column === 'Blocked') statusClass = 'status-blocked';
             
+            // Priority indicator
+            let priorityBadge = '';
+            if (card.priority === 'high') priorityBadge = '<span class="card-priority high">🔴</span>';
+            else if (card.priority === 'medium') priorityBadge = '<span class="card-priority medium">🟡</span>';
+            else if (card.priority === 'low') priorityBadge = '<span class="card-priority low">🟢</span>';
+            
             // Build hover preview
             const preview = [card.title];
             if (card.description) preview.push('', card.description.substring(0, 100) + (card.description.length > 100 ? '...' : ''));
@@ -829,8 +868,8 @@
             if (card.due_date) preview.push('', 'Due: ' + card.due_date);
             
             return `
-                <div class="card" draggable="true" data-id="${card.id}" title="${escapeHtml(preview.join('\n'))}">
-                    <div class="card-title">${escapeHtml(card.title)}</div>
+                <div class="card" draggable="true" data-id="${card.id}" data-priority="${card.priority || 'none'}" title="${escapeHtml(preview.join('\n'))}">
+                    <div class="card-title">${priorityBadge} ${escapeHtml(card.title)}</div>
                     <div class="card-meta">
                         <div class="card-meta-left">
                             ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}
@@ -892,18 +931,20 @@
             const title = document.getElementById('cardTitle').value.trim();
             const description = document.getElementById('cardDescription').value;
             const column = document.getElementById('cardColumn').value;
+            const priority = document.getElementById('cardPriority').value;
             
             if (!title) { showToast('Title is required'); return; }
             
             await fetch('/api/cards', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ title, description, column })
+                body: JSON.stringify({ title, description, column, priority })
             });
             
             closeModal('newCardModal');
             document.getElementById('cardTitle').value = '';
             document.getElementById('cardDescription').value = '';
+            document.getElementById('cardPriority').value = 'none';
         }
         
         async function openCardDetail(cardId) {
@@ -915,6 +956,7 @@
             document.getElementById('detailDescription').value = card.description || '';
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
+            document.getElementById('detailPriority').value = card.priority || 'none';
             
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
@@ -945,7 +987,8 @@
                 title: document.getElementById('detailTitleInput').value,
                 description: document.getElementById('detailDescription').value,
                 assignee: document.getElementById('detailAssignee').value || null,
-                column: document.getElementById('detailColumn').value
+                column: document.getElementById('detailColumn').value,
+                priority: document.getElementById('detailPriority').value
             };
             
             await fetch(`/api/cards/${currentCardId}`, {

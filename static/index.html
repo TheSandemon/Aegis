@@ -618,6 +618,23 @@
         let terminalRefreshInterval = null;
         let searchFilter = '';
         
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // / to focus search
+            if (e.key === '/' && !e.target.matches('input, textarea')) {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+            // Escape to blur search
+            if (e.key === 'Escape' && document.activeElement === document.getElementById('searchInput')) {
+                document.getElementById('searchInput').blur();
+            }
+            // n for new card
+            if (e.key === 'n' && !e.target.matches('input, textarea')) {
+                openNewCardModal();
+            }
+        });
+        
         async function init() {
             await loadConfig();
             populateColumnSelects();

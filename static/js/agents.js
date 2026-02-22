@@ -1,4 +1,4 @@
-/* Aegis Workers Module — Instance-based sidebar */
+/* Aegis Workers Module — Instance-based sidebar with per-instance settings */
 let instancesData = [];
 let registryData = [];
 
@@ -27,6 +27,8 @@ function renderInstancesSidebar() {
         const isRunning = inst.runtime_status === 'running';
         const color = inst.color || '#6366f1';
         const rgb = hexToRgb(color);
+        const serviceBadge = inst.service ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.service}</span>` : '';
+        const modelBadge = inst.model ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.model}</span>` : '';
         return `
             <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
                  style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b}"
@@ -43,11 +45,12 @@ function renderInstancesSidebar() {
                 </div>
                 <div class="agent-params">
                     <div class="param-row"><span>Template</span><b>${escapeHtml(inst.template_id)}</b></div>
-                    <div class="param-row"><span>Instance</span><b style="font-size:0.65rem;color:var(--text-secondary);">${inst.instance_id}</b></div>
+                    <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">${serviceBadge}${modelBadge}</div>
                 </div>
                 <div style="display:flex;gap:0.25rem;margin-top:0.5rem;">
                     ${!isRunning ? `<button onclick="startInstance('${inst.instance_id}')" style="flex:1;background:#22c55e;font-size:0.7rem;">▶ Start</button>` : ''}
                     ${isRunning ? `<button class="danger" onclick="stopInstance('${inst.instance_id}')" style="flex:1;font-size:0.7rem;">⏹ Stop</button>` : ''}
+                    <button class="secondary" onclick="openInstanceSettings('${inst.instance_id}')" style="font-size:0.7rem;" title="Settings">⚙️</button>
                     <button class="secondary" onclick="viewInstanceLogs('${inst.instance_id}')" style="font-size:0.7rem;">📋</button>
                     ${!isRunning ? `<button class="danger" onclick="deleteWorkerInstance('${inst.instance_id}')" style="font-size:0.7rem;">🗑</button>` : ''}
                 </div>
@@ -60,36 +63,32 @@ function hexToRgb(hex) {
     return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 99, g: 102, b: 241 };
 }
 
-function getAgentEmoji(id) {
-    const emojis = { architect: '🏗️', coder: '💻', researcher: '🔍', security: '🛡️' };
-    return emojis[id] || '🤖';
-}
-
-// ─── Instance Actions ────────────────────────────────────────────────────
+// ─── Instance Actions ───────────────────────────────────────────────────
 
 async function startInstance(instanceId) {
-    showToast(`Starting ${instanceId}...`);
+    showToast('Starting...');
     try {
         const res = await fetch(`/api/instances/${instanceId}/start`, { method: 'POST' });
-        res.ok ? showToast(`▶ Worker started!`) : showToast(`⚠️ ${(await res.json()).detail || 'Start failed'}`);
-        await loadInstances();
+        const d = await res.json();
+        if (res.ok) { showToast(`✅ Started`); await loadInstances(); }
+        else { showToast(`⚠️ ${d.detail || 'Start failed'}`); }
     } catch (e) { showToast('Start failed'); }
 }
 
 async function stopInstance(instanceId) {
     try {
         const res = await fetch(`/api/instances/${instanceId}/stop`, { method: 'POST' });
-        res.ok ? showToast(`⏹ Worker stopped`) : showToast(`⚠️ ${(await res.json()).detail || 'Stop failed'}`);
-        await loadInstances();
+        if (res.ok) { showToast('⏹ Stopped'); await loadInstances(); }
+        else { showToast('Stop failed'); }
     } catch (e) { showToast('Stop failed'); }
 }
 
 async function deleteWorkerInstance(instanceId) {
-    if (!confirm(`Delete this worker instance? Files will be removed.`)) return;
+    if (!confirm('Delete this worker instance?')) return;
     try {
         const res = await fetch(`/api/instances/${instanceId}`, { method: 'DELETE' });
-        res.ok ? showToast(`🗑 Worker deleted`) : showToast(`⚠️ Delete failed`);
-        await loadInstances();
+        if (res.ok) { showToast('🗑 Deleted'); await loadInstances(); }
+        else { showToast('Delete failed'); }
     } catch (e) { showToast('Delete failed'); }
 }
 
@@ -102,11 +101,10 @@ async function viewInstanceLogs(instanceId) {
     } catch (e) { showToast('Failed to load logs'); }
 }
 
-// ─── Create Worker Modal ────────────────────────────────────────────────
+// ─── Create Worker Modal (with per-instance settings) ───────────────────
 
 async function openCreateWorkerModal() {
     document.getElementById('createWorkerModal').classList.add('active');
-    // Load installed templates
     try {
         const res = await fetch('/api/registry');
         registryData = await res.json();
@@ -119,32 +117,132 @@ async function openCreateWorkerModal() {
             select.innerHTML += '<option value="" disabled>No templates installed. Visit Marketplace first.</option>';
         }
     } catch (e) { console.error('Failed to load registry', e); }
+    // Clear fields
+    document.getElementById('workerName').value = '';
+    document.getElementById('workerModel').value = '';
+    document.getElementById('createEnvVarsSection').innerHTML = '';
+}
+
+function onTemplateChange() {
+    const templateId = document.getElementById('workerTemplate').value;
+    const tmpl = registryData.find(a => a.id === templateId);
+    const section = document.getElementById('createEnvVarsSection');
+    if (!tmpl || !tmpl.execution || !tmpl.execution.env_vars_required || tmpl.execution.env_vars_required.length === 0) {
+        section.innerHTML = '';
+        return;
+    }
+    // Auto-select service based on template
+    const serviceMap = { 'ANTHROPIC_API_KEY': 'anthropic', 'GOOGLE_API_KEY': 'google', 'OPENAI_API_KEY': 'openai' };
+    const firstKey = tmpl.execution.env_vars_required[0];
+    if (serviceMap[firstKey]) {
+        document.getElementById('workerService').value = serviceMap[firstKey];
+    }
+    section.innerHTML = tmpl.execution.env_vars_required.map(key => `
+        <div class="form-group">
+            <label>🔑 ${key}</label>
+            <input type="password" class="create-env-input" data-key="${key}" placeholder="Enter ${key}">
+        </div>
+    `).join('');
 }
 
 async function createWorkerInstance() {
     const templateId = document.getElementById('workerTemplate').value;
     const instanceName = document.getElementById('workerName').value.trim();
+    const service = document.getElementById('workerService').value;
+    const model = document.getElementById('workerModel').value.trim();
 
     if (!templateId) { showToast('Select a template'); return; }
     if (!instanceName) { showToast('Enter a worker name'); return; }
+
+    // Gather env vars from inputs
+    const env_vars = {};
+    document.querySelectorAll('.create-env-input').forEach(input => {
+        const key = input.dataset.key;
+        if (key && input.value) env_vars[key] = input.value;
+    });
 
     showToast(`Creating ${instanceName}...`);
     try {
         const res = await fetch('/api/instances/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_id: templateId, instance_name: instanceName })
+            body: JSON.stringify({ template_id: templateId, instance_name: instanceName, service, model, env_vars })
         });
         if (res.ok) {
             showToast(`✅ Worker "${instanceName}" created!`);
             closeModal('createWorkerModal');
-            document.getElementById('workerName').value = '';
             await loadInstances();
         } else {
             const err = await res.json();
             showToast(`⚠️ ${err.detail || 'Create failed'}`);
         }
     } catch (e) { showToast('Create failed'); }
+}
+
+// ─── Instance Settings Modal (edit existing worker) ─────────────────────
+
+async function openInstanceSettings(instanceId) {
+    const inst = instancesData.find(i => i.instance_id === instanceId);
+    if (!inst) { showToast('Instance not found'); return; }
+
+    document.getElementById('instSettingsId').value = instanceId;
+    document.getElementById('instSettingsTitle').textContent = inst.instance_name;
+    document.getElementById('instSettingsName').value = inst.instance_name;
+    document.getElementById('instSettingsService').value = inst.service || 'anthropic';
+    document.getElementById('instSettingsModel').value = inst.model || '';
+    document.getElementById('instSettingsEnabled').checked = inst.enabled !== false;
+
+    // Render env var inputs
+    const tmpl = registryData.find(a => a.id === inst.template_id);
+    const requiredKeys = (tmpl && tmpl.execution && tmpl.execution.env_vars_required) ? tmpl.execution.env_vars_required : [];
+    const savedEnv = inst.env_vars || {};
+
+    // Merge required + any extra saved keys
+    const allKeys = new Set([...requiredKeys, ...Object.keys(savedEnv)]);
+
+    const section = document.getElementById('instEnvVarsSection');
+    let html = '';
+    allKeys.forEach(key => {
+        html += `
+            <div class="form-group">
+                <label>🔑 ${key}</label>
+                <input type="password" class="inst-env-input" data-key="${key}" value="${savedEnv[key] || ''}" placeholder="Enter ${key}">
+            </div>
+        `;
+    });
+    section.innerHTML = html;
+
+    document.getElementById('instanceSettingsModal').classList.add('active');
+}
+
+async function saveInstanceSettings() {
+    const instanceId = document.getElementById('instSettingsId').value;
+    const instance_name = document.getElementById('instSettingsName').value.trim();
+    const service = document.getElementById('instSettingsService').value;
+    const model = document.getElementById('instSettingsModel').value.trim();
+    const enabled = document.getElementById('instSettingsEnabled').checked;
+
+    const env_vars = {};
+    document.querySelectorAll('.inst-env-input').forEach(input => {
+        const key = input.dataset.key;
+        if (key && input.value) env_vars[key] = input.value;
+    });
+
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/settings`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ instance_name, service, model, enabled, env_vars })
+        });
+        if (res.ok) {
+            showToast('⚙️ Settings saved');
+            closeModal('instanceSettingsModal');
+            await loadInstances();
+        } else {
+            const err = await res.json();
+            showToast(`⚠️ ${err.detail || 'Save failed'}`);
+        }
+    } catch (e) { showToast('Error saving settings'); }
 }
 
 // ─── Marketplace (kept for install flow) ──────────────────────────────

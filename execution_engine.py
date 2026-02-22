@@ -302,16 +302,18 @@ class ExecutionEngine:
         # Prepare env
         env = os.environ.copy()
         
-        # Load user-defined env vars (API keys)
-        try:
-            with open(CONFIG_PATH) as f:
-                core_config = json.load(f)
-                env_vars = core_config.get("env_vars", {})
-                for k, v in env_vars.items():
-                    if v: # Only set if not empty
-                        env[k] = str(v)
-        except Exception as e:
-            logger.warning(f"Failed to load env_vars from config: {e}")
+        # Load per-instance env vars (API keys) from instances.json
+        if instance_id:
+            try:
+                instances = load_instances()
+                inst_meta = next((i for i in instances if i["instance_id"] == instance_id), None)
+                if inst_meta:
+                    inst_env = inst_meta.get("env_vars", {})
+                    for k, v in inst_env.items():
+                        if v:  # Only set if not empty
+                            env[k] = str(v)
+            except Exception as e:
+                logger.warning(f"Failed to load instance env_vars: {e}")
 
         # Set Aegis specific variables overriding everything else
         env["AEGIS_AGENT_ID"] = agent_id
@@ -643,7 +645,10 @@ def save_instances(instances: list[dict]):
 
 
 def create_instance(template_id: str, instance_name: str,
-                    registry_entry: Optional[dict] = None) -> dict:
+                    registry_entry: Optional[dict] = None,
+                    env_vars: Optional[dict] = None,
+                    service: str = "",
+                    model: str = "") -> dict:
     """
     Create a new instance from an installed template.
     Copies template files into a unique instance directory.
@@ -677,6 +682,9 @@ def create_instance(template_id: str, instance_name: str,
         "enabled": True,
         "icon": registry_entry.get("icon", "🤖") if registry_entry else "🤖",
         "color": "#6366f1",
+        "service": service,
+        "model": model,
+        "env_vars": env_vars or {},
     }
 
     # Persist

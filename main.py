@@ -342,22 +342,6 @@ async def update_config(updates: dict):
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
 
-@app.post("/api/config/env")
-async def update_env_vars(env_vars: dict):
-    """Updates the global env_vars (API keys) in aegis.config.json."""
-    global CONFIG
-    CONFIG["env_vars"] = env_vars
-    
-    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w') as f:
-        json.dump(CONFIG, f, indent=2)
-        
-    # Broadcast the change
-    await manager.broadcast({
-        "type": "config_updated",
-        "env_vars": env_vars
-    })
-    
-    return {"success": True, "env_vars": env_vars}
 
 
 # ─── Cards CRUD ──────────────────────────────────────────────────────────────────
@@ -652,12 +636,18 @@ async def get_agent_params():
 class InstanceCreateRequest(BaseModel):
     template_id: str
     instance_name: str
+    service: str = ""
+    model: str = ""
+    env_vars: Optional[dict] = None
 
 @app.post("/api/instances/create")
 async def create_instance_endpoint(req: InstanceCreateRequest):
     """Create a new worker instance from an installed template."""
     registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == req.template_id), None)
-    result = create_instance(req.template_id, req.instance_name, registry_entry)
+    result = create_instance(
+        req.template_id, req.instance_name, registry_entry,
+        env_vars=req.env_vars or {}, service=req.service, model=req.model
+    )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     await manager.broadcast({"type": "instance_created", "instance": result})
@@ -683,6 +673,22 @@ async def delete_instance_endpoint(instance_id: str):
         raise HTTPException(status_code=404, detail=result["error"])
     await manager.broadcast({"type": "instance_deleted", "instance_id": instance_id})
     return result
+
+@app.patch("/api/instances/{instance_id}/settings")
+async def update_instance_settings(instance_id: str, updates: dict):
+    """Update per-instance settings (name, service, model, env_vars, enabled)."""
+    instances = load_instances()
+    inst = next((i for i in instances if i["instance_id"] == instance_id), None)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    
+    for key in ["instance_name", "service", "model", "env_vars", "enabled"]:
+        if key in updates:
+            inst[key] = updates[key]
+    
+    save_instances(instances)
+    await manager.broadcast({"type": "instance_updated", "instance": inst})
+    return {"success": True, "instance": inst}
 
 @app.post("/api/instances/{instance_id}/start")
 async def start_instance_endpoint(instance_id: str):

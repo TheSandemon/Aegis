@@ -94,6 +94,7 @@
             border: 1px solid var(--border);
             border-radius: 0.5rem;
             padding: 0.5rem 0.75rem;
+            padding-right: 2rem;
             color: var(--text-primary);
             font-size: 0.875rem;
             width: 180px;
@@ -102,6 +103,30 @@
         .header-search:focus {
             outline: none;
             border-color: var(--accent);
+        }
+        
+        .search-wrapper {
+            position: relative;
+            display: inline-block;
+        }
+        
+        .search-clear {
+            position: absolute;
+            right: 6px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0;
+            line-height: 1;
+            display: none;
+        }
+        
+        .search-clear.visible {
+            display: block;
         }
         
         button {
@@ -469,7 +494,10 @@
             </div>
         </div>
         <div class="header-actions">
-            <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
+            <div class="search-wrapper">
+                <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
+                <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
+            </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -662,7 +690,13 @@
         
         function filterCards() {
             searchFilter = document.getElementById('searchInput').value;
+            document.getElementById('searchClear').classList.toggle('visible', searchFilter.length > 0);
             renderBoard();
+        }
+        
+        function clearSearch() {
+            document.getElementById('searchInput').value = '';
+            filterCards();
         }
         
         function renderBoard() {

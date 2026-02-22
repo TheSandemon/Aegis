@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+    <link rel="icon"
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
     <title>Aegis - Multi-Agent Kanban</title>
     <style>
         * {
@@ -201,7 +202,7 @@
             height: 50vh;
             color: var(--text-secondary);
         }
-        
+
         .loading-spinner::after {
             content: '';
             width: 24px;
@@ -211,11 +212,13 @@
             border-radius: 50%;
             animation: spin 0.8s linear infinite;
         }
-        
+
         @keyframes spin {
-            to { transform: rotate(360deg); }
+            to {
+                transform: rotate(360deg);
+            }
         }
-        
+
         .board {
             display: flex;
             gap: 1rem;
@@ -242,15 +245,29 @@
             align-items: center;
             cursor: pointer;
         }
-        
-        .column-header:hover { background: rgba(255,255,255,0.02); }
-        
-        .column.collapsed .column-body { display: none; }
-        .column.collapsed { min-width: 48px; max-width: 48px; }
+
+        .column-header:hover {
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .column.collapsed .column-body {
+            display: none;
+        }
+
+        .column.collapsed {
+            min-width: 48px;
+            max-width: 48px;
+        }
+
         .column.collapsed .column-header h2,
-        .column.collapsed .column-header .count { display: none; }
-        .column.collapsed .collapse-icon { transform: rotate(90deg); }
-        
+        .column.collapsed .column-header .count {
+            display: none;
+        }
+
+        .column.collapsed .collapse-icon {
+            transform: rotate(90deg);
+        }
+
         .collapse-icon {
             font-size: 0.7rem;
             color: var(--text-secondary);
@@ -517,7 +534,7 @@
             bottom: 1rem;
             right: 1rem;
             z-index: 9999;
-            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
         }
 
         @keyframes slideIn {
@@ -653,7 +670,8 @@
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
-            <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh board (R)">🔄 Refresh</button>
+            <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh board (R)">🔄
+                Refresh</button>
         </div>
     </header>
 
@@ -722,6 +740,8 @@
             <div class="modal-footer">
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
                 <div style="flex:1"></div>
+                <button id="approveBtn" style="display:none;background:#22c55e;" onclick="approveCurrentCard()">✓
+                    Approve & Complete</button>
                 <button id="stopAgentBtn" class="danger secondary small" style="display:none;"
                     onclick="stopCurrentAgent()">Stop Agent</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
@@ -934,9 +954,9 @@
                 card.addEventListener('click', () => openCardDetail(parseInt(card.dataset.id)));
             });
         }
-        
+
         const collapsedColumns = {};
-        
+
         function toggleColumn(column) {
             collapsedColumns[column] = !collapsedColumns[column];
             renderBoard();
@@ -1039,6 +1059,7 @@
 
             const isRunning = card.status === 'running';
             document.getElementById('stopAgentBtn').style.display = isRunning ? 'block' : 'none';
+            document.getElementById('approveBtn').style.display = card.column === 'Review' ? 'block' : 'none';
 
             if (isRunning || (card.logs && card.logs.length > 0)) {
                 document.getElementById('terminalSection').style.display = 'block';
@@ -1094,6 +1115,18 @@
                 document.getElementById('stopAgentBtn').style.display = 'none';
             } else {
                 showToast('Failed to stop agent');
+            }
+        }
+
+        async function approveCurrentCard() {
+            const res = await fetch(`/api/cards/${currentCardId}/approve`, { method: 'POST' });
+            if (res.ok) {
+                showToast('✅ Card approved and moved to Done!');
+                document.getElementById('approveBtn').style.display = 'none';
+                closeModal('cardDetailModal');
+            } else {
+                const err = await res.json();
+                showToast(`⚠️ ${err.detail || 'Approval failed'}`);
             }
         }
 
@@ -1218,7 +1251,7 @@
         document.addEventListener('keydown', (e) => {
             // Ignore if typing in an input
             if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-            
+
             if (e.key === 'n' || e.key === 'N') {
                 e.preventDefault();
                 openNewCardModal();
@@ -1241,8 +1274,10 @@
             }
         });
     </script>
-    <footer style="text-align:center;padding:1rem;color:var(--text-secondary);font-size:0.75rem;border-top:1px solid var(--border);margin-top:auto;">
-        <a href="https://github.com/TheSandemon/Aegis" target="_blank" style="color:var(--text-secondary);text-decoration:none;">Aegis on GitHub</a>
+    <footer
+        style="text-align:center;padding:1rem;color:var(--text-secondary);font-size:0.75rem;border-top:1px solid var(--border);margin-top:auto;">
+        <a href="https://github.com/TheSandemon/Aegis" target="_blank"
+            style="color:var(--text-secondary);text-decoration:none;">Aegis on GitHub</a>
     </footer>
 </body>
 

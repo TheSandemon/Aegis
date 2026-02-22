@@ -449,6 +449,7 @@
         let config = {};
         let ws = null;
         let currentCardId = null;
+        let terminalRefreshInterval = null;
         
         // Initialize
         async function init() {
@@ -647,8 +648,15 @@
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
                 loadTerminalLogs(cardId);
+                // Refresh logs every 2 seconds while running
+                if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
+                terminalRefreshInterval = setInterval(() => loadTerminalLogs(cardId), 2000);
             } else {
                 document.getElementById('terminalSection').style.display = 'none';
+                if (terminalRefreshInterval) {
+                    clearInterval(terminalRefreshInterval);
+                    terminalRefreshInterval = null;
+                }
             }
             
             document.getElementById('cardDetailModal').classList.add('active');
@@ -658,7 +666,9 @@
             try {
                 const res = await fetch(`/api/sessions/${cardId}/logs`);
                 const data = await res.json();
-                document.getElementById('terminalOutput').textContent = data.logs.join('\n') || 'No logs yet...';
+                const terminal = document.getElementById('terminalOutput');
+                terminal.textContent = data.logs.join('\n') || 'No logs yet...';
+                terminal.scrollTop = terminal.scrollHeight; // Auto-scroll to bottom
             } catch(e) {
                 document.getElementById('terminalOutput').textContent = 'Loading logs...';
             }
@@ -688,6 +698,10 @@
         
         function closeModal(id) {
             document.getElementById(id).classList.remove('active');
+            if (id === 'cardDetailModal' && terminalRefreshInterval) {
+                clearInterval(terminalRefreshInterval);
+                terminalRefreshInterval = null;
+            }
         }
         
         function openSettings() {

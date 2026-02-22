@@ -12,6 +12,7 @@ import shutil
 from pathlib import Path
 from typing import Optional
 from datetime import datetime
+import uuid
 
 logger = logging.getLogger("aegis.process_manager")
 
@@ -20,10 +21,13 @@ AGENTS_DIR.mkdir(exist_ok=True)
 
 
 class AgentProcess:
-    """Tracks a single running agent process."""
+    """Tracks a single running agent process instance."""
 
     def __init__(self, agent_id: str, pid: int, process: asyncio.subprocess.Process):
         self.agent_id = agent_id
+        # Generate a short unique ID for this instance (e.g. openclaw-core-a1b2)
+        short_uuid = str(uuid.uuid4())[:4]
+        self.instance_id = f"{agent_id}-{short_uuid}"
         self.pid = pid
         self.process = process
         self.status = "running"
@@ -34,6 +38,7 @@ class AgentProcess:
 
     def to_dict(self):
         return {
+            "instance_id": self.instance_id,
             "agent_id": self.agent_id,
             "pid": self.pid,
             "status": self.status,
@@ -46,7 +51,7 @@ class AgentProcess:
 class AgentProcessManager:
     """
     Manages the full lifecycle of agent bot processes.
-    - State tracking with PID, process object, agent ID, status
+    - State tracking with PID, process object, instance ID, status
     - Lifecycle methods: start, stop, status
     - Non-blocking log streaming via asyncio queues -> WebSocket
     - Health polling every 5 seconds
@@ -54,7 +59,7 @@ class AgentProcessManager:
     """
 
     def __init__(self, broadcaster=None, prompts_per_minute: int = 1):
-        self.active: dict[str, AgentProcess] = {}  # agent_id -> AgentProcess
+        self.active: dict[str, AgentProcess] = {}  # instance_id -> AgentProcess
         self.broadcaster = broadcaster
         self._health_task: Optional[asyncio.Task] = None
         self._rate_limiter_last: float = 0.0
@@ -81,8 +86,7 @@ class AgentProcessManager:
 
     async def start_agent(self, agent_id: str, registry_entry: dict) -> dict:
         """Start an agent process from its registry definition."""
-        if agent_id in self.active and self.active[agent_id].status == "running":
-            return {"error": f"Agent '{agent_id}' is already running", "status": "already_running"}
+        # No longer blocking on agent_id; we allow multiple instances.
 
         exec_config = registry_entry.get("execution", {})
         working_dir = Path(exec_config.get("working_dir", ".")).resolve()
@@ -110,17 +114,18 @@ class AgentProcessManager:
             )
 
             agent_proc = AgentProcess(agent_id, process.pid, process)
-            self.active[agent_id] = agent_proc
+            self.active[agent_proc.instance_id] = agent_proc
 
             # Start non-blocking log streaming
             asyncio.create_task(self._stream_logs(agent_proc, process.stdout, "STDOUT"))
             asyncio.create_task(self._stream_logs(agent_proc, process.stderr, "STDERR"))
 
-            logger.info(f"Started agent '{agent_id}' (PID: {process.pid})")
+            logger.info(f"Started instance '{agent_proc.instance_id}' of agent '{agent_id}' (PID: {process.pid})")
 
             if self.broadcaster:
                 await self.broadcaster({
                     "type": "agent_started",
+                    "instance_id": agent_proc.instance_id,
                     "agent_id": agent_id,
                     "pid": process.pid
                 })
@@ -131,11 +136,11 @@ class AgentProcessManager:
             logger.error(f"Failed to start agent '{agent_id}': {e}")
             return {"error": str(e), "status": "error"}
 
-    async def stop_agent(self, agent_id: str) -> dict:
-        """Stop a running agent process."""
-        agent_proc = self.active.get(agent_id)
+    async def stop_agent(self, instance_id: str) -> dict:
+        """Stop a running agent process instance."""
+        agent_proc = self.active.get(instance_id)
         if not agent_proc or agent_proc.status != "running":
-            return {"error": f"Agent '{agent_id}' is not running", "status": "not_running"}
+            return {"error": f"Instance '{instance_id}' is not running", "status": "not_running"}
 
         try:
             agent_proc.process.terminate()
@@ -147,35 +152,36 @@ class AgentProcessManager:
 
             agent_proc.status = "stopped"
             agent_proc.exit_code = agent_proc.process.returncode
-            logger.info(f"Stopped agent '{agent_id}' (PID: {agent_proc.pid})")
+            logger.info(f"Stopped instance '{instance_id}' (PID: {agent_proc.pid})")
 
             if self.broadcaster:
                 await self.broadcaster({
                     "type": "agent_stopped",
-                    "agent_id": agent_id,
+                    "instance_id": instance_id,
+                    "agent_id": agent_proc.agent_id,
                     "pid": agent_proc.pid
                 })
 
             return agent_proc.to_dict()
 
         except Exception as e:
-            logger.error(f"Failed to stop agent '{agent_id}': {e}")
+            logger.error(f"Failed to stop instance '{instance_id}': {e}")
             return {"error": str(e), "status": "error"}
 
-    def get_status(self, agent_id: str) -> Optional[dict]:
-        """Get the current status of an agent."""
-        agent_proc = self.active.get(agent_id)
+    def get_status(self, instance_id: str) -> Optional[dict]:
+        """Get the current status of an agent instance."""
+        agent_proc = self.active.get(instance_id)
         if not agent_proc:
             return None
         return agent_proc.to_dict()
 
     def get_all_active(self) -> list[dict]:
-        """Get all active/recent agent processes."""
+        """Get all active/recent agent process instances."""
         return [proc.to_dict() for proc in self.active.values()]
 
-    def get_logs(self, agent_id: str, tail: int = 100) -> list[str]:
-        """Get recent logs for an agent."""
-        agent_proc = self.active.get(agent_id)
+    def get_logs(self, instance_id: str, tail: int = 100) -> list[str]:
+        """Get recent logs for an agent instance."""
+        agent_proc = self.active.get(instance_id)
         if not agent_proc:
             return []
         return agent_proc.logs[-tail:]
@@ -198,11 +204,12 @@ class AgentProcessManager:
                     if self.broadcaster:
                         await self.broadcaster({
                             "type": "agent_log",
+                            "instance_id": agent_proc.instance_id,
                             "agent_id": agent_proc.agent_id,
                             "entry": entry
                         })
         except Exception as e:
-            logger.error(f"Log streaming error for {agent_proc.agent_id}: {e}")
+            logger.error(f"Log streaming error for {agent_proc.instance_id}: {e}")
 
     # ─── Health Polling ──────────────────────────────────────────────────────
 
@@ -211,7 +218,7 @@ class AgentProcessManager:
         while self._running:
             try:
                 await asyncio.sleep(5)
-                for agent_id, agent_proc in list(self.active.items()):
+                for instance_id, agent_proc in list(self.active.items()):
                     if agent_proc.status != "running":
                         continue
 
@@ -220,14 +227,15 @@ class AgentProcessManager:
                         agent_proc.status = "failed" if returncode != 0 else "completed"
                         agent_proc.exit_code = returncode
                         logger.warning(
-                            f"Agent '{agent_id}' exited with code {returncode} "
+                            f"Instance '{instance_id}' exited with code {returncode} "
                             f"(status: {agent_proc.status})"
                         )
 
                         if self.broadcaster:
                             await self.broadcaster({
                                 "type": "agent_status_changed",
-                                "agent_id": agent_id,
+                                "instance_id": instance_id,
+                                "agent_id": agent_proc.agent_id,
                                 "status": agent_proc.status,
                                 "exit_code": returncode
                             })
@@ -325,6 +333,36 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                 "status": "installed",
                 "path": str(agent_dir),
                 "setup_results": results
+            }
+
+        elif method == "mock_local":
+            # Generate local mock scripts for broken repos to ensure successful execution testing
+            agent_dir.mkdir(parents=True, exist_ok=True)
+            command = registry_entry.get("execution", {}).get("command", "")
+            script_name = command.split()[-1] if " " in command else "mock.py"
+
+            script_content = f"""import time
+import sys
+import os
+
+print(f"Mock Agent '{{os.environ.get('AEGIS_AGENT_ID', 'unknown')}}' started.", flush=True)
+print("Awaiting tasks in background...", flush=True)
+
+try:
+    while True:
+        time.sleep(10)
+        print("Polling... no new tasks found.", flush=True)
+except KeyboardInterrupt:
+    print("Agent shutting down.", flush=True)
+    sys.exit(0)
+"""
+            (agent_dir / script_name).write_text(script_content)
+            (agent_dir / ".installed").write_text(datetime.now().isoformat())
+
+            return {
+                "status": "installed",
+                "path": str(agent_dir),
+                "setup_results": [{"command": "generate_mock", "exit_code": 0, "output": "Mock script created"}]
             }
 
         else:

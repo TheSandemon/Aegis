@@ -34,7 +34,7 @@ class AegisStore:
         self.sessions: dict = {}
         self.next_card_id = 1
         
-    def create_card(self, title: str, description: str = "", column: str = "Inbox", assignee: Optional[str] = None, priority: str = "medium", due_date: Optional[str] = None) -> dict:
+    def create_card(self, title: str, description: str = "", column: str = "Inbox", assignee: Optional[str] = None, priority: str = "medium", due_date: Optional[str] = None, tags: Optional[list] = None) -> dict:
         card_id = self.next_card_id
         self.next_card_id += 1
         card = {
@@ -45,6 +45,7 @@ class AegisStore:
             "assignee": assignee,
             "priority": priority,
             "due_date": due_date,
+            "tags": tags or [],
             "created_at": datetime.now().isoformat(),
             "updated_at": datetime.now().isoformat(),
             "comments": [],
@@ -128,6 +129,7 @@ class CardCreate(BaseModel):
     assignee: Optional[str] = None
     priority: str = "medium"
     due_date: Optional[str] = None
+    tags: Optional[list] = None
 
 class CardUpdate(BaseModel):
     title: Optional[str] = None
@@ -137,6 +139,7 @@ class CardUpdate(BaseModel):
     status: Optional[str] = None
     priority: Optional[str] = None
     due_date: Optional[str] = None
+    tags: Optional[list] = None
 
 class CommentCreate(BaseModel):
     author: str
@@ -166,7 +169,7 @@ async def get_cards(column: Optional[str] = None):
 
 @app.post("/api/cards")
 async def create_card(card: CardCreate):
-    new_card = store.create_card(card.title, card.description, card.column, card.assignee, card.priority, card.due_date)
+    new_card = store.create_card(card.title, card.description, card.column, card.assignee, card.priority, card.due_date, card.tags)
     await manager.broadcast({"type": "card_created", "card": new_card})
     return new_card
 

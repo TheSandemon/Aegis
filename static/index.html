@@ -290,6 +290,55 @@
             color: #f59e0b;
         }
         
+        .card-tags {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.25rem;
+            margin-bottom: 0.375rem;
+        }
+        
+        .card-tag {
+            font-size: 0.6rem;
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.75rem;
+            font-weight: 500;
+        }
+        
+        .tag-red { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
+        .tag-orange { background: rgba(249, 115, 22, 0.2); color: #f97316; }
+        .tag-yellow { background: rgba(234, 179, 8, 0.2); color: #eab308; }
+        .tag-green { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .tag-blue { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
+        .tag-purple { background: rgba(168, 85, 247, 0.2); color: #a855f7; }
+        .tag-pink { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+        .tag-gray { background: rgba(107, 114, 128, 0.2); color: #6b7280; }
+        
+        .tag-selector {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 0.375rem;
+        }
+        
+        .tag-option {
+            font-size: 0.75rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 1rem;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-dark);
+            transition: all 0.2s;
+        }
+        
+        .tag-option:hover {
+            background: var(--border);
+        }
+        
+        .tag-option.selected {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        
         .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
         .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
         .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
@@ -555,6 +604,16 @@
                     <label>Due Date</label>
                     <input type="date" id="cardDueDate">
                 </div>
+                <div class="form-group">
+                    <label>Tags</label>
+                    <div class="tag-selector" id="cardTagSelector">
+                        <span class="tag-option" data-tag="bug" onclick="toggleTag('card', 'bug')">bug</span>
+                        <span class="tag-option" data-tag="feature" onclick="toggleTag('card', 'feature')">feature</span>
+                        <span class="tag-option" data-tag="urgent" onclick="toggleTag('card', 'urgent')">urgent</span>
+                        <span class="tag-option" data-tag="review" onclick="toggleTag('card', 'review')">review</span>
+                        <span class="tag-option" data-tag="blocked" onclick="toggleTag('card', 'blocked')">blocked</span>
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('newCardModal')">Cancel</button>
@@ -600,6 +659,16 @@
                 <div class="form-group">
                     <label>Due Date</label>
                     <input type="date" id="detailDueDate">
+                </div>
+                <div class="form-group">
+                    <label>Tags</label>
+                    <div class="tag-selector" id="detailTagSelector">
+                        <span class="tag-option" data-tag="bug" onclick="toggleTag('detail', 'bug')">bug</span>
+                        <span class="tag-option" data-tag="feature" onclick="toggleTag('detail', 'feature')">feature</span>
+                        <span class="tag-option" data-tag="urgent" onclick="toggleTag('detail', 'urgent')">urgent</span>
+                        <span class="tag-option" data-tag="review" onclick="toggleTag('detail', 'review')">review</span>
+                        <span class="tag-option" data-tag="blocked" onclick="toggleTag('detail', 'blocked')">blocked</span>
+                    </div>
                 </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
                     <label>Live Terminal</label>
@@ -654,6 +723,19 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let selectedTags = { card: [], detail: [] };
+        
+        function toggleTag(modal, tag) {
+            const idx = selectedTags[modal].indexOf(tag);
+            if (idx === -1) {
+                selectedTags[modal].push(tag);
+            } else {
+                selectedTags[modal].splice(idx, 1);
+            }
+            document.querySelectorAll(`#${modal}TagSelector .tag-option`).forEach(el => {
+                el.classList.toggle('selected', selectedTags[modal].includes(el.dataset.tag));
+            });
+        }
         
         async function init() {
             await loadConfig();
@@ -810,8 +892,15 @@
                 dueDateHtml = `<span class="card-due-date ${dueClass}">📅 ${dueDate.toLocaleDateString()}</span>`;
             }
             
+            // Render tags
+            const tagColors = { bug: 'red', feature: 'blue', urgent: 'orange', review: 'purple', blocked: 'pink' };
+            const tagsHtml = card.tags && card.tags.length 
+                ? `<div class="card-tags">${card.tags.map(t => `<span class="card-tag tag-${tagColors[t] || 'gray'}">${t}</span>`).join('')}</div>` 
+                : '';
+            
             return `
                 <div class="card" draggable="true" data-id="${card.id}">
+                    ${tagsHtml}
                     <div class="card-title">${escapeHtml(card.title)}</div>
                     <div class="card-meta">
                         <div class="card-meta-left">
@@ -876,19 +965,22 @@
             const column = document.getElementById('cardColumn').value;
             const priority = document.getElementById('cardPriority')?.value || 'medium';
             const due_date = document.getElementById('cardDueDate').value || null;
+            const tags = [...selectedTags.card];
             
             if (!title) { showToast('Title is required'); return; }
             
             await fetch('/api/cards', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ title, description, column, priority, due_date })
+                body: JSON.stringify({ title, description, column, priority, due_date, tags })
             });
             
             closeModal('newCardModal');
             document.getElementById('cardTitle').value = '';
             document.getElementById('cardDescription').value = '';
             document.getElementById('cardDueDate').value = '';
+            selectedTags.card = [];
+            document.querySelectorAll('#cardTagSelector .tag-option').forEach(el => el.classList.remove('selected'));
         }
         
         async function openCardDetail(cardId) {
@@ -902,6 +994,12 @@
             document.getElementById('detailColumn').value = card.column;
             document.getElementById('detailPriority').value = card.priority || 'medium';
             document.getElementById('detailDueDate').value = card.due_date || '';
+            
+            // Set tags
+            selectedTags.detail = [...(card.tags || [])];
+            document.querySelectorAll('#detailTagSelector .tag-option').forEach(el => {
+                el.classList.toggle('selected', selectedTags.detail.includes(el.dataset.tag));
+            });
             
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
@@ -934,7 +1032,8 @@
                 assignee: document.getElementById('detailAssignee').value || null,
                 column: document.getElementById('detailColumn').value,
                 priority: document.getElementById('detailPriority').value,
-                due_date: document.getElementById('detailDueDate').value || null
+                due_date: document.getElementById('detailDueDate').value || null,
+                tags: [...selectedTags.detail]
             };
             
             await fetch(`/api/cards/${currentCardId}`, {

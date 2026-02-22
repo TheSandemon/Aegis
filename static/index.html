@@ -75,6 +75,17 @@
             background: #22c55e;
         }
         
+        .board-stats {
+            display: flex;
+            gap: 0.75rem;
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            margin-left: 1rem;
+        }
+        
+        .stat-high { color: #ef4444; }
+        .stat-medium { color: #f59e0b; }
+        
         .status-dot.disconnected { background: #ef4444; }
         .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
         
@@ -523,6 +534,7 @@
                 <div class="status-dot" id="wsStatus"></div>
                 <span id="wsStatusText">Connecting...</span>
             </div>
+            <div class="board-stats" id="boardStats"></div>
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
@@ -661,6 +673,7 @@
             await loadCards();
             connectWebSocket();
             renderBoard();
+            updateBoardStats();
         }
         
         async function loadConfig() {
@@ -699,15 +712,17 @@
                 case 'card_created':
                     cards.push(data.card);
                     renderBoard();
+                    updateBoardStats();
                     showToast('Card created');
                     break;
                 case 'card_updated':
                     const idx = cards.findIndex(c => c.id === data.card.id);
-                    if (idx !== -1) { cards[idx] = data.card; renderBoard(); }
+                    if (idx !== -1) { cards[idx] = data.card; renderBoard(); updateBoardStats(); }
                     break;
                 case 'card_deleted':
                     cards = cards.filter(c => c.id !== data.card_id);
                     renderBoard();
+                    updateBoardStats();
                     break;
                 case 'card_assigned':
                     showToast(`Card assigned to ${data.agent}`);
@@ -739,6 +754,19 @@
         function clearSearch() {
             document.getElementById('searchInput').value = '';
             filterCards();
+        }
+        
+        function updateBoardStats() {
+            const total = cards.length;
+            const high = cards.filter(c => c.priority === 'high').length;
+            const medium = cards.filter(c => c.priority === 'medium').length;
+            const inProgress = cards.filter(c => c.column === 'In Progress').length;
+            
+            document.getElementById('boardStats').innerHTML = 
+                '<span>📋 ' + total + '</span>' +
+                '<span style="color:#ef4444">🔴 ' + high + '</span>' +
+                '<span style="color:#f59e0b">🟡 ' + medium + '</span>' +
+                '<span>⚙️ ' + inProgress + '</span>';
         }
         
         function renderBoard() {

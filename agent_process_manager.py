@@ -364,7 +364,6 @@ except KeyboardInterrupt:
                 "path": str(agent_dir),
                 "setup_results": [{"command": "generate_mock", "exit_code": 0, "output": "Mock script created"}]
             }
-
         else:
             return {"status": "unsupported_method", "method": method}
 

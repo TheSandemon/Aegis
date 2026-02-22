@@ -2,39 +2,51 @@
 """
 Aegis - Multi-Agent Kanban & Orchestration Hub
 Main entry point for the FastAPI backend
+
+Architecture:
+  Phase 1: A2A & MCP Protocol Layer
+  Phase 2: Centralized Prompt Queue (PromptBroker)
+  Phase 3: Sandboxed Execution (Docker + Subprocess)
+  Phase 4: Firebase State Sync (optional)
+  Phase 5: Human-in-the-Loop Validation
 """
 
 import json
 import os
 import asyncio
 import logging
+import sqlite3
+import httpx
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel
 
-# Configure logging
+# ─── Logging ─────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aegis")
 
-# Load configuration
+# ─── Configuration ───────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
 
-import sqlite3
+# ═══════════════════════════════════════════════════════════════════════════════════
+# PERSISTENCE LAYER (Phase 4: Firebase or SQLite)
+# ═══════════════════════════════════════════════════════════════════════════════════
 
-# Persistent data store (SQLite)
 class AegisStore:
+    """SQLite-backed persistent store."""
+
     def __init__(self, db_path: str = "aegis.db"):
         self.db_path = db_path
         self._init_db()
-        
+
     def _init_db(self):
         with sqlite3.connect(self.db_path) as conn:
             conn.execute("""
@@ -53,7 +65,7 @@ class AegisStore:
             """)
             conn.commit()
 
-    def create_card(self, title: str, description: str = "", column: str = "Inbox", assignee: Optional[str] = None) -> dict:
+    def create_card(self, title, description="", column="Inbox", assignee=None):
         now = datetime.now().isoformat()
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
@@ -61,44 +73,38 @@ class AegisStore:
                 'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
                 (title, description, column, assignee, now, now)
             )
-            card_id = cursor.lastrowid
             conn.commit()
-            return self.get_card(card_id)
-    
-    def update_card(self, card_id: int, **kwargs) -> Optional[dict]:
+            return self.get_card(cursor.lastrowid)
+
+    def update_card(self, card_id, **kwargs):
         if not kwargs:
             return self.get_card(card_id)
-            
         kwargs["updated_at"] = datetime.now().isoformat()
         fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
         values = list(kwargs.values()) + [card_id]
-        
         with sqlite3.connect(self.db_path) as conn:
             conn.execute(f'UPDATE cards SET {fields} WHERE id = ?', values)
             conn.commit()
-            
         return self.get_card(card_id)
-    
-    def get_card(self, card_id: int) -> Optional[dict]:
+
+    def get_card(self, card_id):
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             row = conn.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
             if not row:
                 return None
             card = dict(row)
-            # Deserialize JSON fields
             card["comments"] = json.loads(card.get("comments", "[]"))
             card["logs"] = json.loads(card.get("logs", "[]"))
             return card
 
-    def get_cards(self, column: Optional[str] = None) -> list:
+    def get_cards(self, column=None):
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             if column:
                 rows = conn.execute('SELECT * FROM cards WHERE "column" = ?', (column,)).fetchall()
             else:
                 rows = conn.execute('SELECT * FROM cards').fetchall()
-            
             cards = []
             for row in rows:
                 card = dict(row)
@@ -106,32 +112,45 @@ class AegisStore:
                 card["logs"] = json.loads(card.get("logs", "[]"))
                 cards.append(card)
             return cards
-    
-    def delete_card(self, card_id: int) -> bool:
+
+    def delete_card(self, card_id):
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute('DELETE FROM cards WHERE id = ?', (card_id,))
             conn.commit()
             return cursor.rowcount > 0
 
-# Global store instance
-store = AegisStore()
 
-# Sample cards removed - board starts empty for clean experience
-# To add sample cards back, uncomment below:
-# store.create_card("Welcome to Aegis", "Your multi-agent Kanban board is ready!", "Inbox")
+# Store factory: Firebase or SQLite
+def _create_store():
+    fb_config = CONFIG.get("fire_base", {})
+    if fb_config.get("enabled"):
+        try:
+            from firebase_store import FirestoreStore
+            logger.info("Using Firebase Firestore as persistence backend")
+            return FirestoreStore()
+        except Exception as e:
+            logger.warning(f"Firebase init failed, falling back to SQLite: {e}")
+    logger.info("Using SQLite as persistence backend")
+    return AegisStore()
 
-# WebSocket connections
+store = _create_store()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# WEBSOCKET MANAGER
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 class ConnectionManager:
     def __init__(self):
         self.active_connections: list[WebSocket] = []
-    
+
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-    
+
     def disconnect(self, websocket: WebSocket):
         self.active_connections.remove(websocket)
-    
+
     async def broadcast(self, message: dict):
         for connection in self.active_connections:
             try:
@@ -141,26 +160,105 @@ class ConnectionManager:
 
 manager = ConnectionManager()
 
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# EXECUTION MANAGER (Phase 3) & PROMPT BROKER (Phase 2)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+from execution import ExecutionManager
+from prompt_broker import PromptBroker
+
+execution_manager = ExecutionManager()
+
+broker = PromptBroker(
+    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1),
+    max_retries=CONFIG.get("rate_limits", {}).get("max_retries_on_fail", 3)
+)
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# HITL — State Transition Validation (Phase 5)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+# Valid column transitions (from -> allowed destinations)
+VALID_TRANSITIONS = {
+    "Inbox":       ["Planned", "Blocked", "Done"],
+    "Planned":     ["In Progress", "Blocked", "Inbox"],
+    "In Progress": ["Review", "Blocked", "Planned"],
+    "Blocked":     ["Planned", "In Progress", "Inbox"],
+    "Review":      ["Done", "In Progress", "Blocked"],  # Review→Done only by humans
+    "Done":        ["Inbox"],  # Reopen
+}
+
+
+async def send_discord_webhook(card: dict):
+    """Fires a Discord webhook when a card enters the Review column."""
+    webhook_url = CONFIG.get("discord", {}).get("webhook_url", "")
+    if not webhook_url:
+        logger.debug("No Discord webhook configured, skipping notification")
+        return
+
+    embed = {
+        "title": f"🛡️ Aegis Review: {card['title']}",
+        "description": card.get("description", "No description")[:500],
+        "color": 0x06b6d4,
+        "fields": [
+            {"name": "Card ID", "value": str(card["id"]), "inline": True},
+            {"name": "Assignee", "value": card.get("assignee", "Unassigned"), "inline": True},
+            {"name": "Status", "value": card.get("status", "idle"), "inline": True},
+        ],
+        "footer": {"text": "Aegis Orchestrator — Awaiting human approval"}
+    }
+
+    try:
+        async with httpx.AsyncClient() as client:
+            await client.post(webhook_url, json={"embeds": [embed]})
+        logger.info(f"Discord webhook sent for card {card['id']}")
+    except Exception as e:
+        logger.error(f"Discord webhook failed: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# APP LIFECYCLE
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Aegis starting up...")
-    logger.info(f"Orchestration mode: {CONFIG['orchestration_mode']}")
-    logger.info(f"Polling rate: {CONFIG['polling_rate_ms']}ms")
-    
-    # Start background task polling if supervisor mode
+    logger.info(f"Orchestration mode: {CONFIG.get('orchestration_mode', 'supervisor')}")
+    logger.info(f"Polling rate: {CONFIG.get('polling_rate_ms', 5000)}ms")
+    logger.info(f"Rate limit: {CONFIG.get('rate_limits', {}).get('prompts_per_minute', 1)} prompt(s)/min")
+
+    # Start prompt broker
+    await broker.start()
+
+    # Start supervisor polling
     if CONFIG.get("orchestration_mode") == "supervisor":
         asyncio.create_task(polling_loop())
-    
+
     yield
-    
+
+    await broker.stop()
     logger.info("Aegis shutting down...")
 
-app = FastAPI(title="Aegis", lifespan=lifespan)
+
+app = FastAPI(title="Aegis", version="2.0.0", lifespan=lifespan)
+
+# ─── Mount routers ───────────────────────────────────────────────────────────────
+from a2a import router as a2a_router
+from mcp_server import router as mcp_router
+
+app.include_router(a2a_router)
+app.include_router(mcp_router)
 
 # Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Pydantic models
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# PYDANTIC MODELS
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 class CardCreate(BaseModel):
     title: str
     description: str = ""
@@ -178,7 +276,11 @@ class CommentCreate(BaseModel):
     author: str
     content: str
 
-# API Routes
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# API ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 @app.get("/")
 async def root():
     return FileResponse("static/index.html")
@@ -191,10 +293,12 @@ async def get_config():
 async def update_config(updates: dict):
     global CONFIG
     CONFIG.update(updates)
-    # Save to file
     with open(CONFIG_PATH, 'w') as f:
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
+
+
+# ─── Cards CRUD ──────────────────────────────────────────────────────────────────
 
 @app.get("/api/cards")
 async def get_cards(column: Optional[str] = None):
@@ -214,11 +318,47 @@ async def get_card(card_id: int):
     return card
 
 @app.patch("/api/cards/{card_id}")
-async def update_card(card_id: int, update: CardUpdate):
-    card = store.update_card(card_id, **update.model_dump(exclude_none=True))
-    if not card:
+async def update_card(card_id: int, update: CardUpdate, request: Request):
+    """
+    Update a card with state-transition validation (Phase 5).
+    Agent-initiated Review→Done is blocked.
+    """
+    existing = store.get_card(card_id)
+    if not existing:
         raise HTTPException(status_code=404, detail="Card not found")
+
+    updates = update.model_dump(exclude_none=True)
+
+    # ── Phase 5: State-transition validation ──
+    new_column = updates.get("column")
+    if new_column and new_column != existing["column"]:
+        old_col = existing["column"]
+        allowed = VALID_TRANSITIONS.get(old_col, [])
+
+        if new_column not in allowed:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid transition: {old_col} → {new_column}. Allowed: {allowed}"
+            )
+
+        # Block agent-initiated Review → Done
+        is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+        if old_col == "Review" and new_column == "Done" and is_agent:
+            raise HTTPException(
+                status_code=403,
+                detail="Only humans can move cards from Review to Done"
+            )
+
+        # Lifecycle hook: auto-kill running agent on Review/Done
+        await execution_manager.lifecycle_hook(card_id, new_column, store, manager.broadcast)
+
+    card = store.update_card(card_id, **updates)
     await manager.broadcast({"type": "card_updated", "card": card})
+
+    # Discord webhook on Review entry
+    if new_column == "Review":
+        asyncio.create_task(send_discord_webhook(card))
+
     return card
 
 @app.delete("/api/cards/{card_id}")
@@ -228,122 +368,34 @@ async def delete_card(card_id: int):
         return {"success": True}
     raise HTTPException(status_code=404, detail="Card not found")
 
+
+# ─── Comments ────────────────────────────────────────────────────────────────────
+
 @app.post("/api/cards/{card_id}/comments")
 async def add_comment(card_id: int, comment: CommentCreate):
     card = store.get_card(card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
-    
+
     comment_obj = {
         "author": comment.author,
         "content": comment.content,
         "timestamp": datetime.now().isoformat()
     }
-    
+
     comments = card.get("comments", [])
     comments.append(comment_obj)
-    
     store.update_card(card_id, comments=json.dumps(comments))
-    
+
     await manager.broadcast({"type": "comment_added", "card_id": card_id, "comment": comment_obj})
     return comment_obj
 
-class AgentManager:
-    def __init__(self):
-        self.running_tasks = {}
 
-    async def run_agent(self, card_id: int, agent_name: str):
-        agent_config = CONFIG.get("agents", {}).get(agent_name)
-        if not agent_config:
-            return
-
-        command = agent_config.get("binary")
-        card = store.get_card(card_id)
-        
-        # Inject context via environment variables
-        env = os.environ.copy()
-        env["AEGIS_CARD_ID"] = str(card_id)
-        env["AEGIS_CARD_TITLE"] = card.get("title", "")
-        env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
-        env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
-
-        try:
-            store.update_card(card_id, status="running")
-            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
-            
-            process = await asyncio.create_subprocess_shell(
-                command,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-                env=env # Pass context
-            )
-            
-            self.running_tasks[card_id] = process
-            
-            # Stream logs (Helper functions)
-            async def stream_output(stream, log_type):
-                while True:
-                    line = await stream.readline()
-                    if not line:
-                        break
-                    decoded_line = line.decode().strip()
-                    if decoded_line:
-                        log_entry = f"[{log_type}] {decoded_line}"
-                        # Update DB logs efficiently (batch or append)
-                        # For now, append and save
-                        current_card = store.get_card(card_id)
-                        if not current_card: break # Card deleted
-                        logs = current_card.get("logs", [])
-                        logs.append(log_entry)
-                        store.update_card(card_id, logs=json.dumps(logs))
-                        # Broadcast
-                        await manager.broadcast({
-                            "type": "log_entry", 
-                            "card_id": card_id, 
-                            "entry": log_entry
-                        })
-
-            await asyncio.gather(
-                stream_output(process.stdout, "STDOUT"),
-                stream_output(process.stderr, "STDERR")
-            )
-            
-            return_code = await process.wait()
-            
-            # Check if process was terminated manually
-            if card_id not in self.running_tasks:
-                status = "terminated"
-            else:
-                status = "completed" if return_code == 0 else "failed"
-            
-            store.update_card(card_id, status=status)
-            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
-            
-        except Exception as e:
-            logger.error(f"Agent execution error for card {card_id}: {e}")
-            store.update_card(card_id, status="error")
-            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
-        finally:
-            if card_id in self.running_tasks:
-                del self.running_tasks[card_id]
-
-    async def stop_agent(self, card_id: int):
-        if card_id in self.running_tasks:
-            process = self.running_tasks[card_id]
-            try:
-                process.terminate()
-                # We'll let the wait() in run_agent handle the status update
-                logger.info(f"Terminating agent for card {card_id}")
-                return True
-            except Exception as e:
-                logger.error(f"Error terminating agent {card_id}: {e}")
-        return False
-
-agent_manager = AgentManager()
+# ─── Agent Control ───────────────────────────────────────────────────────────────
 
 @app.delete("/api/cards/{card_id}/agent")
 async def stop_card_agent(card_id: int):
-    if await agent_manager.stop_agent(card_id):
+    if await execution_manager.stop_agent(card_id):
         return {"success": True}
     raise HTTPException(status_code=404, detail="No running agent found for this card")
 
@@ -354,7 +406,41 @@ async def get_card_logs(card_id: int):
         raise HTTPException(status_code=404, detail="Card not found")
     return {"logs": card.get("logs", [])}
 
-# WebSocket endpoint
+
+# ─── Phase 5: Human Approval Gate ────────────────────────────────────────────────
+
+@app.post("/api/cards/{card_id}/approve")
+async def approve_card(card_id: int):
+    """Human approval gate — moves a card from Review to Done."""
+    card = store.get_card(card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    if card["column"] != "Review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Card must be in Review column to approve (currently: {card['column']})"
+        )
+
+    updated = store.update_card(card_id, column="Done", status="approved")
+    await manager.broadcast({"type": "card_updated", "card": updated})
+
+    logger.info(f"Card {card_id} approved and moved to Done")
+    return {"success": True, "card": updated}
+
+
+# ─── Prompt Broker Stats ─────────────────────────────────────────────────────────
+
+@app.get("/api/broker/stats")
+async def get_broker_stats():
+    """Returns the prompt broker queue and rate-limit statistics."""
+    return broker.get_stats()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# WEBSOCKET
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     await manager.connect(websocket)
@@ -362,38 +448,39 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
-            
+
             if message.get("type") == "subscribe_card":
-                # Client subscribing to card updates
                 await websocket.send_json({"type": "subscribed", "card_id": message.get("card_id")})
-                
+
     except WebSocketDisconnect:
         manager.disconnect(websocket)
 
-# Background polling loop (Supervisor Mode)
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# SUPERVISOR POLLING LOOP
+# ═══════════════════════════════════════════════════════════════════════════════════
+
 async def polling_loop():
-    """Polls for unassigned tasks in Planned column and routes to agents"""
+    """Polls for unassigned tasks in Planned column and routes to agents."""
     while True:
         try:
-            await asyncio.sleep(CONFIG["polling_rate_ms"] / 1000)
-            
-            # Check concurrency limit
-            running_count = len(agent_manager.running_tasks)
+            await asyncio.sleep(CONFIG.get("polling_rate_ms", 5000) / 1000)
+
+            running_count = len(execution_manager.running_tasks)
             max_agents = CONFIG.get("max_concurrent_agents", 4)
-            
+
             if running_count < max_agents:
-                # Find planned cards without assignees
-                planned_cards = [c for c in store.get_cards(column="Planned") if not c.get("assignee")]
-                
+                planned_cards = [
+                    c for c in store.get_cards(column="Planned")
+                    if not c.get("assignee")
+                ]
+
                 for card in planned_cards:
-                    # Check if we still have room
-                    if len(agent_manager.running_tasks) >= max_agents:
+                    if len(execution_manager.running_tasks) >= max_agents:
                         break
-                        
-                    # Try to assign to an available agent
+
                     for agent_name, agent_config in CONFIG.get("agents", {}).items():
                         if agent_config.get("enabled"):
-                            # ... assignment logic ...
                             store.update_card(card["id"], assignee=agent_name, status="assigned")
                             logger.info(f"Routed card {card['id']} to {agent_name}")
                             await manager.broadcast({
@@ -401,13 +488,22 @@ async def polling_loop():
                                 "card_id": card["id"],
                                 "agent": agent_name
                             })
-                            
-                            # Trigger actual agent execution
-                            asyncio.create_task(agent_manager.run_agent(card["id"], agent_name))
+
+                            asyncio.create_task(
+                                execution_manager.run_agent(
+                                    card["id"], agent_name, agent_config,
+                                    card, store, manager.broadcast
+                                )
+                            )
                             break
-                        
+
         except Exception as e:
             logger.error(f"Polling error: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# ENTRYPOINT
+# ═══════════════════════════════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
     import uvicorn

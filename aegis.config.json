@@ -16,36 +16,46 @@
   ],
   "agents": {
     "architect": {
-      "binary": "python mock_agent.py",
+      "binary": "openclaw",
       "profile": "sys_arch",
-      "enabled": true
+      "enabled": true,
+      "isolation": "subprocess"
     },
     "coder": {
       "binary": "gemini-cli",
       "profile": "dev_mode",
-      "enabled": true
+      "enabled": true,
+      "isolation": "subprocess"
     },
     "researcher": {
       "binary": "openclaw",
       "profile": "research",
-      "enabled": false
+      "enabled": false,
+      "isolation": "subprocess"
     },
     "security": {
       "binary": "openclaw",
       "profile": "security",
-      "enabled": false
+      "enabled": false,
+      "isolation": "docker",
+      "docker_image": ""
     }
   },
   "orchestration_mode": "supervisor",
   "database": "sqlite",
-  "card_templates": [
-    {"title": "Bug Report", "description": "**Steps to reproduce:**\n1. \n2. \n3.\n\n**Expected:** \n**Actual:**", "priority": "high"},
-    {"title": "Feature Request", "description": "**Description:**\n\n**Why needed:**", "priority": "medium"},
-    {"title": "Task", "description": "", "priority": "none"}
-  ],
   "fire_base": {
     "enabled": false,
     "project_id": "",
     "credentials_path": ""
+  },
+  "a2a": {
+    "agent_name": "Aegis Orchestrator",
+    "version": "2.0.0"
+  },
+  "mcp": {
+    "workspaces": []
+  },
+  "discord": {
+    "webhook_url": ""
   }
 }

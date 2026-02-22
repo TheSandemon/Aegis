@@ -670,6 +670,20 @@
                 case 'card_assigned':
                     showToast(`Card assigned to ${data.agent}`);
                     break;
+                case 'log_entry':
+                    if (currentCardId === data.card_id) {
+                        const terminal = document.getElementById('terminalOutput');
+                        const wasAtBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 1;
+                        
+                        const entry = document.createElement('div');
+                        entry.textContent = data.entry;
+                        terminal.appendChild(entry);
+                        
+                        if (wasAtBottom) {
+                            terminal.scrollTop = terminal.scrollHeight;
+                        }
+                    }
+                    break;
             }
         }
         
@@ -840,13 +854,11 @@
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
             
-            if (card.status === 'running') {
+            if (card.status === 'running' || (card.logs && card.logs.length > 0)) {
                 document.getElementById('terminalSection').style.display = 'block';
                 loadTerminalLogs(cardId);
-                terminalRefreshInterval = setInterval(() => loadTerminalLogs(cardId), 2000);
             } else {
                 document.getElementById('terminalSection').style.display = 'none';
-                if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
             }
             
             document.getElementById('cardDetailModal').classList.add('active');
@@ -854,10 +866,10 @@
         
         async function loadTerminalLogs(cardId) {
             try {
-                const res = await fetch(`/api/sessions/${cardId}/logs`);
+                const res = await fetch(`/api/cards/${cardId}/logs`);
                 const data = await res.json();
                 const terminal = document.getElementById('terminalOutput');
-                terminal.textContent = data.logs?.join('\n') || 'Waiting for agent output...';
+                terminal.innerHTML = data.logs?.map(l => `<div>${escapeHtml(l)}</div>`).join('') || 'Waiting for agent output...';
                 terminal.scrollTop = terminal.scrollHeight;
             } catch(e) {
                 document.getElementById('terminalOutput').textContent = 'No logs available';

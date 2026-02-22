@@ -629,6 +629,7 @@
         async function loadCards() {
             const res = await fetch('/api/cards');
             cards = await res.json();
+            document.title = `(${cards.length}) Aegis`;
         }
         
         function connectWebSocket() {

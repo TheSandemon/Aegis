@@ -492,6 +492,7 @@
                 <div class="status-dot" id="wsStatus"></div>
                 <span id="wsStatusText">Connecting...</span>
             </div>
+            <button class="secondary" onclick="refreshCards()" title="Refresh cards">🔄</button>
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
@@ -629,6 +630,13 @@
         async function loadCards() {
             const res = await fetch('/api/cards');
             cards = await res.json();
+        }
+        
+        async function refreshCards() {
+            showToast('Refreshing...');
+            await loadCards();
+            renderBoard();
+            showToast('Cards refreshed');
         }
         
         function connectWebSocket() {

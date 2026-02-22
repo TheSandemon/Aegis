@@ -559,6 +559,14 @@
                     <label>Column</label>
                     <select id="detailColumn"></select>
                 </div>
+                <div class="form-group">
+                    <label>Comments</label>
+                    <div id="cardComments"></div>
+                    <div style="display:flex;gap:0.5rem;margin-top:0.5rem">
+                        <input type="text" id="newComment" placeholder="Add a comment..." style="flex:1;background:var(--bg-dark);border:1px solid var(--border);border-radius:0.375rem;padding:0.5rem;color:var(--text-primary)">
+                        <button onclick="addComment()" style="padding:0.5rem">Add</button>
+                    </div>
+                </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
                     <label>Live Terminal</label>
                     <div class="terminal" id="terminalOutput">Waiting for output...</div>
@@ -840,6 +848,9 @@
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
             
+            // Render comments
+            renderComments(card);
+            
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
                 loadTerminalLogs(cardId);
@@ -850,6 +861,42 @@
             }
             
             document.getElementById('cardDetailModal').classList.add('active');
+        }
+        
+        function renderComments(card) {
+            const container = document.getElementById('cardComments');
+            const comments = card.comments || [];
+            if (comments.length === 0) {
+                container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem">No comments yet</p>';
+                return;
+            }
+            container.innerHTML = comments.map(c => 
+                '<div style="padding:0.5rem;background:var(--bg-dark);border-radius:0.25rem;margin-bottom:0.5rem">' +
+                '<div style="font-size:0.7rem;color:var(--accent)">' + (c.author || 'User') + '</div>' +
+                '<div style="font-size:0.8rem">' + escapeHtml(c.content) + '</div></div>'
+            ).join('');
+        }
+        
+        async function addComment() {
+            const input = document.getElementById('newComment');
+            const content = input.value.trim();
+            if (!content || !currentCardId) return;
+            
+            const card = cards.find(c => c.id === currentCardId);
+            if (!card) return;
+            
+            const comment = { author: 'User', content: content, timestamp: new Date().toISOString() };
+            if (!card.comments) card.comments = [];
+            card.comments.push(comment);
+            
+            await fetch('/api/cards/' + currentCardId, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ comments: card.comments })
+            });
+            
+            input.value = '';
+            renderComments(card);
         }
         
         async function loadTerminalLogs(cardId) {

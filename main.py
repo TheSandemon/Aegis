@@ -131,6 +131,7 @@ class CardUpdate(BaseModel):
     column: Optional[str] = None
     assignee: Optional[str] = None
     status: Optional[str] = None
+    comments: Optional[list] = None
 
 class CommentCreate(BaseModel):
     author: str

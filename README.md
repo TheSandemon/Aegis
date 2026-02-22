@@ -1,17 +1,17 @@
 # Aegis 2.0: Multi-Agent Kanban & Orchestration Hub
 
-Aegis is a high-performance Kanban-based orchestration hub for autonomous AI agents. It transforms your development workflow by treating AI agents as a managed team of contributors, complete with protocol-level discovery, rate-limited execution, and human-in-the-loop validation.
+Aegis is a high-performance Kanban-based orchestration hub for autonomous AI agents. It transforms your development workflow by treating AI agents as a managed team of contributors, complete with protocol-level discovery, DAG workflows, and factory-pattern agent instancing.
 
 ---
 
 ## 🚀 Core Features
 
-- 📋 **Protocol-Native Kanban** — Industry-standard task management with built-in A2A (Agent-to-Agent) and MCP (Model Context Protocol) support.
-- 🏪 **Agent Marketplace** — Discover, install, and manage third-party bots from a centralized registry.
-- 🚦 **Prompt Broker** — Centralized rate-limiting (1 prompt/min) ensuring strict adherence to API quotas and budget constraints.
-- 🛡️ **Execution Manager** — Sandboxed agent runtimes using Docker or isolated subprocesses with full lifecycle monitoring.
-- 🔒 **HITL Validation** — Hardened state-transition validation; agents can propose work, but only humans can approve it to "Done".
-- 📺 **Real-Time Observability** — Live terminal log streaming via WebSockets and real-time board updates.
+- 📋 **DAG-Based Kanban** — Industry-standard task management with built-in support for complex task dependencies (DAGs).
+- 🏗️ **Agent Factory** — Instantiate multiple isolated workers from base agent templates (OpenClaw, PicoClaw, etc.).
+- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring adherence to API quotas.
+- 🛡️ **Unified Execution Engine** — Managed agent runtimes using isolated Docker containers or subprocesses with unique working directories per instance.
+- 🔒 **RBAC for MCP** — Fine-grained permission system (read/write/git) for agents accessing project resources via Model Context Protocol.
+- 📺 **Real-Time Observability** — Live log streaming via WebSockets and real-time dashboard updates.
 
 ---
 
@@ -19,85 +19,62 @@ Aegis is a high-performance Kanban-based orchestration hub for autonomous AI age
 
 ```mermaid
 graph TD
-    A["External Bots (OpenClaw, PicoClaw)"] -->|A2A Messages| B["A2A Discovery Layer"]
-    B --> C["Aegis Core Orchestrator"]
-    C -->|Context| D["MCP Resource Server"]
-    C -->|Rate Limited| E["Centralized Prompt Broker"]
-    C -->|Execute| F["Execution Manager"]
-    F -->|Heavy| G["Docker Container"]
-    F -->|Light| H["Subprocess Adapter"]
-    C -->|Persist| I{"Store Factory"}
-    I --> J["SQLite / Firestore"]
-    C -->|Review| K["Discord Webhooks"]
-    K --> L["Human Approval Gate"]
+    A["Agent Registry<br/>(Templates)"] -->|Instantiate| B["Agent Instances<br/>(Isolated Workers)"]
+    B -->|Submit Work| C["Aegis Core Orchestrator"]
+    C -->|Permissions| D["RBAC Layer"]
+    D -->|Context| E["MCP Resource Server"]
+    C -->|Execute| F["Unified Execution Engine"]
+    F -->|Container| G["Docker Adapter"]
+    F -->|Process| H["Subprocess Adapter"]
+    C -->|Rate Limited| I["Prompt Broker"]
+    C -->|Order| J["DAG Dependency Engine"]
 ```
 
 ---
 
 ## 🛠️ Getting Started
 
-### Quick Start (Windows)
-1. Double-clck `setup.bat`.
-2. Wait for the environment to initialize.
-3. Access the dashboard at `http://localhost:8080`.
-
-### Quick Start (Mac/Linux)
-1. `chmod +x setup.sh && ./setup.sh`
-2. Access the dashboard at `http://localhost:8080`.
+1. **Setup**: Run `setup.bat` (Windows) or `setup.sh` (Mac/Linux).
+2. **Install Templates**: Go to **🏪 Marketplace**, browse the registry, and click **Install**. 
+3. **Create Workers**: Click **+ Create** in the sidebar to spawn a new instance (e.g., "Frontend-Coder") from an installed template.
+4. **DAG Workflows**: Open a card detail to link tasks. Use `parent_ids` to ensure tasks are only started when their dependencies are `Done`.
 
 ---
 
-## 🔌 Protocol Support
+## 🏗️ The Agent Factory
 
-### A2A (Agent-to-Agent)
-Aegis implements an AgentCard discovery endpoint at `/.well-known/agent.json`. External bots can register tasks directly into the Inbox via the A2A ingestion endpoint.
+Aegis uses a **Factory Pattern** for agent management:
+- **Templates**: Read-only base code for an agent (cloned from GitHub). Located in `aegis_data/templates/`.
+- **Instances**: Isolated working copies spawned from templates. Each instance has its own `cwd` and configuration. Located in `aegis_data/instances/`.
 
-### MCP (Model Context Protocol)
-Aegis acts as an MCP Resource Server, exposing project workspaces, file systems, and tools to connected LLMs in a standardized, discoverable format.
+This allows you to have multiple distinct workers (e.g., a "Vue-Specialist" and a "Python-Guru") running from the same base OpenClaw code simultaneously.
 
 ---
 
-## 🏪 Agent Marketplace
+## ⛓️ DAG Workflows & Task Dependencies
 
-Manage your AI workforce directly from the dashboard:
-1. Click **🏪 Marketplace** in the header.
-2. Browse the **Registry** for available bots (OpenClaw, PicoClaw, Gemini CLI, etc.).
-3. Click **Install** to clone and configure the bot automatically.
-4. Monitor **Active Runtimes** to see live PIDs, memory usage, and streaming logs.
+Cards in Aegis are not just flat tasks. They can form complex **Directed Acyclic Graphs (DAGs)**:
+- Set `parent_ids` on a card to create a dependency.
+- The orchestrator automatically holds cards in the `Inbox` until all parents are `Done`.
+- Use the **Review** column as a human-in-the-loop gate before dependent tasks begin.
+
+---
+
+## 🔒 Security & RBAC
+
+Agents access your workspace via the **MCP (Model Context Protocol)** server. Aegis enforces **Role-Based Access Control (RBAC)**:
+- Define `permissions` in `agent_registry.json` (e.g., `read_workspace`, `write_workspace`, `git_commit`).
+- The MCP server validates the `x-aegis-agent` header on every tool call.
+- Agents cannot perform unauthorized file or system operations.
 
 ---
 
 ## ⚙️ Configuration
 
-Aegis is highly configurable via `aegis.config.json`:
-
-```json
-{
-  "orchestration_mode": "supervisor",
-  "polling_rate_ms": 5000,
-  "max_concurrent_agents": 4,
-  "rate_limits": {
-    "prompts_per_minute": 1,
-    "max_retries_on_fail": 3
-  },
-  "discord": {
-    "webhook_url": "YOUR_WEBHOOK_URL",
-    "notify_on_review": true
-  },
-  "mcp": {
-    "workspaces": ["./src", "./docs"]
-  }
-}
-```
-
----
-
-## 🛡️ Human-in-the-Loop
-
-Aegis enforces a strict security boundary:
-- **Agents** can move cards to `Review`.
-- **Humans** must click `✓ Approve & Complete` to move a card to `Done`.
-- **Validation** prevents agents from bypassing this gate via API.
+Managed via `aegis.config.json`. Key parameters:
+- `polling_rate_ms`: Frequency of the orchestrator loop.
+- `max_concurrent_agents`: System-wide cap on active processes.
+- `mcp.workspaces`: List of directories exposed to the agents.
 
 ---
 

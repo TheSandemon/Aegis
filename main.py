@@ -9,6 +9,7 @@ Architecture:
   Phase 3: Sandboxed Execution (Docker + Subprocess)
   Phase 4: Firebase State Sync (optional)
   Phase 5: Human-in-the-Loop Validation
+  Phase 6: Agent Registry & Process Manager
 """
 
 import json
@@ -35,6 +36,11 @@ logger = logging.getLogger("aegis")
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
+
+# ─── Agent Registry ──────────────────────────────────────────────────────────────
+REGISTRY_PATH = Path(__file__).parent / "agent_registry.json"
+with open(REGISTRY_PATH) as f:
+    AGENT_REGISTRY = json.load(f)
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # PERSISTENCE LAYER (Phase 4: Firebase or SQLite)
@@ -232,12 +238,16 @@ async def lifespan(app: FastAPI):
     # Start prompt broker
     await broker.start()
 
+    # Start agent process manager health polling
+    await process_manager.start_health_polling()
+
     # Start supervisor polling
     if CONFIG.get("orchestration_mode") == "supervisor":
         asyncio.create_task(polling_loop())
 
     yield
 
+    await process_manager.stop_health_polling()
     await broker.stop()
     logger.info("Aegis shutting down...")
 
@@ -250,6 +260,9 @@ from mcp_server import router as mcp_router
 
 app.include_router(a2a_router)
 app.include_router(mcp_router)
+
+# Wire broadcaster to process manager (deferred to avoid circular ref)
+# Will be set after process_manager is created below in Phase 6 section
 
 # Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -435,6 +448,89 @@ async def approve_card(card_id: int):
 async def get_broker_stats():
     """Returns the prompt broker queue and rate-limit statistics."""
     return broker.get_stats()
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# AGENT REGISTRY & PROCESS MANAGER (Phase 6)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+from agent_process_manager import AgentProcessManager, install_agent
+
+process_manager = AgentProcessManager(
+    broadcaster=None,  # Set after manager is created
+    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1)
+)
+process_manager.broadcaster = manager.broadcast  # Wire up WebSocket broadcaster
+
+
+@app.get("/api/registry")
+async def get_registry():
+    """Serves the agent registry catalog."""
+    # Annotate with install status
+    from agent_process_manager import AGENTS_DIR
+    registry = []
+    for agent in AGENT_REGISTRY:
+        entry = {**agent}
+        agent_dir = AGENTS_DIR / agent["id"]
+        entry["installed"] = agent_dir.exists()
+        # Check if running
+        proc = process_manager.active.get(agent["id"])
+        entry["runtime_status"] = proc.status if proc else "stopped"
+        registry.append(entry)
+    return registry
+
+
+@app.post("/api/agents/install/{agent_id}")
+async def install_agent_endpoint(agent_id: str):
+    """Clones the agent repo and runs setup commands."""
+    entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found in registry")
+    result = await install_agent(agent_id, entry)
+    return result
+
+
+@app.post("/api/agents/start/{agent_id}")
+async def start_agent_endpoint(agent_id: str):
+    """Start a registered agent process."""
+    entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_id), None)
+    if not entry:
+        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found in registry")
+    result = await process_manager.start_agent(agent_id, entry)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/agents/stop/{agent_id}")
+async def stop_agent_endpoint(agent_id: str):
+    """Stop a running agent process."""
+    result = await process_manager.stop_agent(agent_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/agents/active")
+async def get_active_agents():
+    """Lists all active/recent agent processes."""
+    return process_manager.get_all_active()
+
+
+@app.get("/api/agents/{agent_id}/status")
+async def get_agent_status(agent_id: str):
+    """Get status of a specific agent process."""
+    status = process_manager.get_status(agent_id)
+    if not status:
+        raise HTTPException(status_code=404, detail=f"No active process for '{agent_id}'")
+    return status
+
+
+@app.get("/api/agents/{agent_id}/logs")
+async def get_agent_logs(agent_id: str, tail: int = 100):
+    """Get recent logs for an agent process."""
+    logs = process_manager.get_logs(agent_id, tail)
+    return {"agent_id": agent_id, "logs": logs}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

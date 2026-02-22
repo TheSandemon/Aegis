@@ -822,8 +822,14 @@
             else if (card.status === 'completed') statusClass = 'status-completed';
             else if (card.column === 'Blocked') statusClass = 'status-blocked';
             
+            // Build hover preview
+            const preview = [card.title];
+            if (card.description) preview.push('', card.description.substring(0, 100) + (card.description.length > 100 ? '...' : ''));
+            if (card.assignee) preview.push('', 'Assigned: ' + card.assignee);
+            if (card.due_date) preview.push('', 'Due: ' + card.due_date);
+            
             return `
-                <div class="card" draggable="true" data-id="${card.id}">
+                <div class="card" draggable="true" data-id="${card.id}" title="${escapeHtml(preview.join('\n'))}">
                     <div class="card-title">${escapeHtml(card.title)}</div>
                     <div class="card-meta">
                         <div class="card-meta-left">

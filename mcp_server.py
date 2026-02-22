@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Optional, List
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
 
 logger = logging.getLogger("aegis.mcp")
@@ -57,8 +57,9 @@ async def list_resources():
 # ─── Tool Endpoints ──────────────────────────────────────────────────────────────
 
 @router.post("/tools/read_file")
-async def read_file(call: MCPToolCall):
+async def read_file(call: MCPToolCall, request: Request):
     """Reads a file from a permitted MCP workspace."""
+    _check_permission(request, "read_file")
     resolved = _validate_path(call.path)
     if not resolved.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {call.path}")
@@ -75,8 +76,9 @@ async def read_file(call: MCPToolCall):
 
 
 @router.post("/tools/write_file")
-async def write_file(call: MCPToolCall):
+async def write_file(call: MCPToolCall, request: Request):
     """Writes content to a file within a permitted MCP workspace."""
+    _check_permission(request, "write_file")
     if call.content is None:
         raise HTTPException(status_code=400, detail="Content is required for write operations")
 
@@ -96,8 +98,9 @@ async def write_file(call: MCPToolCall):
 
 
 @router.post("/tools/list_dir")
-async def list_directory(call: MCPToolCall):
+async def list_directory(call: MCPToolCall, request: Request):
     """Lists directory contents within a permitted MCP workspace."""
+    _check_permission(request, "list_dir")
     resolved = _validate_path(call.path)
     if not resolved.is_dir():
         raise HTTPException(status_code=404, detail=f"Directory not found: {call.path}")
@@ -116,7 +119,24 @@ async def list_directory(call: MCPToolCall):
     return {"path": str(resolved), "entries": entries}
 
 
-# ─── Path Validation ─────────────────────────────────────────────────────────────
+# ─── Path Validation & RBAC ──────────────────────────────────────────────────────
+
+def _check_permission(request: Request, required_perm: str):
+    """Verifies that the calling agent has the required permission."""
+    from main import AGENT_REGISTRY
+    
+    agent_id = request.headers.get("x-aegis-agent")
+    if not agent_id:
+        return  # Allow if no agent header is provided (e.g. human/UI)
+        
+    entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_id), None)
+    if entry:
+        perms = entry.get("permissions", [])
+        if required_perm not in perms:
+            raise HTTPException(
+                status_code=403, 
+                detail=f"Agent '{agent_id}' lacks permission: {required_perm}"
+            )
 
 def _validate_path(requested_path: str) -> Path:
     """Ensures the requested path falls within a permitted MCP workspace."""

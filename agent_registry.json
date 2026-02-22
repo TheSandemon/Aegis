@@ -20,7 +20,12 @@
             "env_vars_required": [
                 "ANTHROPIC_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "picoclaw",
@@ -41,7 +46,12 @@
             "working_dir": "./agents/picoclaw",
             "command": "./target/release/picoclaw",
             "env_vars_required": []
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "gemini-cli-agent",
@@ -64,7 +74,12 @@
             "env_vars_required": [
                 "GOOGLE_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "claude-code-agent",
@@ -87,7 +102,12 @@
             "env_vars_required": [
                 "ANTHROPIC_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "codex-agent",
@@ -110,6 +130,10 @@
             "env_vars_required": [
                 "OPENAI_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "list_dir"
+        ]
     }
 ]

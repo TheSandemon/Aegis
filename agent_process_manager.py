@@ -22,11 +22,13 @@ AGENTS_DIR.mkdir(exist_ok=True)
 class AgentProcess:
     """Tracks a single running agent process."""
 
-    def __init__(self, agent_id: str, pid: int, process: asyncio.subprocess.Process):
+    def __init__(self, agent_id: str, pid: int, process: asyncio.subprocess.Process, card_id: Optional[int] = None, color: str = "#6366f1"):
         self.agent_id = agent_id
         self.pid = pid
         self.process = process
         self.status = "running"
+        self.card_id = card_id
+        self.color = color
         self.started_at = datetime.now().isoformat()
         self.exit_code: Optional[int] = None
         self.logs: list[str] = []
@@ -37,6 +39,8 @@ class AgentProcess:
             "agent_id": self.agent_id,
             "pid": self.pid,
             "status": self.status,
+            "card_id": self.card_id,
+            "color": self.color,
             "started_at": self.started_at,
             "exit_code": self.exit_code,
             "log_count": len(self.logs),
@@ -76,10 +80,12 @@ class AgentProcessManager:
                 await self._health_task
             except asyncio.CancelledError:
                 pass
+            except Exception as e:
+                logger.error(f"Error stopping health polling: {e}")
 
     # ─── Lifecycle Methods ───────────────────────────────────────────────────
 
-    async def start_agent(self, agent_id: str, registry_entry: dict) -> dict:
+    async def start_agent(self, agent_id: str, registry_entry: dict, card_id: Optional[int] = None) -> dict:
         """Start an agent process from its registry definition."""
         if agent_id in self.active and self.active[agent_id].status == "running":
             return {"error": f"Agent '{agent_id}' is already running", "status": "already_running"}
@@ -87,6 +93,7 @@ class AgentProcessManager:
         exec_config = registry_entry.get("execution", {})
         working_dir = Path(exec_config.get("working_dir", ".")).resolve()
         command = exec_config.get("command", "")
+        color = registry_entry.get("color", "#6366f1")
 
         if not command:
             return {"error": "No command configured", "status": "error"}
@@ -96,6 +103,9 @@ class AgentProcessManager:
 
         env = os.environ.copy()
         env["AEGIS_AGENT_ID"] = agent_id
+        if card_id:
+            env["AEGIS_CARD_ID"] = str(card_id)
+            
         for var in exec_config.get("env_vars_required", []):
             if var not in env:
                 logger.warning(f"Missing env var '{var}' for agent '{agent_id}'")
@@ -109,7 +119,7 @@ class AgentProcessManager:
                 env=env
             )
 
-            agent_proc = AgentProcess(agent_id, process.pid, process)
+            agent_proc = AgentProcess(agent_id, process.pid, process, card_id, color)
             self.active[agent_id] = agent_proc
 
             # Start non-blocking log streaming
@@ -122,7 +132,9 @@ class AgentProcessManager:
                 await self.broadcaster({
                     "type": "agent_started",
                     "agent_id": agent_id,
-                    "pid": process.pid
+                    "pid": process.pid,
+                    "card_id": card_id,
+                    "color": color
                 })
 
             return agent_proc.to_dict()

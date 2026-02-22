@@ -725,13 +725,25 @@
         }
 
         async function loadConfig() {
-            const res = await fetch('/api/config');
-            config = await res.json();
+            try {
+                const res = await fetch('/api/config');
+                if (!res.ok) throw new Error('Failed to load config');
+                config = await res.json();
+            } catch (e) {
+                console.error('Error loading config:', e);
+                showToast('Failed to load configuration');
+            }
         }
 
         async function loadCards() {
-            const res = await fetch('/api/cards');
-            cards = await res.json();
+            try {
+                const res = await fetch('/api/cards');
+                if (!res.ok) throw new Error('Failed to load cards');
+                cards = await res.json();
+            } catch (e) {
+                console.error('Error loading cards:', e);
+                showToast('Failed to load cards');
+            }
         }
 
         function connectWebSocket() {

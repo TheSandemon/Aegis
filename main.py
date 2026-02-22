@@ -47,7 +47,8 @@ class AegisStore:
             "updated_at": datetime.now().isoformat(),
             "comments": [],
             "logs": [],
-            "status": "idle"
+            "status": "idle",
+            "activity": [{"action": "created", "timestamp": datetime.now().isoformat()}]
         }
         self.cards[card_id] = card
         return card
@@ -57,6 +58,13 @@ class AegisStore:
             return None
         self.cards[card_id].update(kwargs)
         self.cards[card_id]["updated_at"] = datetime.now().isoformat()
+        # Add activity log entry
+        if "activity" not in self.cards[card_id]:
+            self.cards[card_id]["activity"] = []
+        self.cards[card_id]["activity"].append({
+            "action": "updated",
+            "timestamp": datetime.now().isoformat()
+        })
         return self.cards[card_id]
     
     def get_cards(self, column: Optional[str] = None) -> list:

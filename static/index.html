@@ -121,6 +121,12 @@
             border-color: var(--accent);
         }
 
+        .shortcut-hint {
+            font-size: 0.7rem;
+            opacity: 0.5;
+            margin-left: 0.25rem;
+        }
+
         .search-wrapper {
             position: relative;
             display: inline-block;
@@ -631,12 +637,12 @@
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
-                <input type="text" class="header-search" id="searchInput" placeholder="Search cards..."
+                <input type="text" class="header-search" id="searchInput" placeholder="Search... (/)"
                     oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
-            <button onclick="openNewCardModal()">+ New Card</button>
+            <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
         </div>
     </header>
 
@@ -1170,6 +1176,29 @@
         });
 
         init();
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                openNewCardModal();
+            } else if (e.key === '/') {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+        });
+
+        // Close modals on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    modal.classList.remove('active');
+                });
+            }
+        });
     </script>
 </body>
 

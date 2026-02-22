@@ -1,0 +1,718 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Aegis - Multi-Agent Kanban</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        :root {
+            --bg-dark: #0f0f14;
+            --bg-card: #1a1a24;
+            --bg-column: #14141c;
+            --border: #2a2a3a;
+            --text-primary: #e4e4e7;
+            --text-secondary: #71717a;
+            --accent: #6366f1;
+            --accent-hover: #818cf8;
+            --inbox: #3b82f6;
+            --planned: #8b5cf6;
+            --in-progress: #f59e0b;
+            --blocked: #ef4444;
+            --review: #06b6d4;
+            --done: #22c55e;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: var(--bg-dark);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+        
+        header {
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            padding: 1rem 1.5rem;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        header h1 span {
+            color: var(--accent);
+        }
+        
+        .header-actions {
+            display: flex;
+            gap: 0.75rem;
+        }
+        
+        button {
+            background: var(--accent);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 500;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: var(--accent-hover);
+        }
+        
+        button.secondary {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+        }
+        
+        button.secondary:hover {
+            background: var(--border);
+        }
+        
+        .board {
+            display: flex;
+            gap: 1rem;
+            padding: 1.5rem;
+            height: calc(100vh - 73px);
+            overflow-x: auto;
+        }
+        
+        .column {
+            background: var(--bg-column);
+            border-radius: 0.75rem;
+            min-width: 280px;
+            max-width: 320px;
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .column-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .column-header h2 {
+            font-size: 0.875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .column-header .count {
+            background: var(--bg-card);
+            padding: 0.125rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .column-body {
+            padding: 0.75rem;
+            flex: 1;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+        
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            cursor: pointer;
+            transition: border-color 0.2s, transform 0.2s;
+        }
+        
+        .card:hover {
+            border-color: var(--accent);
+            transform: translateY(-1px);
+        }
+        
+        .card-title {
+            font-weight: 500;
+            margin-bottom: 0.5rem;
+        }
+        
+        .card-meta {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .card-assignee {
+            background: var(--accent);
+            color: white;
+            padding: 0.125rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.7rem;
+        }
+        
+        .card-status {
+            padding: 0.125rem 0.5rem;
+            border-radius: 1rem;
+            font-size: 0.7rem;
+        }
+        
+        .status-running {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+        }
+        
+        .status-completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+        
+        /* Column colors */
+        .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
+        .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
+        .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
+        .column[data-column="Blocked"] .column-header h2 { color: var(--blocked); }
+        .column[data-column="Review"] .column-header h2 { color: var(--review); }
+        .column[data-column="Done"] .column-header h2 { color: var(--done); }
+        
+        /* Modal */
+        .modal-overlay {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.7);
+            z-index: 100;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal-overlay.active {
+            display: flex;
+        }
+        
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 1rem;
+            width: 90%;
+            max-width: 600px;
+            max-height: 80vh;
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .modal-header h3 {
+            font-size: 1.125rem;
+        }
+        
+        .modal-close {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            font-size: 1.5rem;
+            cursor: pointer;
+            line-height: 1;
+        }
+        
+        .modal-body {
+            padding: 1rem;
+            flex: 1;
+            overflow-y: auto;
+        }
+        
+        .form-group {
+            margin-bottom: 1rem;
+        }
+        
+        .form-group label {
+            display: block;
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.5rem;
+        }
+        
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+        
+        .form-group textarea {
+            min-height: 100px;
+            resize: vertical;
+        }
+        
+        .modal-footer {
+            padding: 1rem;
+            border-top: 1px solid var(--border);
+            display: flex;
+            justify-content: flex-end;
+            gap: 0.5rem;
+        }
+        
+        /* Terminal viewer */
+        .terminal {
+            background: #0a0a0a;
+            border-radius: 0.5rem;
+            padding: 1rem;
+            font-family: 'Monaco', 'Menlo', monospace;
+            font-size: 0.75rem;
+            color: #22c55e;
+            max-height: 300px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+        }
+        
+        /* Toast notifications */
+        .toast-container {
+            position: fixed;
+            bottom: 1rem;
+            right: 1rem;
+            z-index: 200;
+        }
+        
+        .toast {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.75rem 1rem;
+            margin-top: 0.5rem;
+            animation: slideIn 0.3s ease;
+        }
+        
+        @keyframes slideIn {
+            from { transform: translateX(100%); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        
+        /* Drag and drop */
+        .card[draggable="true"] {
+            cursor: grab;
+        }
+        
+        .card.dragging {
+            opacity: 0.5;
+        }
+        
+        .column-body.drag-over {
+            background: rgba(99, 102, 241, 0.1);
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🛡️ <span>Aegis</span> - Multi-Agent Kanban</h1>
+        <div class="header-actions">
+            <button class="secondary" onclick="openSettings()">Settings</button>
+            <button onclick="openNewCardModal()">+ New Card</button>
+        </div>
+    </header>
+    
+    <div class="board" id="board">
+        <!-- Columns will be rendered here -->
+    </div>
+    
+    <!-- New Card Modal -->
+    <div class="modal-overlay" id="newCardModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3>New Card</h3>
+                <button class="modal-close" onclick="closeModal('newCardModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="cardTitle" placeholder="Task title...">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="cardDescription" placeholder="Task description..."></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Column</label>
+                    <select id="cardColumn">
+                        <option value="Inbox">Inbox</option>
+                        <option value="Planned">Planned</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Blocked">Blocked</option>
+                        <option value="Review">Review</option>
+                        <option value="Done">Done</option>
+                    </select>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('newCardModal')">Cancel</button>
+                <button onclick="createCard()">Create Card</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Card Detail Modal -->
+    <div class="modal-overlay" id="cardDetailModal">
+        <div class="modal">
+            <div class="modal-header">
+                <h3 id="detailTitle">Card Details</h3>
+                <button class="modal-close" onclick="closeModal('cardDetailModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="detailTitleInput">
+                </div>
+                <div class="form-group">
+                    <label>Description</label>
+                    <textarea id="detailDescription"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Assignee</label>
+                    <select id="detailAssignee">
+                        <option value="">Unassigned</option>
+                        <option value="architect">Architect</option>
+                        <option value="coder">Coder</option>
+                        <option value="researcher">Researcher</option>
+                        <option value="security">Security</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Column</label>
+                    <select id="detailColumn">
+                        <option value="Inbox">Inbox</option>
+                        <option value="Planned">Planned</option>
+                        <option value="In Progress">In Progress</option>
+                        <option value="Blocked">Blocked</option>
+                        <option value="Review">Review</option>
+                        <option value="Done">Done</option>
+                    </select>
+                </div>
+                <div class="form-group" id="terminalSection" style="display:none;">
+                    <label>Live Terminal Output</label>
+                    <div class="terminal" id="terminalOutput">Waiting for output...</div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="deleteCurrentCard()" style="margin-right:auto;color:#ef4444;">Delete</button>
+                <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
+                <button onclick="saveCardDetails()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="toast-container" id="toastContainer"></div>
+    
+    <script>
+        // State
+        let cards = [];
+        let config = {};
+        let ws = null;
+        let currentCardId = null;
+        
+        // Initialize
+        async function init() {
+            await loadConfig();
+            await loadCards();
+            connectWebSocket();
+            renderBoard();
+        }
+        
+        async function loadConfig() {
+            const res = await fetch('/api/config');
+            config = await res.json();
+        }
+        
+        async function loadCards() {
+            const res = await fetch('/api/cards');
+            cards = await res.json();
+        }
+        
+        function connectWebSocket() {
+            ws = new WebSocket(`ws://${location.host}/ws`);
+            
+            ws.onmessage = (event) => {
+                const data = JSON.parse(event.data);
+                handleWebSocketMessage(data);
+            };
+            
+            ws.onclose = () => {
+                setTimeout(connectWebSocket, 3000);
+            };
+        }
+        
+        function handleWebSocketMessage(data) {
+            switch(data.type) {
+                case 'card_created':
+                    cards.push(data.card);
+                    renderBoard();
+                    showToast('New card created');
+                    break;
+                case 'card_updated':
+                    const idx = cards.findIndex(c => c.id === data.card.id);
+                    if (idx !== -1) {
+                        cards[idx] = data.card;
+                        renderBoard();
+                    }
+                    break;
+                case 'card_deleted':
+                    cards = cards.filter(c => c.id !== data.card_id);
+                    renderBoard();
+                    break;
+                case 'card_assigned':
+                    showToast(`Card assigned to ${data.agent}`);
+                    break;
+            }
+        }
+        
+        function renderBoard() {
+            const board = document.getElementById('board');
+            board.innerHTML = '';
+            
+            const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
+            
+            columns.forEach(column => {
+                const columnCards = cards.filter(c => c.column === column);
+                
+                const colDiv = document.createElement('div');
+                colDiv.className = 'column';
+                colDiv.dataset.column = column;
+                colDiv.innerHTML = `
+                    <div class="column-header">
+                        <h2>${column} <span class="count">${columnCards.length}</span></h2>
+                    </div>
+                    <div class="column-body" data-column="${column}">
+                        ${columnCards.map(card => renderCard(card)).join('')}
+                    </div>
+                `;
+                
+                // Drag and drop
+                const colBody = colDiv.querySelector('.column-body');
+                colBody.addEventListener('dragover', handleDragOver);
+                colBody.addEventListener('drop', handleDrop);
+                colBody.addEventListener('dragleave', handleDragLeave);
+                
+                board.appendChild(colDiv);
+            });
+            
+            // Add drag listeners to cards
+            document.querySelectorAll('.card').forEach(card => {
+                card.addEventListener('dragstart', handleDragStart);
+                card.addEventListener('dragend', handleDragEnd);
+                card.addEventListener('click', () => openCardDetail(parseInt(card.dataset.id)));
+            });
+        }
+        
+        function renderCard(card) {
+            return `
+                <div class="card" draggable="true" data-id="${card.id}">
+                    <div class="card-title">${escapeHtml(card.title)}</div>
+                    <div class="card-meta">
+                        ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}
+                        ${card.status === 'running' ? '<span class="card-status status-running">Running</span>' : ''}
+                        ${card.status === 'completed' ? '<span class="card-status status-completed">Done</span>' : ''}
+                    </div>
+                </div>
+            `;
+        }
+        
+        // Drag and drop
+        let draggedCardId = null;
+        
+        function handleDragStart(e) {
+            draggedCardId = parseInt(e.target.dataset.id);
+            e.target.classList.add('dragging');
+        }
+        
+        function handleDragEnd(e) {
+            e.target.classList.remove('dragging');
+            document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over'));
+        }
+        
+        function handleDragOver(e) {
+            e.preventDefault();
+            e.currentTarget.classList.add('drag-over');
+        }
+        
+        function handleDragLeave(e) {
+            e.currentTarget.classList.remove('drag-over');
+        }
+        
+        async function handleDrop(e) {
+            e.preventDefault();
+            const column = e.currentTarget.dataset.column;
+            const card = cards.find(c => c.id === draggedCardId);
+            
+            if (card && card.column !== column) {
+                // Check HITL - can't move to Review without human
+                if (card.column !== 'Review' && column === 'Review') {
+                    showToast('HITL: Only humans can move to Review!');
+                    return;
+                }
+                
+                await fetch(`/api/cards/${card.id}`, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ column })
+                });
+            }
+            
+            draggedCardId = null;
+        }
+        
+        // Modal functions
+        function openNewCardModal() {
+            document.getElementById('newCardModal').classList.add('active');
+            document.getElementById('cardTitle').focus();
+        }
+        
+        async function createCard() {
+            const title = document.getElementById('cardTitle').value;
+            const description = document.getElementById('cardDescription').value;
+            const column = document.getElementById('cardColumn').value;
+            
+            if (!title) {
+                showToast('Title is required');
+                return;
+            }
+            
+            await fetch('/api/cards', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ title, description, column })
+            });
+            
+            closeModal('newCardModal');
+            document.getElementById('cardTitle').value = '';
+            document.getElementById('cardDescription').value = '';
+        }
+        
+        async function openCardDetail(cardId) {
+            currentCardId = cardId;
+            const card = cards.find(c => c.id === cardId);
+            
+            if (!card) return;
+            
+            document.getElementById('detailTitle').textContent = card.title;
+            document.getElementById('detailTitleInput').value = card.title;
+            document.getElementById('detailDescription').value = card.description || '';
+            document.getElementById('detailAssignee').value = card.assignee || '';
+            document.getElementById('detailColumn').value = card.column;
+            
+            // Show terminal if running
+            if (card.status === 'running') {
+                document.getElementById('terminalSection').style.display = 'block';
+                loadTerminalLogs(cardId);
+            } else {
+                document.getElementById('terminalSection').style.display = 'none';
+            }
+            
+            document.getElementById('cardDetailModal').classList.add('active');
+        }
+        
+        async function loadTerminalLogs(cardId) {
+            try {
+                const res = await fetch(`/api/sessions/${cardId}/logs`);
+                const data = await res.json();
+                document.getElementById('terminalOutput').textContent = data.logs.join('\n') || 'No logs yet...';
+            } catch(e) {
+                document.getElementById('terminalOutput').textContent = 'Loading logs...';
+            }
+        }
+        
+        async function saveCardDetails() {
+            const title = document.getElementById('detailTitleInput').value;
+            const description = document.getElementById('detailDescription').value;
+            const assignee = document.getElementById('detailAssignee').value;
+            const column = document.getElementById('detailColumn').value;
+            
+            await fetch(`/api/cards/${currentCardId}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ title, description, assignee, column })
+            });
+            
+            closeModal('cardDetailModal');
+        }
+        
+        async function deleteCurrentCard() {
+            if (confirm('Delete this card?')) {
+                await fetch(`/api/cards/${currentCardId}`, {method: 'DELETE'});
+                closeModal('cardDetailModal');
+            }
+        }
+        
+        function closeModal(id) {
+            document.getElementById(id).classList.remove('active');
+        }
+        
+        function openSettings() {
+            showToast('Settings coming soon!');
+        }
+        
+        // Toast notifications
+        function showToast(message) {
+            const container = document.getElementById('toastContainer');
+            const toast = document.createElement('div');
+            toast.className = 'toast';
+            toast.textContent = message;
+            container.appendChild(toast);
+            setTimeout(() => toast.remove(), 3000);
+        }
+        
+        // Utility
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // Close modals on overlay click
+        document.querySelectorAll('.modal-overlay').forEach(overlay => {
+            overlay.addEventListener('click', (e) => {
+                if (e.target === overlay) {
+                    overlay.classList.remove('active');
+                }
+            });
+        });
+        
+        // Start
+        init();
+    </script>
+</body>
+</html>

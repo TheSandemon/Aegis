@@ -1,0 +1,39 @@
+{
+  "polling_rate_ms": 5000,
+  "max_concurrent_agents": 4,
+  "isolation_mode": "strict",
+  "rate_limits": {
+    "prompts_per_minute": 1,
+    "max_retries_on_fail": 3
+  },
+  "columns": ["Inbox", "Planned", "In Progress", "Blocked", "Review", "Done"],
+  "agents": {
+    "architect": {
+      "binary": "openclaw",
+      "profile": "sys_arch",
+      "enabled": true
+    },
+    "coder": {
+      "binary": "gemini-cli",
+      "profile": "dev_mode",
+      "enabled": true
+    },
+    "researcher": {
+      "binary": "openclaw",
+      "profile": "research",
+      "enabled": false
+    },
+    "security": {
+      "binary": "openclaw",
+      "profile": "security",
+      "enabled": false
+    }
+  },
+  "orchestration_mode": "supervisor",
+  "database": "sqlite",
+  "fire_base": {
+    "enabled": false,
+    "project_id": "",
+    "credentials_path": ""
+  }
+}

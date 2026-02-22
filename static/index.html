@@ -341,6 +341,14 @@
         .column-body.drag-over {
             background: rgba(99, 102, 241, 0.1);
         }
+        
+        .empty-column {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            text-align: center;
+            padding: 2rem 1rem;
+            opacity: 0.5;
+        }
     </style>
 </head>
 <body>
@@ -523,7 +531,9 @@
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
                     </div>
                     <div class="column-body" data-column="${column}">
-                        ${columnCards.map(card => renderCard(card)).join('')}
+                        ${columnCards.length === 0 
+                            ? '<div class="empty-column">No cards</div>' 
+                            : columnCards.map(card => renderCard(card)).join('')}
                     </div>
                 `;
                 

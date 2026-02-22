@@ -398,6 +398,37 @@
         .card[draggable="true"] { cursor: grab; }
         .card.dragging { opacity: 0.5; }
         
+        /* Context menu */
+        .context-menu {
+            position: fixed;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.25rem;
+            min-width: 150px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.3);
+            z-index: 300;
+            display: none;
+        }
+        
+        .context-menu.visible { display: block; }
+        
+        .context-menu-item {
+            padding: 0.5rem 0.75rem;
+            font-size: 0.8rem;
+            cursor: pointer;
+            border-radius: 0.25rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .context-menu-item:hover {
+            background: var(--border);
+        }
+        
+        .context-menu-item.danger { color: #ef4444; }
+        
         /* Settings specific */
         .settings-section {
             margin-bottom: 1.5rem;
@@ -504,6 +535,17 @@
     </header>
     
     <div class="board" id="board"></div>
+    
+    <!-- Context Menu -->
+    <div class="context-menu" id="contextMenu">
+        <div class="context-menu-item" onclick="quickMoveCard('Inbox')">📥 Move to Inbox</div>
+        <div class="context-menu-item" onclick="quickMoveCard('Planned')">📋 Move to Planned</div>
+        <div class="context-menu-item" onclick="quickMoveCard('In Progress')">🔄 Move to In Progress</div>
+        <div class="context-menu-item" onclick="quickMoveCard('Blocked')">🚫 Move to Blocked</div>
+        <div class="context-menu-item" onclick="quickMoveCard('Review')">👀 Move to Review</div>
+        <div class="context-menu-item" onclick="quickMoveCard('Done')">✅ Move to Done</div>
+        <div class="context-menu-item danger" onclick="quickDeleteCard()">🗑️ Delete</div>
+    </div>
     
     <!-- New Card Modal -->
     <div class="modal-overlay" id="newCardModal">
@@ -954,6 +996,42 @@
                 clearInterval(terminalRefreshInterval);
                 terminalRefreshInterval = null;
             }
+        }
+        
+        // Context menu
+        let contextMenuCardId = null;
+        
+        document.addEventListener('contextmenu', (e) => {
+            const cardEl = e.target.closest('.card');
+            if (cardEl) {
+                e.preventDefault();
+                contextMenuCardId = parseInt(cardEl.dataset.id);
+                const menu = document.getElementById('contextMenu');
+                menu.style.left = e.pageX + 'px';
+                menu.style.top = e.pageY + 'px';
+                menu.classList.add('visible');
+            }
+        });
+        
+        document.addEventListener('click', () => {
+            document.getElementById('contextMenu').classList.remove('visible');
+        });
+        
+        async function quickMoveCard(column) {
+            if (!contextMenuCardId) return;
+            await fetch(`/api/cards/${contextMenuCardId}`, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ column })
+            });
+            document.getElementById('contextMenu').classList.remove('visible');
+        }
+        
+        async function quickDeleteCard() {
+            if (!contextMenuCardId) return;
+            if (!confirm('Delete this card?')) return;
+            await fetch(`/api/cards/${contextMenuCardId}`, {method: 'DELETE'});
+            document.getElementById('contextMenu').classList.remove('visible');
         }
         
         function showToast(message) {

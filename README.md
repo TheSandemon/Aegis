@@ -63,19 +63,35 @@ Click any card to see:
 
 ## Configuration
 
-Edit `aegis.config.json` to change:
+Click the **⚙️ Settings** button to:
+
+- **Enable/disable agents** - Toggle which AI agents can receive tasks
+- **Polling rate** - How often (in ms) to check for new tasks
+- **Max concurrent** - How many AI agents can work simultaneously
+
+Or edit `aegis.config.json` directly:
 
 ```json
 {
   "columns": ["Inbox", "Planned", "In Progress", "Blocked", "Review", "Done"],
-  "polling_rate_ms": 5000,        // How often to check for new tasks
-  "max_concurrent_agents": 4,    // How many AI can work at once
+  "polling_rate_ms": 5000,
+  "max_concurrent_agents": 4,
   "agents": {
     "architect": {"enabled": true},
     "coder": {"enabled": true}
   }
 }
 ```
+
+## Status Indicators
+
+- 🟢 **Live** - Connected to server in real-time
+- 🟡 **Connecting** - Trying to connect
+- 🔴 **Disconnected** - Server not responding
+
+Cards show:
+- **Assignee** - Which AI agent is working on it
+- **Age** - How long since last update (e.g., "2h", "3d")
 
 ## Troubleshooting
 
@@ -87,7 +103,7 @@ Edit `aegis.config.json` to change:
 - Edit `main.py` and change `port = 8080` to another number
 
 **AI not starting tasks**
-- Check `aegis.config.json` has agents enabled
+- Check Settings to ensure agents are enabled
 - Make sure your agent binary (openclaw, gemini) is in your PATH
 
 ## Stopping Aegis

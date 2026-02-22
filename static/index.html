@@ -498,6 +498,9 @@
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
+            <select id="assigneeFilter" class="header-search" style="width:120px" onchange="filterCards()">
+                <option value="">All Assignees</option>
+            </select>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -612,6 +615,7 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let assigneeFilter = '';
         
         async function init() {
             await loadConfig();
@@ -619,6 +623,14 @@
             await loadCards();
             connectWebSocket();
             renderBoard();
+            updateAssigneeFilter();
+        }
+        
+        function updateAssigneeFilter() {
+            const assignees = [...new Set(cards.map(c => c.assignee).filter(Boolean))];
+            const sel = document.getElementById('assigneeFilter');
+            sel.innerHTML = '<option value="">All Assignees</option>' + 
+                assignees.map(a => '<option value="' + a + '">' + a + '</option>').join('');
         }
         
         async function loadConfig() {
@@ -657,15 +669,17 @@
                 case 'card_created':
                     cards.push(data.card);
                     renderBoard();
+                    updateAssigneeFilter();
                     showToast('Card created');
                     break;
                 case 'card_updated':
                     const idx = cards.findIndex(c => c.id === data.card.id);
-                    if (idx !== -1) { cards[idx] = data.card; renderBoard(); }
+                    if (idx !== -1) { cards[idx] = data.card; renderBoard(); updateAssigneeFilter(); }
                     break;
                 case 'card_deleted':
                     cards = cards.filter(c => c.id !== data.card_id);
                     renderBoard();
+                    updateAssigneeFilter();
                     break;
                 case 'card_assigned':
                     showToast(`Card assigned to ${data.agent}`);
@@ -690,12 +704,14 @@
         
         function filterCards() {
             searchFilter = document.getElementById('searchInput').value;
+            assigneeFilter = document.getElementById('assigneeFilter').value;
             document.getElementById('searchClear').classList.toggle('visible', searchFilter.length > 0);
             renderBoard();
         }
         
         function clearSearch() {
             document.getElementById('searchInput').value = '';
+            document.getElementById('assigneeFilter').value = '';
             filterCards();
         }
         
@@ -715,6 +731,11 @@
                         c.title.toLowerCase().includes(filter) || 
                         (c.description && c.description.toLowerCase().includes(filter))
                     );
+                }
+                
+                // Apply assignee filter
+                if (assigneeFilter) {
+                    columnCards = columnCards.filter(c => c.assignee === assigneeFilter);
                 }
                 
                 const colDiv = document.createElement('div');

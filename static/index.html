@@ -757,6 +757,10 @@
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) {
                     overlay.classList.remove('active');
+                    if (terminalRefreshInterval) {
+                        clearInterval(terminalRefreshInterval);
+                        terminalRefreshInterval = null;
+                    }
                 }
             });
         });

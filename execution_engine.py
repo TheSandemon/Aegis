@@ -109,6 +109,14 @@ class SubprocessAdapter(ExecutionAdapter):
             working_dir = agent_config.get("execution", {}).get("working_dir", ".")
             working_dir = Path(working_dir).resolve()
 
+        # Cross-platform command adjustments
+        if os.name == "nt" and command.startswith("./"):
+            parts = command.split(" ", 1)
+            exe = parts[0].replace("/", "\\")
+            if not any(exe.endswith(ext) for ext in [".exe", ".bat", ".cmd"]):
+                exe += ".exe"
+            command = exe + (" " + parts[1] if len(parts) > 1 else "")
+
         process = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
@@ -368,16 +376,19 @@ class ExecutionEngine:
 
             store.update_card(card_id, status=status)
 
+            key = agent_proc.instance_id or agent_proc.agent_id
+
             if self.broadcaster:
                 await self.broadcaster({"type": "card_updated", "card": store.get_card(card_id)})
                 await self.broadcaster({
                     "type": "agent_status_changed",
                     "agent_id": agent_proc.agent_id,
+                    "instance_id": agent_proc.instance_id,
                     "status": status,
                     "exit_code": return_code
                 })
 
-            logger.info(f"Agent '{agent_proc.agent_id}' finished with status '{status}' (code: {return_code})")
+            logger.info(f"'{key}' finished with status '{status}' (code: {return_code})")
 
         except Exception as e:
             logger.error(f"Error waiting for agent '{agent_proc.agent_id}': {e}")
@@ -557,8 +568,12 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                 results.append({
                     "command": cmd,
                     "exit_code": setup_proc.returncode,
-                    "output": s_out.decode(errors="replace")[:500]
+                    "output": (s_out or s_err).decode(errors="replace")[:500]
                 })
+                if setup_proc.returncode != 0:
+                    import shutil
+                    shutil.rmtree(str(template_dir), ignore_errors=True)
+                    return {"status": "setup_failed", "error": f"Command '{cmd}' failed.", "details": results}
 
             logger.info(f"Installed template '{agent_id}' to {template_dir}")
             return {"status": "installed", "path": str(template_dir), "setup_results": results}
@@ -575,8 +590,10 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                 results.append({
                     "command": cmd,
                     "exit_code": setup_proc.returncode,
-                    "output": s_out.decode(errors="replace")[:500]
+                    "output": (s_out or s_err).decode(errors="replace")[:500]
                 })
+                if setup_proc.returncode != 0:
+                    return {"status": "setup_failed", "error": f"Command '{cmd}' failed.", "details": results}
 
             template_dir.mkdir(parents=True, exist_ok=True)
             (template_dir / ".installed").write_text(datetime.now().isoformat())

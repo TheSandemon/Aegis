@@ -161,6 +161,36 @@
             font-size: 0.7rem;
         }
         
+        .quick-create {
+            display: none;
+            padding: 0.75rem 1rem;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+            gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .quick-create.visible { display: flex; }
+        
+        .quick-create input {
+            flex: 1;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+        
+        .quick-create select {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+        }
+        
         .board {
             display: flex;
             gap: 1rem;
@@ -503,6 +533,16 @@
         </div>
     </header>
     
+    <div class="quick-create" id="quickCreate">
+        <input type="text" id="quickTitle" placeholder="Quick add card... (Press Enter)" onkeydown="handleQuickCreate(event)">
+        <select id="quickColumn">
+            <option value="Inbox">Inbox</option>
+            <option value="Planned">Planned</option>
+            <option value="In Progress">In Progress</option>
+        </select>
+        <button onclick="submitQuickCard()">Add</button>
+    </div>
+    
     <div class="board" id="board"></div>
     
     <!-- New Card Modal -->
@@ -613,12 +653,50 @@
         let terminalRefreshInterval = null;
         let searchFilter = '';
         
+        // Quick create
+        function showQuickCreate() {
+            document.getElementById('quickCreate').classList.add('visible');
+            document.getElementById('quickTitle').focus();
+        }
+        
+        function hideQuickCreate() {
+            document.getElementById('quickCreate').classList.remove('visible');
+            document.getElementById('quickTitle').value = '';
+        }
+        
+        function handleQuickCreate(e) {
+            if (e.key === 'Enter') submitQuickCard();
+            if (e.key === 'Escape') hideQuickCreate();
+        }
+        
+        async function submitQuickCard() {
+            const title = document.getElementById('quickTitle').value.trim();
+            const column = document.getElementById('quickColumn').value;
+            if (!title) { hideQuickCreate(); return; }
+            
+            await fetch('/api/cards', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({ title, column })
+            });
+            
+            hideQuickCreate();
+            showToast('Card created');
+        }
+        
         async function init() {
             await loadConfig();
             populateColumnSelects();
             await loadCards();
             connectWebSocket();
             renderBoard();
+            
+            // Global keyboard shortcuts
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'c' && !e.target.matches('input, textarea')) {
+                    showQuickCreate();
+                }
+            });
         }
         
         async function loadConfig() {

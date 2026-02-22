@@ -339,6 +339,15 @@
             gap: 0.5rem;
         }
         
+        kbd {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.25rem;
+            padding: 0.125rem 0.375rem;
+            font-family: monospace;
+            font-size: 0.75rem;
+        }
+        
         .form-group { margin-bottom: 1rem; }
         
         .form-group label {
@@ -490,6 +499,7 @@
     <header>
         <div class="header-left">
             <h1>🛡️ <span>Aegis</span></h1>
+            <button class="small secondary" onclick="toggleTheme()">🌓</button>
             <div class="connection-status">
                 <div class="status-dot" id="wsStatus"></div>
                 <span id="wsStatusText">Connecting...</span>
@@ -501,6 +511,7 @@
                 <button class="search-clear" id="searchClear" onclick="clearFilters()">×</button>
             </div>
             <button class="secondary" id="clearFiltersBtn" onclick="clearFilters()" style="display:none">Clear Filters</button>
+            <button class="secondary" onclick="document.getElementById('shortcutsModal').classList.add('active')" title="Keyboard shortcuts">⌨️</button>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -571,6 +582,27 @@
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Keyboard Shortcuts Modal -->
+    <div class="modal-overlay" id="shortcutsModal">
+        <div class="modal" style="max-width: 400px;">
+            <div class="modal-header">
+                <h3>⌨️ Keyboard Shortcuts</h3>
+                <button class="modal-close" onclick="closeModal('shortcutsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem"><span>Focus search</span><kbd>/</kbd></div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem"><span>New card</span><kbd>n</kbd></div>
+                    <div style="display:flex;justify-content:space-between;margin-bottom:0.5rem"><span>Close modal / blur</span><kbd>Esc</kbd></div>
+                    <div style="display:flex;justify-content:space-between"><span>Open card details</span><kbd>Click</kbd></div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button onclick="closeModal('shortcutsModal')">Close</button>
             </div>
         </div>
     </div>

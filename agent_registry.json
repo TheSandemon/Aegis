@@ -9,14 +9,23 @@
         "license": "MIT",
         "icon": "🦞",
         "installation": {
-            "method": "mock_local",
-            "setup_commands": []
+            "method": "git_clone",
+            "setup_commands": [
+                "npm install"
+            ]
         },
         "execution": {
             "working_dir": "./agents/openclaw-core",
-            "command": "python openclaw_mock.py",
-            "env_vars_required": []
-        }
+            "command": "node index.js",
+            "env_vars_required": [
+                "ANTHROPIC_API_KEY"
+            ]
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "picoclaw",
@@ -28,14 +37,21 @@
         "license": "MIT",
         "icon": "🦀",
         "installation": {
-            "method": "mock_local",
-            "setup_commands": []
+            "method": "git_clone",
+            "setup_commands": [
+                "cargo build --release"
+            ]
         },
         "execution": {
             "working_dir": "./agents/picoclaw",
-            "command": "python picoclaw_mock.py",
+            "command": "./target/release/picoclaw",
             "env_vars_required": []
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "gemini-cli-agent",
@@ -58,7 +74,12 @@
             "env_vars_required": [
                 "GOOGLE_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "claude-code-agent",
@@ -81,7 +102,12 @@
             "env_vars_required": [
                 "ANTHROPIC_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
+            "list_dir"
+        ]
     },
     {
         "id": "codex-agent",
@@ -104,6 +130,10 @@
             "env_vars_required": [
                 "OPENAI_API_KEY"
             ]
-        }
+        },
+        "permissions": [
+            "read_file",
+            "list_dir"
+        ]
     }
 ]

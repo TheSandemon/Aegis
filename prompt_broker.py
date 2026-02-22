@@ -45,6 +45,7 @@ class PromptBroker:
             "total_failed": 0,
             "total_retried": 0,
             "dead_letters": 0,
+            "estimated_tokens": 0,
         }
 
     async def start(self):
@@ -69,6 +70,7 @@ class PromptBroker:
     async def submit(self, request: PromptRequest):
         """Submit a prompt request to the queue."""
         self._stats["total_submitted"] += 1
+        self._stats["estimated_tokens"] += len(str(request.prompt)) // 4
         await self.queue.put(request)
         logger.info(
             f"Broker: Queued prompt for card {request.card_id} "

@@ -42,6 +42,11 @@ REGISTRY_PATH = Path(__file__).parent / "agent_registry.json"
 with open(REGISTRY_PATH) as f:
     AGENT_REGISTRY = json.load(f)
 
+# Default colors for agents if not specified
+AGENT_COLORS = [
+    "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"
+]
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # PERSISTENCE LAYER (Phase 4: Firebase or SQLite)
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -66,18 +71,32 @@ class AegisStore:
                     updated_at TEXT NOT NULL,
                     status TEXT DEFAULT 'idle',
                     logs TEXT DEFAULT '[]',
-                    comments TEXT DEFAULT '[]'
+                    comments TEXT DEFAULT '[]',
+                    depends_on TEXT DEFAULT '[]',
+                    priority TEXT DEFAULT 'normal'
                 )
             """)
             conn.commit()
+            # Migration: add new columns to existing tables
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN depends_on TEXT DEFAULT "[]"')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN priority TEXT DEFAULT "normal"')
+            except sqlite3.OperationalError:
+                pass
+            conn.commit()
 
-    def create_card(self, title, description="", column="Inbox", assignee=None):
+    def create_card(self, title, description="", column="Inbox", assignee=None, **kwargs):
         now = datetime.now().isoformat()
+        depends_on = kwargs.get("depends_on", "[]")
+        priority = kwargs.get("priority", "normal")
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
-                (title, description, column, assignee, now, now)
+                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at, depends_on, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
+                (title, description, column, assignee, now, now, depends_on, priority)
             )
             conn.commit()
             return self.get_card(cursor.lastrowid)
@@ -102,6 +121,7 @@ class AegisStore:
             card = dict(row)
             card["comments"] = json.loads(card.get("comments", "[]"))
             card["logs"] = json.loads(card.get("logs", "[]"))
+            card["depends_on"] = json.loads(card.get("depends_on", "[]"))
             return card
 
     def get_cards(self, column=None):
@@ -116,6 +136,7 @@ class AegisStore:
                 card = dict(row)
                 card["comments"] = json.loads(card.get("comments", "[]"))
                 card["logs"] = json.loads(card.get("logs", "[]"))
+                card["depends_on"] = json.loads(card.get("depends_on", "[]"))
                 cards.append(card)
             return cards
 
@@ -168,13 +189,16 @@ manager = ConnectionManager()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# EXECUTION MANAGER (Phase 3) & PROMPT BROKER (Phase 2)
+# UNIFIED EXECUTION ENGINE & PROMPT BROKER
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-from execution import ExecutionManager
+from execution_engine import ExecutionEngine, install_agent, AGENTS_DIR
 from prompt_broker import PromptBroker
 
-execution_manager = ExecutionManager()
+engine = ExecutionEngine(
+    broadcaster=None,  # Wired after ConnectionManager
+    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1)
+)
 
 broker = PromptBroker(
     prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1),
@@ -238,8 +262,8 @@ async def lifespan(app: FastAPI):
     # Start prompt broker
     await broker.start()
 
-    # Start agent process manager health polling
-    await process_manager.start_health_polling()
+    # Start unified execution engine health polling
+    await engine.start_health_polling()
 
     # Start supervisor polling
     if CONFIG.get("orchestration_mode") == "supervisor":
@@ -247,7 +271,7 @@ async def lifespan(app: FastAPI):
 
     yield
 
-    await process_manager.stop_health_polling()
+    await engine.stop_health_polling()
     await broker.stop()
     logger.info("Aegis shutting down...")
 
@@ -261,8 +285,8 @@ from mcp_server import router as mcp_router
 app.include_router(a2a_router)
 app.include_router(mcp_router)
 
-# Wire broadcaster to process manager (deferred to avoid circular ref)
-# Will be set after process_manager is created below in Phase 6 section
+# Wire broadcaster to execution engine
+engine.broadcaster = manager.broadcast
 
 # Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -277,6 +301,8 @@ class CardCreate(BaseModel):
     description: str = ""
     column: str = "Inbox"
     assignee: Optional[str] = None
+    depends_on: Optional[list[int]] = None
+    priority: str = "normal"
 
 class CardUpdate(BaseModel):
     title: Optional[str] = None
@@ -284,6 +310,8 @@ class CardUpdate(BaseModel):
     column: Optional[str] = None
     assignee: Optional[str] = None
     status: Optional[str] = None
+    depends_on: Optional[list[int]] = None
+    priority: Optional[str] = None
 
 class CommentCreate(BaseModel):
     author: str
@@ -319,7 +347,12 @@ async def get_cards(column: Optional[str] = None):
 
 @app.post("/api/cards")
 async def create_card(card: CardCreate):
-    new_card = store.create_card(card.title, card.description, card.column, card.assignee)
+    create_kwargs = {}
+    if card.depends_on is not None:
+        create_kwargs["depends_on"] = json.dumps(card.depends_on)
+    if card.priority:
+        create_kwargs["priority"] = card.priority
+    new_card = store.create_card(card.title, card.description, card.column, card.assignee, **create_kwargs)
     await manager.broadcast({"type": "card_created", "card": new_card})
     return new_card
 
@@ -342,6 +375,10 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
 
     updates = update.model_dump(exclude_none=True)
 
+    # Serialize depends_on as JSON string for SQLite
+    if "depends_on" in updates:
+        updates["depends_on"] = json.dumps(updates["depends_on"])
+
     # ── Phase 5: State-transition validation ──
     new_column = updates.get("column")
     if new_column and new_column != existing["column"]:
@@ -363,7 +400,7 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
             )
 
         # Lifecycle hook: auto-kill running agent on Review/Done
-        await execution_manager.lifecycle_hook(card_id, new_column, store, manager.broadcast)
+        await engine.lifecycle_hook(card_id, new_column, store, manager.broadcast)
 
     card = store.update_card(card_id, **updates)
     await manager.broadcast({"type": "card_updated", "card": card})
@@ -380,6 +417,26 @@ async def delete_card(card_id: int):
         await manager.broadcast({"type": "card_deleted", "card_id": card_id})
         return {"success": True}
     raise HTTPException(status_code=404, detail="Card not found")
+
+@app.get("/api/cards/{card_id}/diff")
+async def get_card_diff(card_id: int):
+    """
+    Returns the current git diff of the workspace to review agent changes.
+    Used during the Review phase before transitioning to Done.
+    """
+    try:
+        import subprocess
+        proc = await asyncio.create_subprocess_exec(
+            "git", "diff",
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            return {"diff": f"Failed to get git diff: {stderr.decode()}"}
+        return {"diff": stdout.decode()}
+    except Exception as e:
+        return {"diff": f"Error running git diff: {str(e)}"}
 
 
 # ─── Comments ────────────────────────────────────────────────────────────────────
@@ -408,7 +465,7 @@ async def add_comment(card_id: int, comment: CommentCreate):
 
 @app.delete("/api/cards/{card_id}/agent")
 async def stop_card_agent(card_id: int):
-    if await execution_manager.stop_agent(card_id):
+    if await engine.stop_by_card(card_id):
         return {"success": True}
     raise HTTPException(status_code=404, detail="No running agent found for this card")
 
@@ -451,38 +508,19 @@ async def get_broker_stats():
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# AGENT REGISTRY & PROCESS MANAGER (Phase 6)
+# AGENT REGISTRY & MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════════════
-
-from agent_process_manager import AgentProcessManager, install_agent
-
-process_manager = AgentProcessManager(
-    broadcaster=None,  # Set after manager is created
-    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1)
-)
-process_manager.broadcaster = manager.broadcast  # Wire up WebSocket broadcaster
-
 
 @app.get("/api/registry")
 async def get_registry():
     """Serves the agent registry catalog."""
-    # Annotate with install status and active instances
-    from agent_process_manager import AGENTS_DIR
     registry = []
-    
-    # Pre-calculate active instances per agent
-    active_procs = process_manager.get_all_active()
-    active_counts = {}
-    for proc in active_procs:
-        if proc["status"] == "running":
-            a_id = proc["agent_id"]
-            active_counts[a_id] = active_counts.get(a_id, 0) + 1
-
     for agent in AGENT_REGISTRY:
         entry = {**agent}
         agent_dir = AGENTS_DIR / agent["id"]
         entry["installed"] = agent_dir.exists()
-        entry["active_instances"] = active_counts.get(agent["id"], 0)
+        proc = engine.active.get(agent["id"])
+        entry["runtime_status"] = proc.status if proc else "stopped"
         registry.append(entry)
     return registry
 
@@ -503,16 +541,17 @@ async def start_agent_endpoint(agent_id: str):
     entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_id), None)
     if not entry:
         raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found in registry")
-    result = await process_manager.start_agent(agent_id, entry)
+    # Use the unified engine to start agent
+    result = await engine.run_agent(0, agent_id, CONFIG.get("agents", {}).get(agent_id, {}), {"id": 0, "title": "Manual Start"}, store, entry)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
 
-@app.post("/api/agents/stop/{instance_id}")
-async def stop_agent_endpoint(instance_id: str):
-    """Stop a running agent process instance."""
-    result = await process_manager.stop_agent(instance_id)
+@app.post("/api/agents/stop/{agent_id}")
+async def stop_agent_endpoint(agent_id: str):
+    """Stop a running agent process."""
+    result = await engine.stop_agent(agent_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -521,23 +560,113 @@ async def stop_agent_endpoint(instance_id: str):
 @app.get("/api/agents/active")
 async def get_active_agents():
     """Lists all active/recent agent processes."""
-    return process_manager.get_all_active()
+    return engine.get_all_active()
 
 
-@app.get("/api/agents/{instance_id}/status")
-async def get_agent_status(instance_id: str):
-    """Get status of a specific agent process instance."""
-    status = process_manager.get_status(instance_id)
+@app.get("/api/agents/{agent_id}/status")
+async def get_agent_status(agent_id: str):
+    """Get status of a specific agent process."""
+    status = engine.get_status(agent_id)
     if not status:
-        raise HTTPException(status_code=404, detail=f"No active process for '{instance_id}'")
+        raise HTTPException(status_code=404, detail=f"No active process for '{agent_id}'")
     return status
 
 
-@app.get("/api/agents/{instance_id}/logs")
-async def get_agent_logs(instance_id: str, tail: int = 100):
-    """Get recent logs for an agent process instance."""
-    logs = process_manager.get_logs(instance_id, tail)
-    return {"instance_id": instance_id, "logs": logs}
+@app.get("/api/agents/logs")
+async def get_agent_logs(agent_id: str, tail: int = 100):
+    """Get recent logs for an agent process."""
+    logs = engine.get_logs(agent_id, tail)
+    return {"agent_id": agent_id, "logs": logs}
+
+
+@app.get("/api/agents/params")
+async def get_agent_params():
+    """Returns the current parameters for all agents from config."""
+    agents = CONFIG.get("agents", {})
+    # Enrich with registry data and current status
+    enriched = {}
+    
+    # Get all from registry first to know available agents
+    for idx, reg_agent in enumerate(AGENT_REGISTRY):
+        aid = reg_agent["id"]
+        conf = agents.get(aid, {})
+        
+        # Determine color
+        color = conf.get("color") or reg_agent.get("color") or AGENT_COLORS[idx % len(AGENT_COLORS)]
+        
+        enriched[aid] = {
+            "name": reg_agent.get("name", aid),
+            "description": reg_agent.get("description", ""),
+            "color": color,
+            "params": conf, # Current config (enabled, profile, etc)
+            "status": "idle"
+        }
+        
+    # Overwrite with runtime status
+    active = engine.get_all_active()
+    for proc in active:
+        aid = proc["agent_id"]
+        if aid in enriched:
+            enriched[aid]["status"] = proc["status"]
+            enriched[aid]["pid"] = proc["pid"]
+            
+    # Also check if any card is currently assigned
+    cards = store.get_cards()
+    for card in cards:
+        if card.get("assignee") and card.get("status") == "running":
+            aid = card["assignee"]
+            if aid in enriched:
+                enriched[aid]["current_card"] = {
+                    "id": card["id"],
+                    "title": card["title"]
+                }
+
+    return enriched
+
+
+@app.post("/api/agents/params/{agent_id}")
+async def update_agent_params(agent_id: str, updates: dict):
+    """Update parameters for a specific agent in aegis.config.json."""
+    global CONFIG
+    if "agents" not in CONFIG:
+        CONFIG["agents"] = {}
+    if agent_id not in CONFIG["agents"]:
+        CONFIG["agents"][agent_id] = {}
+        
+    CONFIG["agents"][agent_id].update(updates)
+    
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(CONFIG, f, indent=2)
+        
+    # Broadcast the change
+    await manager.broadcast({
+        "type": "agent_params_updated",
+        "agent_id": agent_id,
+        "params": CONFIG["agents"][agent_id]
+    })
+    
+    return {"success": True, "params": CONFIG["agents"][agent_id]}
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# TELEMETRY
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/telemetry")
+async def get_telemetry():
+    """Returns combined telemetry data from PromptBroker and ExecutionEngine."""
+    raw = broker.get_stats()
+    broker_stats = {
+        "submitted": raw.get("total_submitted", 0),
+        "processed": raw.get("total_processed", 0),
+        "failed": raw.get("total_failed", 0),
+        "retried": raw.get("total_retried", 0),
+        "queue_depth": raw.get("queue_depth", 0),
+        "dead_letters": raw.get("dead_letter_count", 0),
+        "estimated_tokens": raw.get("estimated_tokens", 0),
+    }
+    agent_data = engine.get_all_active()
+    return {"broker": broker_stats, "agents": agent_data}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -564,12 +693,17 @@ async def websocket_endpoint(websocket: WebSocket):
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 async def polling_loop():
-    """Polls for unassigned tasks in Planned column and routes to agents."""
+    """Polls for unassigned tasks in Planned column and routes to agents.
+    Supports DAG dependencies — cards with unresolved depends_on are skipped.
+    Cards are dispatched in priority order (high > normal > low).
+    """
+    priority_order = {"high": 0, "normal": 1, "low": 2}
+
     while True:
         try:
             await asyncio.sleep(CONFIG.get("polling_rate_ms", 5000) / 1000)
 
-            running_count = len(execution_manager.running_tasks)
+            running_count = len(engine.running_tasks)
             max_agents = CONFIG.get("max_concurrent_agents", 4)
 
             if running_count < max_agents:
@@ -578,12 +712,25 @@ async def polling_loop():
                     if not c.get("assignee")
                 ]
 
+                # Sort by priority (high first)
+                planned_cards.sort(key=lambda c: priority_order.get(c.get("priority", "normal"), 1))
+
+                # Get all done card IDs for dependency checking
+                done_ids = {c["id"] for c in store.get_cards(column="Done")}
+
                 for card in planned_cards:
-                    if len(execution_manager.running_tasks) >= max_agents:
+                    if len(engine.running_tasks) >= max_agents:
                         break
+
+                    # DAG check: skip if any dependency is not yet Done
+                    deps = card.get("depends_on", [])
+                    if deps and not all(d in done_ids for d in deps):
+                        continue
 
                     for agent_name, agent_config in CONFIG.get("agents", {}).items():
                         if agent_config.get("enabled"):
+                            registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_name), None)
+
                             store.update_card(card["id"], assignee=agent_name, status="assigned")
                             logger.info(f"Routed card {card['id']} to {agent_name}")
                             await manager.broadcast({
@@ -592,10 +739,11 @@ async def polling_loop():
                                 "agent": agent_name
                             })
 
+                            # Single unified call — tracks process, streams logs, broadcasts status
                             asyncio.create_task(
-                                execution_manager.run_agent(
+                                engine.run_agent(
                                     card["id"], agent_name, agent_config,
-                                    card, store, manager.broadcast
+                                    card, store, registry_entry
                                 )
                             )
                             break

@@ -503,6 +503,7 @@
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
+            <button class="secondary" onclick="clearDoneCards()" title="Move all Done cards to archive">📦 Archive Done</button>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -702,6 +703,19 @@
         function clearSearch() {
             document.getElementById('searchInput').value = '';
             filterCards();
+        }
+        
+        async function clearDoneCards() {
+            const doneCards = cards.filter(c => c.column === 'Done');
+            if (doneCards.length === 0) { showToast('No Done cards to archive'); return; }
+            if (!confirm('Archive ' + doneCards.length + ' Done card(s)? This cannot be undone.')) return;
+            
+            let archived = 0;
+            for (const card of doneCards) {
+                await fetch('/api/cards/' + card.id, { method: 'DELETE' });
+                archived++;
+            }
+            showToast('Archived ' + archived + ' card(s)');
         }
         
         function renderBoard() {

@@ -6,10 +6,17 @@
     "prompts_per_minute": 1,
     "max_retries_on_fail": 3
   },
-  "columns": ["Inbox", "Planned", "In Progress", "Blocked", "Review", "Done"],
+  "columns": [
+    "Inbox",
+    "Planned",
+    "In Progress",
+    "Blocked",
+    "Review",
+    "Done"
+  ],
   "agents": {
     "architect": {
-      "binary": "openclaw",
+      "binary": "python mock_agent.py",
       "profile": "sys_arch",
       "enabled": true
     },

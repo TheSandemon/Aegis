@@ -27,49 +27,91 @@ CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
 with open(CONFIG_PATH) as f:
     CONFIG = json.load(f)
 
-# In-memory data store (SQLite-like for now)
+import sqlite3
+
+# Persistent data store (SQLite)
 class AegisStore:
-    def __init__(self):
-        self.cards: dict = {}
-        self.sessions: dict = {}
-        self.next_card_id = 1
+    def __init__(self, db_path: str = "aegis.db"):
+        self.db_path = db_path
+        self._init_db()
         
+    def _init_db(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS cards (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    title TEXT NOT NULL,
+                    description TEXT,
+                    "column" TEXT NOT NULL,
+                    assignee TEXT,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    status TEXT DEFAULT 'idle',
+                    logs TEXT DEFAULT '[]',
+                    comments TEXT DEFAULT '[]'
+                )
+            """)
+            conn.commit()
+
     def create_card(self, title: str, description: str = "", column: str = "Inbox", assignee: Optional[str] = None) -> dict:
-        card_id = self.next_card_id
-        self.next_card_id += 1
-        card = {
-            "id": card_id,
-            "title": title,
-            "description": description,
-            "column": column,
-            "assignee": assignee,
-            "created_at": datetime.now().isoformat(),
-            "updated_at": datetime.now().isoformat(),
-            "comments": [],
-            "logs": [],
-            "status": "idle"
-        }
-        self.cards[card_id] = card
-        return card
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            cursor = conn.execute(
+                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)',
+                (title, description, column, assignee, now, now)
+            )
+            card_id = cursor.lastrowid
+            conn.commit()
+            return self.get_card(card_id)
     
     def update_card(self, card_id: int, **kwargs) -> Optional[dict]:
-        if card_id not in self.cards:
-            return None
-        self.cards[card_id].update(kwargs)
-        self.cards[card_id]["updated_at"] = datetime.now().isoformat()
-        return self.cards[card_id]
+        if not kwargs:
+            return self.get_card(card_id)
+            
+        kwargs["updated_at"] = datetime.now().isoformat()
+        fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
+        values = list(kwargs.values()) + [card_id]
+        
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(f'UPDATE cards SET {fields} WHERE id = ?', values)
+            conn.commit()
+            
+        return self.get_card(card_id)
     
+    def get_card(self, card_id: int) -> Optional[dict]:
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT * FROM cards WHERE id = ?', (card_id,)).fetchone()
+            if not row:
+                return None
+            card = dict(row)
+            # Deserialize JSON fields
+            card["comments"] = json.loads(card.get("comments", "[]"))
+            card["logs"] = json.loads(card.get("logs", "[]"))
+            return card
+
     def get_cards(self, column: Optional[str] = None) -> list:
-        cards = list(self.cards.values())
-        if column:
-            cards = [c for c in cards if c["column"] == column]
-        return cards
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            if column:
+                rows = conn.execute('SELECT * FROM cards WHERE "column" = ?', (column,)).fetchall()
+            else:
+                rows = conn.execute('SELECT * FROM cards').fetchall()
+            
+            cards = []
+            for row in rows:
+                card = dict(row)
+                card["comments"] = json.loads(card.get("comments", "[]"))
+                card["logs"] = json.loads(card.get("logs", "[]"))
+                cards.append(card)
+            return cards
     
     def delete_card(self, card_id: int) -> bool:
-        if card_id in self.cards:
-            del self.cards[card_id]
-            return True
-        return False
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('DELETE FROM cards WHERE id = ?', (card_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
 # Global store instance
 store = AegisStore()
@@ -166,7 +208,7 @@ async def create_card(card: CardCreate):
 
 @app.get("/api/cards/{card_id}")
 async def get_card(card_id: int):
-    card = store.cards.get(card_id)
+    card = store.get_card(card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
@@ -188,28 +230,129 @@ async def delete_card(card_id: int):
 
 @app.post("/api/cards/{card_id}/comments")
 async def add_comment(card_id: int, comment: CommentCreate):
-    card = store.cards.get(card_id)
+    card = store.get_card(card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
+    
     comment_obj = {
         "author": comment.author,
         "content": comment.content,
         "timestamp": datetime.now().isoformat()
     }
-    card["comments"].append(comment_obj)
+    
+    comments = card.get("comments", [])
+    comments.append(comment_obj)
+    
+    store.update_card(card_id, comments=json.dumps(comments))
+    
     await manager.broadcast({"type": "comment_added", "card_id": card_id, "comment": comment_obj})
     return comment_obj
 
-@app.get("/api/sessions")
-async def get_sessions():
-    return store.sessions
+class AgentManager:
+    def __init__(self):
+        self.running_tasks = {}
 
-@app.get("/api/sessions/{session_id}/logs")
-async def get_session_logs(session_id: int):
-    session = store.sessions.get(session_id)
-    if not session:
-        raise HTTPException(status_code=404, detail="Session not found")
-    return {"logs": session.get("logs", [])}
+    async def run_agent(self, card_id: int, agent_name: str):
+        agent_config = CONFIG.get("agents", {}).get(agent_name)
+        if not agent_config:
+            return
+
+        command = agent_config.get("binary")
+        card = store.get_card(card_id)
+        
+        # Inject context via environment variables
+        env = os.environ.copy()
+        env["AEGIS_CARD_ID"] = str(card_id)
+        env["AEGIS_CARD_TITLE"] = card.get("title", "")
+        env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
+        env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
+
+        try:
+            store.update_card(card_id, status="running")
+            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
+            
+            process = await asyncio.create_subprocess_shell(
+                command,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+                env=env # Pass context
+            )
+            
+            self.running_tasks[card_id] = process
+            
+            # Stream logs (Helper functions)
+            async def stream_output(stream, log_type):
+                while True:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    decoded_line = line.decode().strip()
+                    if decoded_line:
+                        log_entry = f"[{log_type}] {decoded_line}"
+                        # Update DB logs efficiently (batch or append)
+                        # For now, append and save
+                        current_card = store.get_card(card_id)
+                        if not current_card: break # Card deleted
+                        logs = current_card.get("logs", [])
+                        logs.append(log_entry)
+                        store.update_card(card_id, logs=json.dumps(logs))
+                        # Broadcast
+                        await manager.broadcast({
+                            "type": "log_entry", 
+                            "card_id": card_id, 
+                            "entry": log_entry
+                        })
+
+            await asyncio.gather(
+                stream_output(process.stdout, "STDOUT"),
+                stream_output(process.stderr, "STDERR")
+            )
+            
+            return_code = await process.wait()
+            
+            # Check if process was terminated manually
+            if card_id not in self.running_tasks:
+                status = "terminated"
+            else:
+                status = "completed" if return_code == 0 else "failed"
+            
+            store.update_card(card_id, status=status)
+            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
+            
+        except Exception as e:
+            logger.error(f"Agent execution error for card {card_id}: {e}")
+            store.update_card(card_id, status="error")
+            await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
+        finally:
+            if card_id in self.running_tasks:
+                del self.running_tasks[card_id]
+
+    async def stop_agent(self, card_id: int):
+        if card_id in self.running_tasks:
+            process = self.running_tasks[card_id]
+            try:
+                process.terminate()
+                # We'll let the wait() in run_agent handle the status update
+                logger.info(f"Terminating agent for card {card_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Error terminating agent {card_id}: {e}")
+        return False
+
+agent_manager = AgentManager()
+
+@app.delete("/api/cards/{card_id}/agent")
+async def stop_card_agent(card_id: int):
+    if await agent_manager.stop_agent(card_id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="No running agent found for this card")
+
+@app.get("/api/cards/{card_id}/logs")
+async def get_card_logs(card_id: int):
+    card = store.get_card(card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+    return {"logs": card.get("logs", [])}
 
 # WebSocket endpoint
 @app.websocket("/ws")
@@ -234,22 +377,34 @@ async def polling_loop():
         try:
             await asyncio.sleep(CONFIG["polling_rate_ms"] / 1000)
             
-            # Find planned cards without assignees
-            planned_cards = [c for c in store.cards.values() 
-                           if c["column"] == "Planned" and not c.get("assignee")]
+            # Check concurrency limit
+            running_count = len(agent_manager.running_tasks)
+            max_agents = CONFIG.get("max_concurrent_agents", 4)
             
-            for card in planned_cards:
-                # Try to assign to an available agent
-                for agent_name, agent_config in CONFIG.get("agents", {}).items():
-                    if agent_config.get("enabled"):
-                        store.update_card(card["id"], assignee=agent_name, status="assigned")
-                        logger.info(f"Routed card {card['id']} to {agent_name}")
-                        await manager.broadcast({
-                            "type": "card_assigned",
-                            "card_id": card["id"],
-                            "agent": agent_name
-                        })
+            if running_count < max_agents:
+                # Find planned cards without assignees
+                planned_cards = [c for c in store.get_cards(column="Planned") if not c.get("assignee")]
+                
+                for card in planned_cards:
+                    # Check if we still have room
+                    if len(agent_manager.running_tasks) >= max_agents:
                         break
+                        
+                    # Try to assign to an available agent
+                    for agent_name, agent_config in CONFIG.get("agents", {}).items():
+                        if agent_config.get("enabled"):
+                            # ... assignment logic ...
+                            store.update_card(card["id"], assignee=agent_name, status="assigned")
+                            logger.info(f"Routed card {card['id']} to {agent_name}")
+                            await manager.broadcast({
+                                "type": "card_assigned",
+                                "card_id": card["id"],
+                                "agent": agent_name
+                            })
+                            
+                            # Trigger actual agent execution
+                            asyncio.create_task(agent_manager.run_agent(card["id"], agent_name))
+                            break
                         
         except Exception as e:
             logger.error(f"Polling error: {e}")

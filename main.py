@@ -74,10 +74,9 @@ class AegisStore:
 # Global store instance
 store = AegisStore()
 
-# Create sample cards
-store.create_card("Welcome to Aegis", "Your multi-agent Kanban board is ready!", "Inbox")
-store.create_card("Configure Agents", "Set up your agent binaries in aegis.config.json", "Planned")
-store.create_card("Test Agent Execution", "Try moving a card to In Progress to trigger an agent", "In Progress")
+# Sample cards removed - board starts empty for clean experience
+# To add sample cards back, uncomment below:
+# store.create_card("Welcome to Aegis", "Your multi-agent Kanban board is ready!", "Inbox")
 
 # WebSocket connections
 class ConnectionManager:
@@ -145,6 +144,15 @@ async def root():
 @app.get("/api/config")
 async def get_config():
     return CONFIG
+
+@app.post("/api/config")
+async def update_config(updates: dict):
+    global CONFIG
+    CONFIG.update(updates)
+    # Save to file
+    with open(CONFIG_PATH, 'w') as f:
+        json.dump(CONFIG, f, indent=2)
+    return {"success": True, "config": CONFIG}
 
 @app.get("/api/cards")
 async def get_cards(column: Optional[str] = None):

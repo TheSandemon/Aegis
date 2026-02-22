@@ -38,74 +38,108 @@
         header {
             background: var(--bg-card);
             border-bottom: 1px solid var(--border);
-            padding: 1rem 1.5rem;
+            padding: 0.75rem 1.5rem;
             display: flex;
             justify-content: space-between;
             align-items: center;
         }
         
         header h1 {
-            font-size: 1.5rem;
+            font-size: 1.25rem;
             font-weight: 700;
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
         
-        header h1 span {
-            color: var(--accent);
+        header h1 span { color: var(--accent); }
+        
+        .header-left {
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+        
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }
+        
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #22c55e;
+        }
+        
+        .status-dot.disconnected { background: #ef4444; }
+        .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
+        
+        @keyframes pulse {
+            0%, 100% { opacity: 1; }
+            50% { opacity: 0.5; }
         }
         
         .header-actions {
             display: flex;
-            gap: 0.75rem;
+            gap: 0.5rem;
         }
         
         button {
             background: var(--accent);
             color: white;
             border: none;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.375rem;
             cursor: pointer;
-            font-size: 0.875rem;
+            font-size: 0.8rem;
             font-weight: 500;
             transition: background 0.2s;
         }
         
-        button:hover {
-            background: var(--accent-hover);
-        }
+        button:hover { background: var(--accent-hover); }
         
         button.secondary {
             background: var(--bg-card);
             border: 1px solid var(--border);
         }
         
-        button.secondary:hover {
-            background: var(--border);
+        button.secondary:hover { background: var(--border); }
+        
+        button.danger {
+            background: #dc2626;
+        }
+        
+        button.danger:hover { background: #ef4444; }
+        
+        button.small {
+            padding: 0.25rem 0.5rem;
+            font-size: 0.7rem;
         }
         
         .board {
             display: flex;
             gap: 1rem;
-            padding: 1.5rem;
-            height: calc(100vh - 73px);
+            padding: 1rem;
+            height: calc(100vh - 56px);
             overflow-x: auto;
         }
         
         .column {
             background: var(--bg-column);
-            border-radius: 0.75rem;
-            min-width: 280px;
-            max-width: 320px;
+            border-radius: 0.5rem;
+            min-width: 260px;
+            max-width: 300px;
             flex: 1;
             display: flex;
             flex-direction: column;
         }
         
         .column-header {
-            padding: 1rem;
+            padding: 0.75rem;
             border-bottom: 1px solid var(--border);
             display: flex;
             justify-content: space-between;
@@ -113,25 +147,22 @@
         }
         
         .column-header h2 {
-            font-size: 0.875rem;
+            font-size: 0.75rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
-            display: flex;
-            align-items: center;
-            gap: 0.5rem;
         }
         
         .column-header .count {
             background: var(--bg-card);
             padding: 0.125rem 0.5rem;
             border-radius: 1rem;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
         }
         
         .column-body {
-            padding: 0.75rem;
+            padding: 0.5rem;
             flex: 1;
             overflow-y: auto;
             display: flex;
@@ -139,11 +170,15 @@
             gap: 0.5rem;
         }
         
+        .column-body.drag-over {
+            background: rgba(99, 102, 241, 0.1);
+        }
+        
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 0.5rem;
-            padding: 0.75rem;
+            border-radius: 0.375rem;
+            padding: 0.625rem;
             cursor: pointer;
             transition: border-color 0.2s, transform 0.2s;
         }
@@ -155,47 +190,47 @@
         
         .card-title {
             font-weight: 500;
-            margin-bottom: 0.5rem;
+            font-size: 0.875rem;
+            margin-bottom: 0.375rem;
         }
         
         .card-meta {
             display: flex;
             justify-content: space-between;
             align-items: center;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: var(--text-secondary);
+            gap: 0.5rem;
+        }
+        
+        .card-meta-left {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
         }
         
         .card-age {
-            font-size: 0.7rem;
             opacity: 0.7;
         }
         
         .card-assignee {
             background: var(--accent);
             color: white;
-            padding: 0.125rem 0.5rem;
+            padding: 0.1rem 0.375rem;
             border-radius: 1rem;
-            font-size: 0.7rem;
+            font-size: 0.65rem;
         }
         
         .card-status {
-            padding: 0.125rem 0.5rem;
+            padding: 0.1rem 0.375rem;
             border-radius: 1rem;
-            font-size: 0.7rem;
+            font-size: 0.65rem;
         }
         
-        .status-running {
-            background: rgba(245, 158, 11, 0.2);
-            color: #f59e0b;
-        }
+        .status-running { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
+        .status-completed { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
+        .status-blocked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
         
-        .status-completed {
-            background: rgba(34, 197, 94, 0.2);
-            color: #22c55e;
-        }
-        
-        /* Column colors */
         .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
         .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
         .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
@@ -203,7 +238,7 @@
         .column[data-column="Review"] .column-header h2 { color: var(--review); }
         .column[data-column="Done"] .column-header h2 { color: var(--done); }
         
-        /* Modal */
+        /* Modals */
         .modal-overlay {
             display: none;
             position: fixed;
@@ -214,17 +249,15 @@
             justify-content: center;
         }
         
-        .modal-overlay.active {
-            display: flex;
-        }
+        .modal-overlay.active { display: flex; }
         
         .modal {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 1rem;
+            border-radius: 0.75rem;
             width: 90%;
-            max-width: 600px;
-            max-height: 80vh;
+            max-width: 500px;
+            max-height: 85vh;
             overflow: hidden;
             display: flex;
             flex-direction: column;
@@ -238,15 +271,13 @@
             align-items: center;
         }
         
-        .modal-header h3 {
-            font-size: 1.125rem;
-        }
+        .modal-header h3 { font-size: 1rem; }
         
         .modal-close {
             background: none;
             border: none;
             color: var(--text-secondary);
-            font-size: 1.5rem;
+            font-size: 1.25rem;
             cursor: pointer;
             line-height: 1;
         }
@@ -257,34 +288,6 @@
             overflow-y: auto;
         }
         
-        .form-group {
-            margin-bottom: 1rem;
-        }
-        
-        .form-group label {
-            display: block;
-            font-size: 0.875rem;
-            color: var(--text-secondary);
-            margin-bottom: 0.5rem;
-        }
-        
-        .form-group input,
-        .form-group textarea,
-        .form-group select {
-            width: 100%;
-            background: var(--bg-dark);
-            border: 1px solid var(--border);
-            border-radius: 0.5rem;
-            padding: 0.5rem;
-            color: var(--text-primary);
-            font-size: 0.875rem;
-        }
-        
-        .form-group textarea {
-            min-height: 100px;
-            resize: vertical;
-        }
-        
         .modal-footer {
             padding: 1rem;
             border-top: 1px solid var(--border);
@@ -293,21 +296,43 @@
             gap: 0.5rem;
         }
         
-        /* Terminal viewer */
+        .form-group { margin-bottom: 1rem; }
+        
+        .form-group label {
+            display: block;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.375rem;
+        }
+        
+        .form-group input,
+        .form-group textarea,
+        .form-group select {
+            width: 100%;
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.375rem;
+            padding: 0.5rem;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-family: inherit;
+        }
+        
+        .form-group textarea { min-height: 80px; resize: vertical; }
+        
         .terminal {
             background: #0a0a0a;
-            border-radius: 0.5rem;
-            padding: 1rem;
+            border-radius: 0.375rem;
+            padding: 0.75rem;
             font-family: 'Monaco', 'Menlo', monospace;
-            font-size: 0.75rem;
+            font-size: 0.7rem;
             color: #22c55e;
-            max-height: 300px;
+            max-height: 200px;
             overflow-y: auto;
             white-space: pre-wrap;
             word-break: break-all;
         }
         
-        /* Toast notifications */
         .toast-container {
             position: fixed;
             bottom: 1rem;
@@ -318,8 +343,8 @@
         .toast {
             background: var(--bg-card);
             border: 1px solid var(--border);
-            border-radius: 0.5rem;
-            padding: 0.75rem 1rem;
+            border-radius: 0.375rem;
+            padding: 0.625rem 1rem;
             margin-top: 0.5rem;
             animation: slideIn 0.3s ease;
         }
@@ -329,40 +354,111 @@
             to { transform: translateX(0); opacity: 1; }
         }
         
-        /* Drag and drop */
-        .card[draggable="true"] {
-            cursor: grab;
+        .card[draggable="true"] { cursor: grab; }
+        .card.dragging { opacity: 0.5; }
+        
+        /* Settings specific */
+        .settings-section {
+            margin-bottom: 1.5rem;
         }
         
-        .card.dragging {
-            opacity: 0.5;
+        .settings-section h4 {
+            font-size: 0.875rem;
+            margin-bottom: 0.75rem;
+            color: var(--accent);
         }
         
-        .column-body.drag-over {
-            background: rgba(99, 102, 241, 0.1);
+        .agent-config {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 0.5rem;
+            background: var(--bg-dark);
+            border-radius: 0.375rem;
+            margin-bottom: 0.5rem;
         }
         
-        .empty-column {
+        .agent-config-info {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        
+        .agent-config-name {
+            font-weight: 500;
+            font-size: 0.875rem;
+        }
+        
+        .agent-config-binary {
+            font-size: 0.7rem;
             color: var(--text-secondary);
-            font-size: 0.75rem;
+        }
+        
+        .toggle {
+            position: relative;
+            width: 40px;
+            height: 22px;
+        }
+        
+        .toggle input { opacity: 0; width: 0; height: 0; }
+        
+        .toggle-slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background: var(--bg-dark);
+            border-radius: 22px;
+            transition: 0.3s;
+        }
+        
+        .toggle-slider:before {
+            content: "";
+            position: absolute;
+            height: 16px;
+            width: 16px;
+            left: 3px;
+            bottom: 3px;
+            background: white;
+            border-radius: 50%;
+            transition: 0.3s;
+        }
+        
+        .toggle input:checked + .toggle-slider { background: var(--accent); }
+        .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
+        
+        /* Empty state */
+        .empty-state {
             text-align: center;
             padding: 2rem 1rem;
-            opacity: 0.5;
+            color: var(--text-secondary);
+        }
+        
+        .empty-state-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        
+        .empty-state-text {
+            font-size: 0.8rem;
         }
     </style>
 </head>
 <body>
     <header>
-        <h1>🛡️ <span>Aegis</span> - Multi-Agent Kanban</h1>
+        <div class="header-left">
+            <h1>🛡️ <span>Aegis</span></h1>
+            <div class="connection-status">
+                <div class="status-dot" id="wsStatus"></div>
+                <span id="wsStatusText">Connecting...</span>
+            </div>
+        </div>
         <div class="header-actions">
-            <button class="secondary" onclick="openSettings()">Settings</button>
+            <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
     </header>
     
-    <div class="board" id="board">
-        <!-- Columns will be rendered here -->
-    </div>
+    <div class="board" id="board"></div>
     
     <!-- New Card Modal -->
     <div class="modal-overlay" id="newCardModal">
@@ -373,28 +469,21 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Title</label>
-                    <input type="text" id="cardTitle" placeholder="Task title...">
+                    <label>Title *</label>
+                    <input type="text" id="cardTitle" placeholder="What needs to be done?">
                 </div>
                 <div class="form-group">
                     <label>Description</label>
-                    <textarea id="cardDescription" placeholder="Task description..."></textarea>
+                    <textarea id="cardDescription" placeholder="Additional details..."></textarea>
                 </div>
                 <div class="form-group">
                     <label>Column</label>
-                    <select id="cardColumn">
-                        <option value="Inbox">Inbox</option>
-                        <option value="Planned">Planned</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Blocked">Blocked</option>
-                        <option value="Review">Review</option>
-                        <option value="Done">Done</option>
-                    </select>
+                    <select id="cardColumn"></select>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('newCardModal')">Cancel</button>
-                <button onclick="createCard()">Create Card</button>
+                <button onclick="createCard()">Create</button>
             </div>
         </div>
     </div>
@@ -403,7 +492,7 @@
     <div class="modal-overlay" id="cardDetailModal">
         <div class="modal">
             <div class="modal-header">
-                <h3 id="detailTitle">Card Details</h3>
+                <h3>Card Details</h3>
                 <button class="modal-close" onclick="closeModal('cardDetailModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -419,32 +508,52 @@
                     <label>Assignee</label>
                     <select id="detailAssignee">
                         <option value="">Unassigned</option>
-                        <option value="architect">Architect</option>
-                        <option value="coder">Coder</option>
-                        <option value="researcher">Researcher</option>
-                        <option value="security">Security</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Column</label>
-                    <select id="detailColumn">
-                        <option value="Inbox">Inbox</option>
-                        <option value="Planned">Planned</option>
-                        <option value="In Progress">In Progress</option>
-                        <option value="Blocked">Blocked</option>
-                        <option value="Review">Review</option>
-                        <option value="Done">Done</option>
-                    </select>
+                    <select id="detailColumn"></select>
                 </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
-                    <label>Live Terminal Output</label>
+                    <label>Live Terminal</label>
                     <div class="terminal" id="terminalOutput">Waiting for output...</div>
                 </div>
             </div>
             <div class="modal-footer">
-                <button class="secondary" onclick="deleteCurrentCard()" style="margin-right:auto;color:#ef4444;">Delete</button>
+                <button class="danger" onclick="deleteCurrentCard()">Delete</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Settings Modal -->
+    <div class="modal-overlay" id="settingsModal">
+        <div class="modal" style="max-width: 550px;">
+            <div class="modal-header">
+                <h3>⚙️ Settings</h3>
+                <button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="settings-section">
+                    <h4>🤖 Agents</h4>
+                    <div id="agentConfigs"></div>
+                </div>
+                <div class="settings-section">
+                    <h4>📊 Configuration</h4>
+                    <div class="form-group">
+                        <label>Polling Rate (ms)</label>
+                        <input type="number" id="configPollingRate" min="1000" max="60000" step="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>Max Concurrent Agents</label>
+                        <input type="number" id="configMaxAgents" min="1" max="16">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('settingsModal')">Close</button>
+                <button onclick="saveSettings()">Save Changes</button>
             </div>
         </div>
     </div>
@@ -452,16 +561,15 @@
     <div class="toast-container" id="toastContainer"></div>
     
     <script>
-        // State
         let cards = [];
         let config = {};
         let ws = null;
         let currentCardId = null;
         let terminalRefreshInterval = null;
         
-        // Initialize
         async function init() {
             await loadConfig();
+            populateColumnSelects();
             await loadCards();
             connectWebSocket();
             renderBoard();
@@ -478,16 +586,24 @@
         }
         
         function connectWebSocket() {
+            updateConnectionStatus('connecting');
             ws = new WebSocket(`ws://${location.host}/ws`);
+            
+            ws.onopen = () => updateConnectionStatus('connected');
+            ws.onclose = () => { updateConnectionStatus('disconnected'); setTimeout(connectWebSocket, 3000); };
+            ws.onerror = () => updateConnectionStatus('disconnected');
             
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 handleWebSocketMessage(data);
             };
-            
-            ws.onclose = () => {
-                setTimeout(connectWebSocket, 3000);
-            };
+        }
+        
+        function updateConnectionStatus(status) {
+            const dot = document.getElementById('wsStatus');
+            const text = document.getElementById('wsStatusText');
+            dot.className = 'status-dot ' + status;
+            text.textContent = status === 'connected' ? 'Live' : status === 'connecting' ? 'Connecting...' : 'Disconnected';
         }
         
         function handleWebSocketMessage(data) {
@@ -495,14 +611,11 @@
                 case 'card_created':
                     cards.push(data.card);
                     renderBoard();
-                    showToast('New card created');
+                    showToast('Card created');
                     break;
                 case 'card_updated':
                     const idx = cards.findIndex(c => c.id === data.card.id);
-                    if (idx !== -1) {
-                        cards[idx] = data.card;
-                        renderBoard();
-                    }
+                    if (idx !== -1) { cards[idx] = data.card; renderBoard(); }
                     break;
                 case 'card_deleted':
                     cards = cards.filter(c => c.id !== data.card_id);
@@ -512,6 +625,21 @@
                     showToast(`Card assigned to ${data.agent}`);
                     break;
             }
+        }
+        
+        function populateColumnSelects() {
+            const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
+            const selects = ['cardColumn', 'detailColumn'];
+            selects.forEach(id => {
+                const sel = document.getElementById(id);
+                sel.innerHTML = columns.map(c => `<option value="${c}">${c}</option>`).join('');
+            });
+            
+            // Populate assignees
+            const assigneeSel = document.getElementById('detailAssignee');
+            const agents = Object.keys(config.agents || {});
+            assigneeSel.innerHTML = '<option value="">Unassigned</option>' + 
+                agents.map(a => `<option value="${a}">${a}</option>`).join('');
         }
         
         function renderBoard() {
@@ -531,13 +659,11 @@
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
                     </div>
                     <div class="column-body" data-column="${column}">
-                        ${columnCards.length === 0 
-                            ? '<div class="empty-column">No cards</div>' 
-                            : columnCards.map(card => renderCard(card)).join('')}
+                        ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') : 
+                        `<div class="empty-state"><div class="empty-state-icon">📭</div><div class="empty-state-text">No cards</div></div>`}
                     </div>
                 `;
                 
-                // Drag and drop
                 const colBody = colDiv.querySelector('.column-body');
                 colBody.addEventListener('dragover', handleDragOver);
                 colBody.addEventListener('drop', handleDrop);
@@ -546,7 +672,6 @@
                 board.appendChild(colDiv);
             });
             
-            // Add drag listeners to cards
             document.querySelectorAll('.card').forEach(card => {
                 card.addEventListener('dragstart', handleDragStart);
                 card.addEventListener('dragend', handleDragEnd);
@@ -556,22 +681,25 @@
         
         function renderCard(card) {
             const age = formatRelativeTime(card.updated_at);
+            let statusClass = '';
+            if (card.status === 'running') statusClass = 'status-running';
+            else if (card.status === 'completed') statusClass = 'status-completed';
+            else if (card.column === 'Blocked') statusClass = 'status-blocked';
+            
             return `
                 <div class="card" draggable="true" data-id="${card.id}">
                     <div class="card-title">${escapeHtml(card.title)}</div>
                     <div class="card-meta">
-                        <span class="card-age">${age}</span>
-                        <div>
+                        <div class="card-meta-left">
                             ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}
-                            ${card.status === 'running' ? '<span class="card-status status-running">Running</span>' : ''}
-                            ${card.status === 'completed' ? '<span class="card-status status-completed">Done</span>' : ''}
+                            ${card.status ? `<span class="card-status ${statusClass}">${card.status}</span>` : ''}
                         </div>
+                        <span class="card-age">${age}</span>
                     </div>
                 </div>
             `;
         }
         
-        // Drag and drop
         let draggedCardId = null;
         
         function handleDragStart(e) {
@@ -599,37 +727,31 @@
             const card = cards.find(c => c.id === draggedCardId);
             
             if (card && card.column !== column) {
-                // Check HITL - can't move to Review without human
                 if (card.column !== 'Review' && column === 'Review') {
-                    showToast('HITL: Only humans can move to Review!');
+                    showToast('⚠️ Only humans can move to Review!');
                     return;
                 }
-                
                 await fetch(`/api/cards/${card.id}`, {
                     method: 'PATCH',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ column })
                 });
             }
-            
             draggedCardId = null;
         }
         
-        // Modal functions
+        // Modals
         function openNewCardModal() {
             document.getElementById('newCardModal').classList.add('active');
             document.getElementById('cardTitle').focus();
         }
         
         async function createCard() {
-            const title = document.getElementById('cardTitle').value;
+            const title = document.getElementById('cardTitle').value.trim();
             const description = document.getElementById('cardDescription').value;
             const column = document.getElementById('cardColumn').value;
             
-            if (!title) {
-                showToast('Title is required');
-                return;
-            }
+            if (!title) { showToast('Title is required'); return; }
             
             await fetch('/api/cards', {
                 method: 'POST',
@@ -645,28 +767,20 @@
         async function openCardDetail(cardId) {
             currentCardId = cardId;
             const card = cards.find(c => c.id === cardId);
-            
             if (!card) return;
             
-            document.getElementById('detailTitle').textContent = card.title;
             document.getElementById('detailTitleInput').value = card.title;
             document.getElementById('detailDescription').value = card.description || '';
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
             
-            // Show terminal if running
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
                 loadTerminalLogs(cardId);
-                // Refresh logs every 2 seconds while running
-                if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
                 terminalRefreshInterval = setInterval(() => loadTerminalLogs(cardId), 2000);
             } else {
                 document.getElementById('terminalSection').style.display = 'none';
-                if (terminalRefreshInterval) {
-                    clearInterval(terminalRefreshInterval);
-                    terminalRefreshInterval = null;
-                }
+                if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
             }
             
             document.getElementById('cardDetailModal').classList.add('active');
@@ -677,32 +791,94 @@
                 const res = await fetch(`/api/sessions/${cardId}/logs`);
                 const data = await res.json();
                 const terminal = document.getElementById('terminalOutput');
-                terminal.textContent = data.logs.join('\n') || 'No logs yet...';
-                terminal.scrollTop = terminal.scrollHeight; // Auto-scroll to bottom
+                terminal.textContent = data.logs?.join('\n') || 'Waiting for agent output...';
+                terminal.scrollTop = terminal.scrollHeight;
             } catch(e) {
-                document.getElementById('terminalOutput').textContent = 'Loading logs...';
+                document.getElementById('terminalOutput').textContent = 'No logs available';
             }
         }
         
         async function saveCardDetails() {
-            const title = document.getElementById('detailTitleInput').value;
-            const description = document.getElementById('detailDescription').value;
-            const assignee = document.getElementById('detailAssignee').value;
-            const column = document.getElementById('detailColumn').value;
+            const updates = {
+                title: document.getElementById('detailTitleInput').value,
+                description: document.getElementById('detailDescription').value,
+                assignee: document.getElementById('detailAssignee').value || null,
+                column: document.getElementById('detailColumn').value
+            };
             
             await fetch(`/api/cards/${currentCardId}`, {
                 method: 'PATCH',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ title, description, assignee, column })
+                body: JSON.stringify(updates)
             });
             
             closeModal('cardDetailModal');
+            if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
         }
         
         async function deleteCurrentCard() {
-            if (confirm('Delete this card?')) {
-                await fetch(`/api/cards/${currentCardId}`, {method: 'DELETE'});
-                closeModal('cardDetailModal');
+            if (!confirm('Delete this card?')) return;
+            await fetch(`/api/cards/${currentCardId}`, {method: 'DELETE'});
+            closeModal('cardDetailModal');
+            if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
+        }
+        
+        function openSettingsModal() {
+            renderAgentConfigs();
+            document.getElementById('configPollingRate').value = config.polling_rate_ms || 5000;
+            document.getElementById('configMaxAgents').value = config.max_concurrent_agents || 4;
+            document.getElementById('settingsModal').classList.add('active');
+        }
+        
+        function renderAgentConfigs() {
+            const container = document.getElementById('agentConfigs');
+            const agents = config.agents || {};
+            
+            if (Object.keys(agents).length === 0) {
+                container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;">No agents configured. Edit aegis.config.json to add agents.</p>';
+                return;
+            }
+            
+            container.innerHTML = Object.entries(agents).map(([name, agent]) => `
+                <div class="agent-config">
+                    <div class="agent-config-info">
+                        <div>
+                            <div class="agent-config-name">${name}</div>
+                            <div class="agent-config-binary">${agent.binary || 'unknown'}</div>
+                        </div>
+                    </div>
+                    <label class="toggle">
+                        <input type="checkbox" ${agent.enabled ? 'checked' : ''} onchange="toggleAgent('${name}', this.checked)">
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            `).join('');
+        }
+        
+        async function toggleAgent(name, enabled) {
+            config.agents[name].enabled = enabled;
+            await saveSettings();
+        }
+        
+        async function saveSettings() {
+            config.polling_rate_ms = parseInt(document.getElementById('configPollingRate').value);
+            config.max_concurrent_agents = parseInt(document.getElementById('configMaxAgents').value);
+            
+            try {
+                const res = await fetch('/api/config', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify(config)
+                });
+                
+                if (res.ok) {
+                    showToast('Settings saved');
+                    closeModal('settingsModal');
+                } else {
+                    showToast('Failed to save settings');
+                }
+            } catch(e) {
+                showToast('Error saving settings');
             }
         }
         
@@ -714,11 +890,6 @@
             }
         }
         
-        function openSettings() {
-            showToast('Settings coming soon!');
-        }
-        
-        // Toast notifications
         function showToast(message) {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
@@ -728,7 +899,6 @@
             setTimeout(() => toast.remove(), 3000);
         }
         
-        // Utility
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
@@ -745,50 +915,20 @@
             const diffHour = Math.floor(diffMin / 60);
             const diffDay = Math.floor(diffHour / 24);
             
-            if (diffSec < 60) return 'just now';
-            if (diffMin < 60) return `${diffMin}m ago`;
-            if (diffHour < 24) return `${diffHour}h ago`;
-            if (diffDay < 7) return `${diffDay}d ago`;
-            return `${Math.floor(diffDay / 7)}w ago`;
+            if (diffSec < 60) return 'now';
+            if (diffMin < 60) return `${diffMin}m`;
+            if (diffHour < 24) return `${diffHour}h`;
+            if (diffDay < 7) return `${diffDay}d`;
+            return `${Math.floor(diffDay / 7)}w`;
         }
         
-        // Close modals on overlay click
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
             overlay.addEventListener('click', (e) => {
-                if (e.target === overlay) {
-                    overlay.classList.remove('active');
-                    if (terminalRefreshInterval) {
-                        clearInterval(terminalRefreshInterval);
-                        terminalRefreshInterval = null;
-                    }
-                }
+                if (e.target === overlay) overlay.classList.remove('active');
             });
         });
         
-        // Start
         init();
-        
-        // Keyboard shortcuts
-        document.addEventListener('keydown', (e) => {
-            // Escape to close modals
-            if (e.key === 'Escape') {
-                const activeModal = document.querySelector('.modal-overlay.active');
-                if (activeModal) {
-                    activeModal.classList.remove('active');
-                    if (terminalRefreshInterval) {
-                        clearInterval(terminalRefreshInterval);
-                        terminalRefreshInterval = null;
-                    }
-                }
-            }
-            // Enter in new card modal to create
-            if (e.key === 'Enter' && e.ctrlKey) {
-                const newCardModal = document.getElementById('newCardModal');
-                if (newCardModal.classList.contains('active')) {
-                    createCard();
-                }
-            }
-        });
     </script>
 </body>
 </html>

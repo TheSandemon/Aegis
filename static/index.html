@@ -86,6 +86,22 @@
         .header-actions {
             display: flex;
             gap: 0.5rem;
+            align-items: center;
+        }
+        
+        .header-search {
+            background: var(--bg-dark);
+            border: 1px solid var(--border);
+            border-radius: 0.5rem;
+            padding: 0.5rem 0.75rem;
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            width: 180px;
+        }
+        
+        .header-search:focus {
+            outline: none;
+            border-color: var(--accent);
         }
         
         button {
@@ -453,6 +469,7 @@
             </div>
         </div>
         <div class="header-actions">
+            <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -566,6 +583,7 @@
         let ws = null;
         let currentCardId = null;
         let terminalRefreshInterval = null;
+        let searchFilter = '';
         
         async function init() {
             await loadConfig();
@@ -642,6 +660,11 @@
                 agents.map(a => `<option value="${a}">${a}</option>`).join('');
         }
         
+        function filterCards() {
+            searchFilter = document.getElementById('searchInput').value;
+            renderBoard();
+        }
+        
         function renderBoard() {
             const board = document.getElementById('board');
             board.innerHTML = '';
@@ -649,7 +672,16 @@
             const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
             
             columns.forEach(column => {
-                const columnCards = cards.filter(c => c.column === column);
+                let columnCards = cards.filter(c => c.column === column);
+                
+                // Apply search filter
+                if (searchFilter) {
+                    const filter = searchFilter.toLowerCase();
+                    columnCards = columnCards.filter(c => 
+                        c.title.toLowerCase().includes(filter) || 
+                        (c.description && c.description.toLowerCase().includes(filter))
+                    );
+                }
                 
                 const colDiv = document.createElement('div');
                 colDiv.className = 'column';

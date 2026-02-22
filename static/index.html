@@ -1502,7 +1502,7 @@
                             <small>v${a.version} · ${a.license}</small>
                         </div>
                         ${a.installed ? '<span class="badge badge-installed">Installed</span>' : ''}
-                        ${a.runtime_status === 'running' ? '<span class="badge badge-running">Running</span>' : ''}
+                        ${a.active_instances > 0 ? `<span class="badge badge-running">${a.active_instances} Active</span>` : ''}
                     </div>
                     <div class="agent-card-desc">${escapeHtml(a.description)}</div>
                     <div class="agent-card-actions">
@@ -1510,8 +1510,7 @@
                             <button class="secondary" style="font-size:0.75rem;">⭐ Star on GitHub</button>
                         </a>
                         ${!a.installed ? `<button onclick="installAgent('${a.id}')">📥 Install</button>` : ''}
-                        ${a.installed && a.runtime_status !== 'running' ? `<button onclick="startAgent('${a.id}')" style="background:#22c55e;">▶ Start</button>` : ''}
-                        ${a.runtime_status === 'running' ? `<button class="danger" onclick="stopAgent('${a.id}')">⏹ Stop</button>` : ''}
+                        ${a.installed ? `<button onclick="startAgent('${a.id}')" style="background:#22c55e;">▶ Start New Instance</button>` : ''}
                     </div>
                 </div>
             `).join('');
@@ -1549,16 +1548,19 @@
             }
         }
 
-        async function stopAgent(agentId) {
+        async function stopAgent(instanceId) {
             try {
-                const res = await fetch(`/api/agents/stop/${agentId}`, { method: 'POST' });
+                const res = await fetch(`/api/agents/stop/${instanceId}`, { method: 'POST' });
                 if (res.ok) {
-                    showToast(`⏹ ${agentId} stopped`);
+                    showToast(`⏹ Stopped instance ${instanceId}`);
                 } else {
                     const err = await res.json();
                     showToast(`⚠️ ${err.detail || 'Stop failed'}`);
                 }
                 await loadRegistry();
+                if (document.getElementById('tab-runtimes').classList.contains('active')) {
+                    loadActiveRuntimes();
+                }
             } catch (e) {
                 showToast('Stop failed');
             }
@@ -1581,29 +1583,29 @@
                         <div class="runtime-row">
                             <span class="agent-icon">${agent.icon || '🤖'}</span>
                             <div class="runtime-info">
-                                <h4>${agent.name || r.agent_id}</h4>
+                                <h4>${agent.name || r.agent_id} <span style="font-size:0.7rem; color:var(--text-secondary); font-family:monospace;">(${r.instance_id})</span></h4>
                                 <small>PID: ${r.pid} · Status: <span class="badge badge-${r.status}">${r.status}</span> · Logs: ${r.log_count}</small>
                             </div>
-                            ${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopAgent('${r.agent_id}')">⏹ Stop</button>` : ''}
+                            ${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopAgent('${r.instance_id}')">⏹ Stop</button>` : ''}
                         </div>
-                        <div class="runtime-logs" id="logs-${r.agent_id}">Loading logs...</div>
+                        <div class="runtime-logs" id="logs-${r.instance_id}">Loading logs...</div>
                     `;
                 }).join('');
 
                 // Load logs for each runtime
                 for (const r of runtimes) {
-                    loadRuntimeLogs(r.agent_id);
+                    loadRuntimeLogs(r.instance_id);
                 }
             } catch (e) {
                 document.getElementById('runtimesList').textContent = 'Failed to load runtimes';
             }
         }
 
-        async function loadRuntimeLogs(agentId) {
+        async function loadRuntimeLogs(instanceId) {
             try {
-                const res = await fetch(`/api/agents/${agentId}/logs?tail=50`);
+                const res = await fetch(`/api/agents/${instanceId}/logs?tail=50`);
                 const data = await res.json();
-                const logEl = document.getElementById(`logs-${agentId}`);
+                const logEl = document.getElementById(`logs-${instanceId}`);
                 if (logEl) {
                     logEl.innerHTML = data.logs.length > 0
                         ? data.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('')
@@ -1618,7 +1620,7 @@
         function handleWebSocketMessage(data) {
             // Handle agent-specific events
             if (data.type === 'agent_log') {
-                const logEl = document.getElementById(`logs-${data.agent_id}`);
+                const logEl = document.getElementById(`logs-${data.instance_id}`);
                 if (logEl) {
                     const entry = document.createElement('div');
                     entry.textContent = data.entry;

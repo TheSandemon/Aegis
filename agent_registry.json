@@ -9,17 +9,13 @@
         "license": "MIT",
         "icon": "🦞",
         "installation": {
-            "method": "git_clone",
-            "setup_commands": [
-                "npm install"
-            ]
+            "method": "mock_local",
+            "setup_commands": []
         },
         "execution": {
             "working_dir": "./agents/openclaw-core",
-            "command": "node index.js",
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "command": "python openclaw_mock.py",
+            "env_vars_required": []
         }
     },
     {
@@ -32,14 +28,12 @@
         "license": "MIT",
         "icon": "🦀",
         "installation": {
-            "method": "git_clone",
-            "setup_commands": [
-                "cargo build --release"
-            ]
+            "method": "mock_local",
+            "setup_commands": []
         },
         "execution": {
             "working_dir": "./agents/picoclaw",
-            "command": "./target/release/picoclaw",
+            "command": "python picoclaw_mock.py",
             "env_vars_required": []
         }
     },

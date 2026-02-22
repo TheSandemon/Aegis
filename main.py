@@ -466,16 +466,23 @@ process_manager.broadcaster = manager.broadcast  # Wire up WebSocket broadcaster
 @app.get("/api/registry")
 async def get_registry():
     """Serves the agent registry catalog."""
-    # Annotate with install status
+    # Annotate with install status and active instances
     from agent_process_manager import AGENTS_DIR
     registry = []
+    
+    # Pre-calculate active instances per agent
+    active_procs = process_manager.get_all_active()
+    active_counts = {}
+    for proc in active_procs:
+        if proc["status"] == "running":
+            a_id = proc["agent_id"]
+            active_counts[a_id] = active_counts.get(a_id, 0) + 1
+
     for agent in AGENT_REGISTRY:
         entry = {**agent}
         agent_dir = AGENTS_DIR / agent["id"]
         entry["installed"] = agent_dir.exists()
-        # Check if running
-        proc = process_manager.active.get(agent["id"])
-        entry["runtime_status"] = proc.status if proc else "stopped"
+        entry["active_instances"] = active_counts.get(agent["id"], 0)
         registry.append(entry)
     return registry
 
@@ -502,10 +509,10 @@ async def start_agent_endpoint(agent_id: str):
     return result
 
 
-@app.post("/api/agents/stop/{agent_id}")
-async def stop_agent_endpoint(agent_id: str):
-    """Stop a running agent process."""
-    result = await process_manager.stop_agent(agent_id)
+@app.post("/api/agents/stop/{instance_id}")
+async def stop_agent_endpoint(instance_id: str):
+    """Stop a running agent process instance."""
+    result = await process_manager.stop_agent(instance_id)
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
@@ -517,20 +524,20 @@ async def get_active_agents():
     return process_manager.get_all_active()
 
 
-@app.get("/api/agents/{agent_id}/status")
-async def get_agent_status(agent_id: str):
-    """Get status of a specific agent process."""
-    status = process_manager.get_status(agent_id)
+@app.get("/api/agents/{instance_id}/status")
+async def get_agent_status(instance_id: str):
+    """Get status of a specific agent process instance."""
+    status = process_manager.get_status(instance_id)
     if not status:
-        raise HTTPException(status_code=404, detail=f"No active process for '{agent_id}'")
+        raise HTTPException(status_code=404, detail=f"No active process for '{instance_id}'")
     return status
 
 
-@app.get("/api/agents/{agent_id}/logs")
-async def get_agent_logs(agent_id: str, tail: int = 100):
-    """Get recent logs for an agent process."""
-    logs = process_manager.get_logs(agent_id, tail)
-    return {"agent_id": agent_id, "logs": logs}
+@app.get("/api/agents/{instance_id}/logs")
+async def get_agent_logs(instance_id: str, tail: int = 100):
+    """Get recent logs for an agent process instance."""
+    logs = process_manager.get_logs(instance_id, tail)
+    return {"instance_id": instance_id, "logs": logs}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

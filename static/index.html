@@ -760,10 +760,27 @@
                             ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}
                             ${card.status ? `<span class="card-status ${statusClass}">${card.status}</span>` : ''}
                         </div>
-                        <span class="card-age">${age}</span>
+                        <span class="card-age">${age} <span style="cursor:pointer;opacity:0.5" onclick="event.stopPropagation();quickMoveCard(${card.id},'prev')" title="Move left">◀</span><span style="cursor:pointer;opacity:0.5" onclick="event.stopPropagation();quickMoveCard(${card.id},'next')" title="Move right">▶</span></span>
                     </div>
                 </div>
             `;
+        }
+        
+        async function quickMoveCard(id, dir) {
+            const card = cards.find(c => c.id === id);
+            if (!card) return;
+            const columns = ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
+            const idx = columns.indexOf(card.column);
+            let newCol = card.column;
+            if (dir === 'next' && idx < columns.length - 1) newCol = columns[idx + 1];
+            if (dir === 'prev' && idx > 0) newCol = columns[idx - 1];
+            if (newCol !== card.column) {
+                await fetch('/api/cards/' + id, {
+                    method: 'PATCH',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ column: newCol })
+                });
+            }
         }
         
         let draggedCardId = null;

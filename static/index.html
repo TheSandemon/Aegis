@@ -215,6 +215,24 @@
             background: rgba(99, 102, 241, 0.1);
         }
         
+        .column.collapsed .column-body {
+            display: none;
+        }
+        
+        .column-toggle {
+            background: none;
+            border: none;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 0.9rem;
+            padding: 0;
+            line-height: 1;
+        }
+        
+        .column-toggle:hover {
+            color: var(--text-primary);
+        }
+        
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -612,6 +630,15 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let priorityFilter = 'all';
+        let collapsedColumns = [];
+        
+        function toggleColumn(column) {
+            const idx = collapsedColumns.indexOf(column);
+            if (idx === -1) collapsedColumns.push(column);
+            else collapsedColumns.splice(idx, 1);
+            renderBoard();
+        }
         
         async function init() {
             await loadConfig();
@@ -721,15 +748,18 @@
                 const colDiv = document.createElement('div');
                 colDiv.className = 'column';
                 colDiv.dataset.column = column;
+                const collapsed = collapsedColumns.includes(column);
                 colDiv.innerHTML = `
                     <div class="column-header">
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
+                        <button class="column-toggle" onclick="toggleColumn('${column}')">${collapsed ? '▶' : '▼'}</button>
                     </div>
                     <div class="column-body" data-column="${column}">
                         ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') : 
                         `<div class="empty-state"><div class="empty-state-icon">${searchFilter ? '🔍' : '📭'}</div><div class="empty-state-text">${searchFilter ? 'No matching cards' : 'No cards'}</div></div>`}
                     </div>
                 `;
+                if (collapsed) colDiv.classList.add('collapsed');
                 
                 const colBody = colDiv.querySelector('.column-body');
                 colBody.addEventListener('dragover', handleDragOver);

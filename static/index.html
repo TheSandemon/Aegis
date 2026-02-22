@@ -708,6 +708,7 @@
             
             columns.forEach(column => {
                 let columnCards = cards.filter(c => c.column === column);
+                const totalCount = columnCards.length;
                 
                 // Apply search filter
                 if (searchFilter) {
@@ -718,12 +719,14 @@
                     );
                 }
                 
+                const countDisplay = searchFilter ? columnCards.length + '/' + totalCount : columnCards.length;
+                
                 const colDiv = document.createElement('div');
                 colDiv.className = 'column';
                 colDiv.dataset.column = column;
                 colDiv.innerHTML = `
                     <div class="column-header">
-                        <h2>${column} <span class="count">${columnCards.length}</span></h2>
+                        <h2>${column} <span class="count">${countDisplay}</span></h2>
                     </div>
                     <div class="column-body" data-column="${column}">
                         ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') : 

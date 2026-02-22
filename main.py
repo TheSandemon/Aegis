@@ -20,6 +20,7 @@ import sqlite3
 import httpx
 from pathlib import Path
 from datetime import datetime
+import sys
 from typing import Optional
 from contextlib import asynccontextmanager
 
@@ -337,9 +338,26 @@ async def get_config():
 async def update_config(updates: dict):
     global CONFIG
     CONFIG.update(updates)
-    with open(CONFIG_PATH, 'w') as f:
+    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w') as f:
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
+
+@app.post("/api/config/env")
+async def update_env_vars(env_vars: dict):
+    """Updates the global env_vars (API keys) in aegis.config.json."""
+    global CONFIG
+    CONFIG["env_vars"] = env_vars
+    
+    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w') as f:
+        json.dump(CONFIG, f, indent=2)
+        
+    # Broadcast the change
+    await manager.broadcast({
+        "type": "config_updated",
+        "env_vars": env_vars
+    })
+    
+    return {"success": True, "env_vars": env_vars}
 
 
 # ─── Cards CRUD ──────────────────────────────────────────────────────────────────

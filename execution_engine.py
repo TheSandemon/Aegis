@@ -14,6 +14,8 @@ import secrets
 from pathlib import Path
 from typing import Optional, Callable, Coroutine, Any
 from datetime import datetime
+
+CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
 from abc import ABC, abstractmethod
 
 logger = logging.getLogger("aegis.engine")
@@ -299,6 +301,19 @@ class ExecutionEngine:
 
         # Prepare env
         env = os.environ.copy()
+        
+        # Load user-defined env vars (API keys)
+        try:
+            with open(CONFIG_PATH) as f:
+                core_config = json.load(f)
+                env_vars = core_config.get("env_vars", {})
+                for k, v in env_vars.items():
+                    if v: # Only set if not empty
+                        env[k] = str(v)
+        except Exception as e:
+            logger.warning(f"Failed to load env_vars from config: {e}")
+
+        # Set Aegis specific variables overriding everything else
         env["AEGIS_AGENT_ID"] = agent_id
         env["AEGIS_CARD_ID"] = str(card_id)
         env["AEGIS_CARD_TITLE"] = card.get("title", "")

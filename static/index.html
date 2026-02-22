@@ -121,6 +121,12 @@
             border-color: var(--accent);
         }
 
+        .shortcut-hint {
+            font-size: 0.7rem;
+            opacity: 0.5;
+            margin-left: 0.25rem;
+        }
+
         .search-wrapper {
             position: relative;
             display: inline-block;
@@ -183,6 +189,28 @@
             font-size: 0.7rem;
         }
 
+        .loading-spinner {
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 50vh;
+            color: var(--text-secondary);
+        }
+        
+        .loading-spinner::after {
+            content: '';
+            width: 24px;
+            height: 24px;
+            border: 2px solid var(--border);
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
         .board {
             display: flex;
             gap: 1rem;
@@ -207,6 +235,21 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            cursor: pointer;
+        }
+        
+        .column-header:hover { background: rgba(255,255,255,0.02); }
+        
+        .column.collapsed .column-body { display: none; }
+        .column.collapsed { min-width: 48px; max-width: 48px; }
+        .column.collapsed .column-header h2,
+        .column.collapsed .column-header .count { display: none; }
+        .column.collapsed .collapse-icon { transform: rotate(90deg); }
+        
+        .collapse-icon {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
         }
 
         .column-header h2 {
@@ -594,15 +637,16 @@
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
-                <input type="text" class="header-search" id="searchInput" placeholder="Search cards..."
+                <input type="text" class="header-search" id="searchInput" placeholder="Search... (/)"
                     oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
-            <button onclick="openNewCardModal()">+ New Card</button>
+            <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
         </div>
     </header>
 
+    <div class="loading-spinner" id="loadingSpinner"></div>
     <div class="board" id="board"></div>
 
     <!-- New Card Modal -->
@@ -722,6 +766,7 @@
             await loadCards();
             connectWebSocket();
             renderBoard();
+            document.getElementById('loadingSpinner').style.display = 'none';
         }
 
         async function loadConfig() {
@@ -835,11 +880,12 @@
                 }
 
                 const colDiv = document.createElement('div');
-                colDiv.className = 'column';
+                colDiv.className = 'column' + (collapsedColumns[column] ? ' collapsed' : '');
                 colDiv.dataset.column = column;
                 colDiv.innerHTML = `
-                    <div class="column-header">
+                    <div class="column-header" onclick="toggleColumn('${column}')">
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
+                        <span class="collapse-icon">▼</span>
                     </div>
                     <div class="column-body" data-column="${column}">
                         ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') :
@@ -860,6 +906,13 @@
                 card.addEventListener('dragend', handleDragEnd);
                 card.addEventListener('click', () => openCardDetail(parseInt(card.dataset.id)));
             });
+        }
+        
+        const collapsedColumns = {};
+        
+        function toggleColumn(column) {
+            collapsedColumns[column] = !collapsedColumns[column];
+            renderBoard();
         }
 
         function renderCard(card) {
@@ -1130,6 +1183,29 @@
         });
 
         init();
+
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Ignore if typing in an input
+            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            
+            if (e.key === 'n' || e.key === 'N') {
+                e.preventDefault();
+                openNewCardModal();
+            } else if (e.key === '/') {
+                e.preventDefault();
+                document.getElementById('searchInput').focus();
+            }
+        });
+
+        // Close modals on Escape
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape') {
+                document.querySelectorAll('.modal-overlay.active').forEach(modal => {
+                    modal.classList.remove('active');
+                });
+            }
+        });
     </script>
 </body>
 

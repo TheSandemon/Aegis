@@ -498,8 +498,9 @@
         <div class="header-actions">
             <div class="search-wrapper">
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
-                <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
+                <button class="search-clear" id="searchClear" onclick="clearFilters()">×</button>
             </div>
+            <button class="secondary" id="clearFiltersBtn" onclick="clearFilters()" style="display:none">Clear Filters</button>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -692,13 +693,23 @@
         
         function filterCards() {
             searchFilter = document.getElementById('searchInput').value;
+            assigneeFilter = document.getElementById('assigneeFilter').value;
             document.getElementById('searchClear').classList.toggle('visible', searchFilter.length > 0);
             renderBoard();
+            updateClearFiltersBtn();
         }
         
-        function clearSearch() {
+        function clearFilters() {
             document.getElementById('searchInput').value = '';
+            document.getElementById('assigneeFilter').value = '';
             filterCards();
+            updateClearFiltersBtn();
+        }
+        
+        function updateClearFiltersBtn() {
+            const hasFilters = searchFilter || assigneeFilter;
+            document.getElementById('clearFiltersBtn').style.display = hasFilters ? 'inline-block' : 'none';
+            document.getElementById('searchClear').style.display = searchFilter ? 'block' : 'none';
         }
         
         function renderBoard() {

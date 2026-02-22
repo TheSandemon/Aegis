@@ -566,6 +566,7 @@
             </div>
             <div class="modal-footer">
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
+                <button class="secondary" onclick="duplicateCurrentCard()">Duplicate</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
             </div>
@@ -887,6 +888,26 @@
             await fetch(`/api/cards/${currentCardId}`, {method: 'DELETE'});
             closeModal('cardDetailModal');
             if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
+        }
+        
+        async function duplicateCurrentCard() {
+            const card = cards.find(c => c.id === currentCardId);
+            if (!card) return;
+            
+            await fetch('/api/cards', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    title: card.title + ' (copy)',
+                    description: card.description,
+                    column: card.column,
+                    priority: card.priority,
+                    due_date: card.due_date,
+                    tags: card.tags
+                })
+            });
+            closeModal('cardDetailModal');
+            showToast('Card duplicated');
         }
         
         function openSettingsModal() {

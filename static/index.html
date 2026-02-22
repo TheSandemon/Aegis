@@ -692,7 +692,7 @@
                     </div>
                     <div class="column-body" data-column="${column}">
                         ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') : 
-                        `<div class="empty-state"><div class="empty-state-icon">📭</div><div class="empty-state-text">No cards</div></div>`}
+                        `<div class="empty-state"><div class="empty-state-icon">${searchFilter ? '🔍' : '📭'}</div><div class="empty-state-text">${searchFilter ? 'No matching cards' : 'No cards'}</div></div>`}
                     </div>
                 `;
                 

@@ -150,6 +150,11 @@
         
         button.secondary:hover { background: var(--border); }
         
+        button.active {
+            background: var(--accent);
+            border-color: var(--accent);
+        }
+        
         button.danger {
             background: #dc2626;
         }
@@ -498,6 +503,7 @@
                 <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
+            <button class="secondary" id="dueTodayBtn" onclick="toggleDueToday()">📅 Due Today</button>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
@@ -612,6 +618,13 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let dueTodayFilter = false;
+        
+        function toggleDueToday() {
+            dueTodayFilter = !dueTodayFilter;
+            document.getElementById('dueTodayBtn').classList.toggle('active', dueTodayFilter);
+            renderBoard();
+        }
         
         async function init() {
             await loadConfig();
@@ -715,6 +728,21 @@
                         c.title.toLowerCase().includes(filter) || 
                         (c.description && c.description.toLowerCase().includes(filter))
                     );
+                }
+                
+                // Apply due today filter
+                if (dueTodayFilter) {
+                    const today = new Date();
+                    today.setHours(0, 0, 0, 0);
+                    const tomorrow = new Date(today);
+                    tomorrow.setDate(tomorrow.getDate() + 1);
+                    
+                    columnCards = columnCards.filter(c => {
+                        if (!c.due_date) return false;
+                        const due = new Date(c.due_date);
+                        due.setHours(0, 0, 0, 0);
+                        return due <= today || (due >= today && due < tomorrow);
+                    });
                 }
                 
                 const colDiv = document.createElement('div');

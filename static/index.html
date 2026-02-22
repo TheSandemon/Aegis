@@ -503,6 +503,14 @@
         </div>
     </header>
     
+    <div class="filter-bar">
+        <span class="filter-label">Priority:</span>
+        <button class="filter-btn active" data-priority="all" onclick="setPriorityFilter('all')">All</button>
+        <button class="filter-btn" data-priority="high" onclick="setPriorityFilter('high')">🔴 High</button>
+        <button class="filter-btn" data-priority="medium" onclick="setPriorityFilter('medium')">🟡 Medium</button>
+        <button class="filter-btn" data-priority="low" onclick="setPriorityFilter('low')">🟢 Low</button>
+    </div>
+    
     <div class="board" id="board"></div>
     
     <!-- New Card Modal -->
@@ -612,6 +620,15 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
+        let priorityFilter = 'all';
+        
+        function setPriorityFilter(priority) {
+            priorityFilter = priority;
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.toggle('active', btn.dataset.priority === priority);
+            });
+            renderBoard();
+        }
         
         async function init() {
             await loadConfig();
@@ -715,6 +732,11 @@
                         c.title.toLowerCase().includes(filter) || 
                         (c.description && c.description.toLowerCase().includes(filter))
                     );
+                }
+                
+                // Apply priority filter
+                if (priorityFilter !== 'all') {
+                    columnCards = columnCards.filter(c => (c.priority || 'medium') === priorityFilter);
                 }
                 
                 const colDiv = document.createElement('div');

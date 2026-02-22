@@ -1101,6 +1101,14 @@
         });
         
         init();
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', e => {
+            if(e.key === 'n' && !e.target.matches('input,textarea')) { openNewCardModal(); e.preventDefault(); }
+            if(e.key === 'a' && !e.target.matches('input,textarea')) { openNewAgentModal(); e.preventDefault(); }
+            if(e.key === 'Escape') { document.querySelectorAll('.modal-overlay').forEach(m => m.classList.remove('active')); }
+            if(e.key === '/' && !e.target.matches('input,textarea')) { document.getElementById('searchInput').focus(); e.preventDefault(); }
+        });
     </script>
 </body>
 </html>

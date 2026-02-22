@@ -2,6 +2,7 @@
   "polling_rate_ms": 5000,
   "max_concurrent_agents": 4,
   "isolation_mode": "strict",
+  "logs_retention_days": 30,
   "rate_limits": {
     "prompts_per_minute": 1,
     "max_retries_on_fail": 3

@@ -1,115 +1,104 @@
-# Aegis: Multi-Agent Kanban & Orchestration Hub
+# Aegis 2.0: Multi-Agent Kanban & Orchestration Hub
 
-Aegis is a Kanban board that manages AI agents like a development team. Think of it as Trello, but your tasks are done by AI agents.
+Aegis is a high-performance Kanban-based orchestration hub for autonomous AI agents. It transforms your development workflow by treating AI agents as a managed team of contributors, complete with protocol-level discovery, rate-limited execution, and human-in-the-loop validation.
 
-**No complicated setup** - just double-click and go.
+---
 
-## What Does It Do?
+## 🚀 Core Features
 
-- 📋 **Kanban Board** - Drag cards between columns like Trello
-- 🤖 **AI Workers** - Assign tasks to AI agents (OpenClaw, Gemini CLI)
-- 🔒 **Human Approval** - AI can work freely, but YOU must approve before "Done"
-- 📺 **Live View** - Watch agents work in real-time
-- 🔄 **Auto-Routing** - New tasks automatically go to available agents
+- 📋 **Protocol-Native Kanban** — Industry-standard task management with built-in A2A (Agent-to-Agent) and MCP (Model Context Protocol) support.
+- 🏪 **Agent Marketplace** — Discover, install, and manage third-party bots from a centralized registry.
+- 🚦 **Prompt Broker** — Centralized rate-limiting (1 prompt/min) ensuring strict adherence to API quotas and budget constraints.
+- 🛡️ **Execution Manager** — Sandboxed agent runtimes using Docker or isolated subprocesses with full lifecycle monitoring.
+- 🔒 **HITL Validation** — Hardened state-transition validation; agents can propose work, but only humans can approve it to "Done".
+- 📺 **Real-Time Observability** — Live terminal log streaming via WebSockets and real-time board updates.
 
-## Quick Start (30 seconds)
+---
 
-### Windows
-1. Double-click `setup.bat`
-2. Wait for installation to finish
-3. Opens automatically in your browser!
+## 🏗️ Architecture
 
-### Mac/Linux
-1. Open terminal in this folder
-2. Run: `chmod +x setup.sh && ./setup.sh`
-3. Opens automatically in your browser!
+```mermaid
+graph TD
+    A["External Bots (OpenClaw, PicoClaw)"] -->|A2A Messages| B["A2A Discovery Layer"]
+    B --> C["Aegis Core Orchestrator"]
+    C -->|Context| D["MCP Resource Server"]
+    C -->|Rate Limited| E["Centralized Prompt Broker"]
+    C -->|Execute| F["Execution Manager"]
+    F -->|Heavy| G["Docker Container"]
+    F -->|Light| H["Subprocess Adapter"]
+    C -->|Persist| I{"Store Factory"}
+    I --> J["SQLite / Firestore"]
+    C -->|Review| K["Discord Webhooks"]
+    K --> L["Human Approval Gate"]
+```
 
-That's it! 🎉
+---
 
-## How to Use
+## 🛠️ Getting Started
 
-### Creating Tasks
-1. Click **"+ New Card"**
-2. Give it a title and description
-3. Choose which column (Inbox, Planned, etc.)
+### Quick Start (Windows)
+1. Double-clck `setup.bat`.
+2. Wait for the environment to initialize.
+3. Access the dashboard at `http://localhost:8080`.
 
-### Assigning to AI
-1. Create a card in "Planned" column
-2. Aegis automatically assigns it to an available AI agent
-3. Watch it move to "In Progress" and work!
+### Quick Start (Mac/Linux)
+1. `chmod +x setup.sh && ./setup.sh`
+2. Access the dashboard at `http://localhost:8080`.
 
-### Moving Cards
-- **Drag and drop** between columns
-- AI can move cards freely
-- **"Review" column is protected** - only YOU can move cards from Review to Done
-- This prevents AI from doing something unsafe
+---
 
-### Viewing Agent Work
-Click any card to see:
-- Full description
-- Who it's assigned to
-- Live terminal output (when running)
+## 🔌 Protocol Support
 
-## Default Columns
+### A2A (Agent-to-Agent)
+Aegis implements an AgentCard discovery endpoint at `/.well-known/agent.json`. External bots can register tasks directly into the Inbox via the A2A ingestion endpoint.
 
-| Column | Who Can Use |
-|--------|-------------|
-| Inbox | Anyone |
-| Planned | Anyone |
-| In Progress | AI agents only |
-| Blocked | AI agents only |
-| Review | **Humans only** |
-| Done | Humans only |
+### MCP (Model Context Protocol)
+Aegis acts as an MCP Resource Server, exposing project workspaces, file systems, and tools to connected LLMs in a standardized, discoverable format.
 
-## Configuration
+---
 
-Click the **⚙️ Settings** button to:
+## 🏪 Agent Marketplace
 
-- **Enable/disable agents** - Toggle which AI agents can receive tasks
-- **Polling rate** - How often (in ms) to check for new tasks
-- **Max concurrent** - How many AI agents can work simultaneously
+Manage your AI workforce directly from the dashboard:
+1. Click **🏪 Marketplace** in the header.
+2. Browse the **Registry** for available bots (OpenClaw, PicoClaw, Gemini CLI, etc.).
+3. Click **Install** to clone and configure the bot automatically.
+4. Monitor **Active Runtimes** to see live PIDs, memory usage, and streaming logs.
 
-Or edit `aegis.config.json` directly:
+---
+
+## ⚙️ Configuration
+
+Aegis is highly configurable via `aegis.config.json`:
 
 ```json
 {
-  "columns": ["Inbox", "Planned", "In Progress", "Blocked", "Review", "Done"],
+  "orchestration_mode": "supervisor",
   "polling_rate_ms": 5000,
   "max_concurrent_agents": 4,
-  "agents": {
-    "architect": {"enabled": true},
-    "coder": {"enabled": true}
+  "rate_limits": {
+    "prompts_per_minute": 1,
+    "max_retries_on_fail": 3
+  },
+  "discord": {
+    "webhook_url": "YOUR_WEBHOOK_URL",
+    "notify_on_review": true
+  },
+  "mcp": {
+    "workspaces": ["./src", "./docs"]
   }
 }
 ```
 
-## Status Indicators
+---
 
-- 🟢 **Live** - Connected to server in real-time
-- 🟡 **Connecting** - Trying to connect
-- 🔴 **Disconnected** - Server not responding
+## 🛡️ Human-in-the-Loop
 
-Cards show:
-- **Assignee** - Which AI agent is working on it
-- **Age** - How long since last update (e.g., "2h", "3d")
-
-## Troubleshooting
-
-**"Python not found"**
-- Download from https://python.org
-- During install, check "Add Python to PATH"
-
-**Port 8080 in use**
-- Edit `main.py` and change `port = 8080` to another number
-
-**AI not starting tasks**
-- Check Settings to ensure agents are enabled
-- Make sure your agent binary (openclaw, gemini) is in your PATH
-
-## Stopping Aegis
-
-Press `Ctrl+C` in the terminal window to stop the server.
+Aegis enforces a strict security boundary:
+- **Agents** can move cards to `Review`.
+- **Humans** must click `✓ Approve & Complete` to move a card to `Done`.
+- **Validation** prevents agents from bypassing this gate via API.
 
 ---
 
-Built with ❤️ for autonomous development teams.
+Built with ❤️ for the next generation of autonomous development.

@@ -192,7 +192,10 @@ manager = ConnectionManager()
 # UNIFIED EXECUTION ENGINE & PROMPT BROKER
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-from execution_engine import ExecutionEngine, install_agent, AGENTS_DIR
+from execution_engine import (
+    ExecutionEngine, install_agent, AGENTS_DIR, TEMPLATES_DIR,
+    load_instances, save_instances, create_instance, delete_instance
+)
 from prompt_broker import PromptBroker
 
 engine = ExecutionEngine(
@@ -513,14 +516,14 @@ async def get_broker_stats():
 
 @app.get("/api/registry")
 async def get_registry():
-    """Serves the agent registry catalog."""
+    """Serves the agent registry catalog (templates)."""
     registry = []
     for agent in AGENT_REGISTRY:
         entry = {**agent}
-        agent_dir = AGENTS_DIR / agent["id"]
-        entry["installed"] = agent_dir.exists()
-        proc = engine.active.get(agent["id"])
-        entry["runtime_status"] = proc.status if proc else "stopped"
+        # Check both template dir and legacy agents dir
+        template_dir = TEMPLATES_DIR / agent["id"]
+        legacy_dir = AGENTS_DIR / agent["id"]
+        entry["installed"] = template_dir.exists() or legacy_dir.exists()
         registry.append(entry)
     return registry
 
@@ -622,6 +625,85 @@ async def get_agent_params():
                 }
 
     return enriched
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# INSTANCE CRUD (Factory Pattern)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+class InstanceCreateRequest(BaseModel):
+    template_id: str
+    instance_name: str
+
+@app.post("/api/instances/create")
+async def create_instance_endpoint(req: InstanceCreateRequest):
+    """Create a new worker instance from an installed template."""
+    registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == req.template_id), None)
+    result = create_instance(req.template_id, req.instance_name, registry_entry)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    await manager.broadcast({"type": "instance_created", "instance": result})
+    return result
+
+@app.get("/api/instances")
+async def list_instances():
+    """List all worker instances with runtime status."""
+    instances = load_instances()
+    for inst in instances:
+        proc = engine.active.get(inst["instance_id"])
+        inst["runtime_status"] = proc.status if proc else "stopped"
+    return instances
+
+@app.delete("/api/instances/{instance_id}")
+async def delete_instance_endpoint(instance_id: str):
+    """Delete a worker instance and its files."""
+    # Stop if running
+    if instance_id in engine.active and engine.active[instance_id].status == "running":
+        await engine.stop_agent(instance_id)
+    result = delete_instance(instance_id)
+    if "error" in result:
+        raise HTTPException(status_code=404, detail=result["error"])
+    await manager.broadcast({"type": "instance_deleted", "instance_id": instance_id})
+    return result
+
+@app.post("/api/instances/{instance_id}/start")
+async def start_instance_endpoint(instance_id: str):
+    """Start a worker instance process in its isolated directory."""
+    instances = load_instances()
+    inst = next((i for i in instances if i["instance_id"] == instance_id), None)
+    if not inst:
+        raise HTTPException(status_code=404, detail=f"Instance '{instance_id}' not found")
+
+    template_id = inst["template_id"]
+    registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == template_id), None)
+    agent_config = CONFIG.get("agents", {}).get(template_id, {})
+    if registry_entry:
+        agent_config.setdefault("execution", registry_entry.get("execution", {}))
+
+    result = await engine.run_agent(
+        0, template_id, agent_config,
+        {"id": 0, "title": f"Instance: {inst['instance_name']}"},
+        store, registry_entry,
+        instance_id=instance_id,
+        instance_name=inst["instance_name"]
+    )
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/instances/{instance_id}/stop")
+async def stop_instance_endpoint(instance_id: str):
+    """Stop a running worker instance."""
+    result = await engine.stop_agent(instance_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.get("/api/instances/{instance_id}/logs")
+async def get_instance_logs(instance_id: str, tail: int = 100):
+    """Get recent logs for an instance process."""
+    logs = engine.get_logs(instance_id, tail)
+    return {"instance_id": instance_id, "logs": logs}
 
 
 @app.post("/api/agents/params/{agent_id}")

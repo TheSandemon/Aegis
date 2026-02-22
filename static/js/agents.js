@@ -1,74 +1,154 @@
-/* Aegis Agents Module */
-let agentStatus = {};
+/* Aegis Workers Module — Instance-based sidebar */
+let instancesData = [];
 let registryData = [];
 
-async function loadAgents() {
+async function loadInstances() {
     try {
-        const res = await fetch('/api/agents/params');
-        agentStatus = await res.json();
-        renderAgentMenu();
-    } catch (e) { console.error('Error loading agents:', e); }
+        const res = await fetch('/api/instances');
+        instancesData = await res.json();
+        renderInstancesSidebar();
+    } catch (e) { console.error('Error loading instances:', e); }
 }
 
-function renderAgentMenu() {
+function renderInstancesSidebar() {
     const list = document.getElementById('agentCardsList');
     if (!list) return;
-    list.innerHTML = Object.entries(agentStatus).map(([id, data]) => {
-        const isRunning = data.status === 'running';
-        const rgb = hexToRgb(data.color);
+
+    if (instancesData.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state" style="padding:2rem 1rem;">
+                <div class="empty-state-icon" style="font-size:2rem;">🏗️</div>
+                <div class="empty-state-text" style="font-size:0.8rem;">No workers yet.<br>Create one from an installed template.</div>
+            </div>`;
+        return;
+    }
+
+    list.innerHTML = instancesData.map(inst => {
+        const isRunning = inst.runtime_status === 'running';
+        const color = inst.color || '#6366f1';
+        const rgb = hexToRgb(color);
         return `
-            <div class="agent-sidebar-card ${isRunning ? 'active' : ''}" 
-                 style="--agent-color: ${data.color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b}">
+            <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
+                 style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b}"
+                 data-instance-id="${inst.instance_id}">
                 <div class="agent-sidebar-header">
-                    <div class="agent-avatar" style="border-color: ${data.color}">${getAgentEmoji(id)}</div>
+                    <div class="agent-avatar" style="border-color: ${color}">${inst.icon || '🤖'}</div>
                     <div class="agent-info-main">
-                        <div class="agent-name">${data.name}</div>
+                        <div class="agent-name">${escapeHtml(inst.instance_name)}</div>
                         <div class="agent-status-tag ${isRunning ? 'running' : ''}">
                             <div class="dot"></div>
-                            <span>${data.status.charAt(0).toUpperCase() + data.status.slice(1)}</span>
+                            <span>${inst.runtime_status ? inst.runtime_status.charAt(0).toUpperCase() + inst.runtime_status.slice(1) : 'Stopped'}</span>
                         </div>
                     </div>
                 </div>
-                ${isRunning && data.current_card ? `<div class="agent-working-on"><b>Working on:</b> ${data.current_card.title || 'Card #' + data.current_card.id}</div>` : ''}
                 <div class="agent-params">
-                    <div class="param-row"><span>Profile</span><b>${data.params.profile || 'default'}</b></div>
-                    <div class="param-row"><span>Isolation</span><b>${data.params.isolation || 'subprocess'}</b></div>
-                    <div class="param-row"><span>Enabled</span>
-                        <label class="toggle"><input type="checkbox" ${data.params.enabled ? 'checked' : ''} onchange="updateAgentParam('${id}', 'enabled', this.checked)"><span class="toggle-slider"></span></label>
-                    </div>
+                    <div class="param-row"><span>Template</span><b>${escapeHtml(inst.template_id)}</b></div>
+                    <div class="param-row"><span>Instance</span><b style="font-size:0.65rem;color:var(--text-secondary);">${inst.instance_id}</b></div>
+                </div>
+                <div style="display:flex;gap:0.25rem;margin-top:0.5rem;">
+                    ${!isRunning ? `<button onclick="startInstance('${inst.instance_id}')" style="flex:1;background:#22c55e;font-size:0.7rem;">▶ Start</button>` : ''}
+                    ${isRunning ? `<button class="danger" onclick="stopInstance('${inst.instance_id}')" style="flex:1;font-size:0.7rem;">⏹ Stop</button>` : ''}
+                    <button class="secondary" onclick="viewInstanceLogs('${inst.instance_id}')" style="font-size:0.7rem;">📋</button>
+                    ${!isRunning ? `<button class="danger" onclick="deleteWorkerInstance('${inst.instance_id}')" style="font-size:0.7rem;">🗑</button>` : ''}
                 </div>
             </div>`;
     }).join('');
-    updateGlowEffects();
+}
+
+function hexToRgb(hex) {
+    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+    return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 99, g: 102, b: 241 };
 }
 
 function getAgentEmoji(id) {
     const emojis = { architect: '🏗️', coder: '💻', researcher: '🔍', security: '🛡️' };
     return emojis[id] || '🤖';
 }
-function hexToRgb(hex) {
-    const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
-    return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 99, g: 102, b: 241 };
-}
 
-async function updateAgentParam(agentId, key, value) {
+// ─── Instance Actions ────────────────────────────────────────────────────
+
+async function startInstance(instanceId) {
+    showToast(`Starting ${instanceId}...`);
     try {
-        const res = await fetch(`/api/agents/params/${agentId}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ [key]: value }) });
-        if (res.ok) { agentStatus[agentId].params[key] = value; showToast(`${agentId} parameter updated`); }
-    } catch (e) { showToast('Failed to update agent parameter'); }
+        const res = await fetch(`/api/instances/${instanceId}/start`, { method: 'POST' });
+        res.ok ? showToast(`▶ Worker started!`) : showToast(`⚠️ ${(await res.json()).detail || 'Start failed'}`);
+        await loadInstances();
+    } catch (e) { showToast('Start failed'); }
 }
 
-function updateGlowEffects() {
-    document.querySelectorAll('.card').forEach(c => { c.classList.remove('agent-active'); c.style.removeProperty('--agent-color'); });
-    Object.entries(agentStatus).forEach(([id, data]) => {
-        if (data.status === 'running' && data.current_card) {
-            const el = document.querySelector(`.card[data-id="${data.current_card.id}"]`);
-            if (el) { el.classList.add('agent-active'); el.style.setProperty('--agent-color', data.color); }
+async function stopInstance(instanceId) {
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/stop`, { method: 'POST' });
+        res.ok ? showToast(`⏹ Worker stopped`) : showToast(`⚠️ ${(await res.json()).detail || 'Stop failed'}`);
+        await loadInstances();
+    } catch (e) { showToast('Stop failed'); }
+}
+
+async function deleteWorkerInstance(instanceId) {
+    if (!confirm(`Delete this worker instance? Files will be removed.`)) return;
+    try {
+        const res = await fetch(`/api/instances/${instanceId}`, { method: 'DELETE' });
+        res.ok ? showToast(`🗑 Worker deleted`) : showToast(`⚠️ Delete failed`);
+        await loadInstances();
+    } catch (e) { showToast('Delete failed'); }
+}
+
+async function viewInstanceLogs(instanceId) {
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/logs?tail=50`);
+        const d = await res.json();
+        const logs = d.logs || [];
+        alert(logs.length > 0 ? logs.join('\n') : 'No output yet.');
+    } catch (e) { showToast('Failed to load logs'); }
+}
+
+// ─── Create Worker Modal ────────────────────────────────────────────────
+
+async function openCreateWorkerModal() {
+    document.getElementById('createWorkerModal').classList.add('active');
+    // Load installed templates
+    try {
+        const res = await fetch('/api/registry');
+        registryData = await res.json();
+        const select = document.getElementById('workerTemplate');
+        select.innerHTML = '<option value="">Select a template...</option>';
+        registryData.filter(a => a.installed).forEach(a => {
+            select.innerHTML += `<option value="${a.id}">${a.icon || '🤖'} ${escapeHtml(a.name)} (${a.id})</option>`;
+        });
+        if (registryData.filter(a => a.installed).length === 0) {
+            select.innerHTML += '<option value="" disabled>No templates installed. Visit Marketplace first.</option>';
         }
-    });
+    } catch (e) { console.error('Failed to load registry', e); }
 }
 
-// Marketplace
+async function createWorkerInstance() {
+    const templateId = document.getElementById('workerTemplate').value;
+    const instanceName = document.getElementById('workerName').value.trim();
+
+    if (!templateId) { showToast('Select a template'); return; }
+    if (!instanceName) { showToast('Enter a worker name'); return; }
+
+    showToast(`Creating ${instanceName}...`);
+    try {
+        const res = await fetch('/api/instances/create', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ template_id: templateId, instance_name: instanceName })
+        });
+        if (res.ok) {
+            showToast(`✅ Worker "${instanceName}" created!`);
+            closeModal('createWorkerModal');
+            document.getElementById('workerName').value = '';
+            await loadInstances();
+        } else {
+            const err = await res.json();
+            showToast(`⚠️ ${err.detail || 'Create failed'}`);
+        }
+    } catch (e) { showToast('Create failed'); }
+}
+
+// ─── Marketplace (kept for install flow) ──────────────────────────────
+
 async function openMarketplaceModal() { document.getElementById('marketplaceModal').classList.add('active'); await loadRegistry(); }
 
 function switchMarketTab(tabId, btn) {
@@ -91,14 +171,11 @@ function renderRegistry(agents) {
                 <span class="agent-icon">${a.icon || '🤖'}</span>
                 <div class="agent-card-info"><h4>${escapeHtml(a.name)}</h4><small>v${a.version} · ${a.license}</small></div>
                 ${a.installed ? '<span class="badge badge-installed">Installed</span>' : ''}
-                ${a.runtime_status === 'running' ? '<span class="badge badge-running">Running</span>' : ''}
             </div>
             <div class="agent-card-desc">${escapeHtml(a.description)}</div>
             <div class="agent-card-actions">
                 <a href="${a.support_url}" target="_blank" style="text-decoration:none;"><button class="secondary" style="font-size:0.75rem;">⭐ GitHub</button></a>
-                ${!a.installed ? `<button onclick="installAgent('${a.id}')">📥 Install</button>` : ''}
-                ${a.installed && a.runtime_status !== 'running' ? `<button onclick="startAgent('${a.id}')" style="background:#22c55e;">▶ Start</button>` : ''}
-                ${a.runtime_status === 'running' ? `<button class="danger" onclick="stopAgent('${a.id}')">⏹ Stop</button>` : ''}
+                ${!a.installed ? `<button onclick="installAgent('${a.id}')">📥 Install</button>` : `<span style="color:var(--text-secondary);font-size:0.75rem;">✓ Ready to instance</span>`}
             </div>
         </div>`).join('');
 }
@@ -111,21 +188,6 @@ async function installAgent(agentId) {
         await loadRegistry();
     } catch (e) { showToast('Install failed'); }
 }
-async function startAgent(agentId) {
-    showToast(`Starting ${agentId}...`);
-    try {
-        const res = await fetch(`/api/agents/start/${agentId}`, { method: 'POST' });
-        res.ok ? showToast(`▶ ${agentId} started!`) : showToast(`⚠️ ${(await res.json()).detail || 'Start failed'}`);
-        await loadRegistry();
-    } catch (e) { showToast('Start failed'); }
-}
-async function stopAgent(agentId) {
-    try {
-        const res = await fetch(`/api/agents/stop/${agentId}`, { method: 'POST' });
-        res.ok ? showToast(`⏹ ${agentId} stopped`) : showToast(`⚠️ ${(await res.json()).detail || 'Stop failed'}`);
-        await loadRegistry();
-    } catch (e) { showToast('Stop failed'); }
-}
 
 async function loadActiveRuntimes() {
     try {
@@ -133,16 +195,17 @@ async function loadActiveRuntimes() {
         const container = document.getElementById('runtimesList');
         if (runtimes.length === 0) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💤</div><div class="empty-state-text">No active runtimes.</div></div>'; return; }
         container.innerHTML = runtimes.map(r => {
-            const agent = registryData.find(a => a.id === r.agent_id) || {};
-            return `<div class="runtime-row"><span class="agent-icon">${agent.icon || '🤖'}</span><div class="runtime-info"><h4>${agent.name || r.agent_id}</h4><small>PID: ${r.pid} · <span class="badge badge-${r.status}">${r.status}</span> · ${r.log_count} logs</small></div>${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopAgent('${r.agent_id}')">⏹</button>` : ''}</div><div class="runtime-logs" id="logs-${r.agent_id}">Loading...</div>`;
+            return `<div class="runtime-row"><span class="agent-icon">${r.instance_name ? '⚙️' : '🤖'}</span><div class="runtime-info"><h4>${r.instance_name || r.agent_id}</h4><small>PID: ${r.pid} · <span class="badge badge-${r.status}">${r.status}</span> · ${r.log_count} logs</small></div>${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopInstance('${r.instance_id || r.agent_id}')">⏹</button>` : ''}</div>`;
         }).join('');
-        for (const r of runtimes) loadRuntimeLogs(r.agent_id);
     } catch (e) { document.getElementById('runtimesList').textContent = 'Failed to load runtimes'; }
 }
-async function loadRuntimeLogs(agentId) {
-    try {
-        const res = await fetch(`/api/agents/${agentId}/logs?tail=50`); const d = await res.json();
-        const el = document.getElementById(`logs-${agentId}`);
-        if (el) { el.innerHTML = d.logs.length > 0 ? d.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('') : 'No output yet...'; el.scrollTop = el.scrollHeight; }
-    } catch (e) { /* ignore */ }
+
+// Glow effects
+function updateGlowEffects() {
+    document.querySelectorAll('.card').forEach(c => { c.classList.remove('agent-active'); c.style.removeProperty('--agent-color'); });
 }
+
+// Called on page load — renamed from loadAgents
+async function loadAgents() { await loadInstances(); }
+
+function updateAgentParam(agentId, key, value) { /* Legacy no-op */ }

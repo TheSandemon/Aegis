@@ -1,5 +1,6 @@
 <!DOCTYPE html>
 <html lang="en">
+
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -10,7 +11,7 @@
             padding: 0;
             box-sizing: border-box;
         }
-        
+
         :root {
             --bg-dark: #0f0f14;
             --bg-card: #1a1a24;
@@ -27,14 +28,14 @@
             --review: #06b6d4;
             --done: #22c55e;
         }
-        
+
         body {
             font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
             background: var(--bg-dark);
             color: var(--text-primary);
             min-height: 100vh;
         }
-        
+
         header {
             background: var(--bg-card);
             border-bottom: 1px solid var(--border);
@@ -43,7 +44,7 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
         header h1 {
             font-size: 1.25rem;
             font-weight: 700;
@@ -51,15 +52,17 @@
             align-items: center;
             gap: 0.5rem;
         }
-        
-        header h1 span { color: var(--accent); }
-        
+
+        header h1 span {
+            color: var(--accent);
+        }
+
         .header-left {
             display: flex;
             align-items: center;
             gap: 1rem;
         }
-        
+
         .connection-status {
             display: flex;
             align-items: center;
@@ -67,28 +70,41 @@
             font-size: 0.75rem;
             color: var(--text-secondary);
         }
-        
+
         .status-dot {
             width: 8px;
             height: 8px;
             border-radius: 50%;
             background: #22c55e;
         }
-        
-        .status-dot.disconnected { background: #ef4444; }
-        .status-dot.connecting { background: #f59e0b; animation: pulse 1s infinite; }
-        
-        @keyframes pulse {
-            0%, 100% { opacity: 1; }
-            50% { opacity: 0.5; }
+
+        .status-dot.disconnected {
+            background: #ef4444;
         }
-        
+
+        .status-dot.connecting {
+            background: #f59e0b;
+            animation: pulse 1s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
         .header-actions {
             display: flex;
             gap: 0.5rem;
             align-items: center;
         }
-        
+
         .header-search {
             background: var(--bg-dark);
             border: 1px solid var(--border);
@@ -99,17 +115,17 @@
             font-size: 0.875rem;
             width: 180px;
         }
-        
+
         .header-search:focus {
             outline: none;
             border-color: var(--accent);
         }
-        
+
         .search-wrapper {
             position: relative;
             display: inline-block;
         }
-        
+
         .search-clear {
             position: absolute;
             right: 6px;
@@ -124,11 +140,11 @@
             line-height: 1;
             display: none;
         }
-        
+
         .search-clear.visible {
             display: block;
         }
-        
+
         button {
             background: var(--accent);
             color: white;
@@ -140,27 +156,33 @@
             font-weight: 500;
             transition: background 0.2s;
         }
-        
-        button:hover { background: var(--accent-hover); }
-        
+
+        button:hover {
+            background: var(--accent-hover);
+        }
+
         button.secondary {
             background: var(--bg-card);
             border: 1px solid var(--border);
         }
-        
-        button.secondary:hover { background: var(--border); }
-        
+
+        button.secondary:hover {
+            background: var(--border);
+        }
+
         button.danger {
             background: #dc2626;
         }
-        
-        button.danger:hover { background: #ef4444; }
-        
+
+        button.danger:hover {
+            background: #ef4444;
+        }
+
         button.small {
             padding: 0.25rem 0.5rem;
             font-size: 0.7rem;
         }
-        
+
         .board {
             display: flex;
             gap: 1rem;
@@ -168,7 +190,7 @@
             height: calc(100vh - 56px);
             overflow-x: auto;
         }
-        
+
         .column {
             background: var(--bg-column);
             border-radius: 0.5rem;
@@ -178,7 +200,7 @@
             display: flex;
             flex-direction: column;
         }
-        
+
         .column-header {
             padding: 0.75rem;
             border-bottom: 1px solid var(--border);
@@ -186,14 +208,14 @@
             justify-content: space-between;
             align-items: center;
         }
-        
+
         .column-header h2 {
             font-size: 0.75rem;
             font-weight: 600;
             text-transform: uppercase;
             letter-spacing: 0.05em;
         }
-        
+
         .column-header .count {
             background: var(--bg-card);
             padding: 0.125rem 0.5rem;
@@ -201,7 +223,7 @@
             font-size: 0.7rem;
             color: var(--text-secondary);
         }
-        
+
         .column-body {
             padding: 0.5rem;
             flex: 1;
@@ -210,11 +232,11 @@
             flex-direction: column;
             gap: 0.5rem;
         }
-        
+
         .column-body.drag-over {
             background: rgba(99, 102, 241, 0.1);
         }
-        
+
         .card {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -223,18 +245,18 @@
             cursor: pointer;
             transition: border-color 0.2s, transform 0.2s;
         }
-        
+
         .card:hover {
             border-color: var(--accent);
             transform: translateY(-1px);
         }
-        
+
         .card-title {
             font-weight: 500;
             font-size: 0.875rem;
             margin-bottom: 0.375rem;
         }
-        
+
         .card-meta {
             display: flex;
             justify-content: space-between;
@@ -243,17 +265,17 @@
             color: var(--text-secondary);
             gap: 0.5rem;
         }
-        
+
         .card-meta-left {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .card-age {
             opacity: 0.7;
         }
-        
+
         .card-assignee {
             background: var(--accent);
             color: white;
@@ -261,24 +283,70 @@
             border-radius: 1rem;
             font-size: 0.65rem;
         }
-        
+
         .card-status {
             padding: 0.1rem 0.375rem;
             border-radius: 1rem;
             font-size: 0.65rem;
         }
-        
-        .status-running { background: rgba(245, 158, 11, 0.2); color: #f59e0b; }
-        .status-completed { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
-        .status-blocked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
-        
-        .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
-        .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
-        .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
-        .column[data-column="Blocked"] .column-header h2 { color: var(--blocked); }
-        .column[data-column="Review"] .column-header h2 { color: var(--review); }
-        .column[data-column="Done"] .column-header h2 { color: var(--done); }
-        
+
+        .status-running {
+            background: rgba(245, 158, 11, 0.2);
+            color: #f59e0b;
+            animation: soft-pulse 2s infinite;
+        }
+
+        .status-completed {
+            background: rgba(34, 197, 94, 0.2);
+            color: #22c55e;
+        }
+
+        .status-blocked {
+            background: rgba(239, 68, 68, 0.2);
+            color: #ef4444;
+        }
+
+        .status-terminated {
+            background: rgba(113, 113, 122, 0.2);
+            color: #71717a;
+        }
+
+        @keyframes soft-pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.6;
+            }
+        }
+
+        .column[data-column="Inbox"] .column-header h2 {
+            color: var(--inbox);
+        }
+
+        .column[data-column="Planned"] .column-header h2 {
+            color: var(--planned);
+        }
+
+        .column[data-column="In Progress"] .column-header h2 {
+            color: var(--in-progress);
+        }
+
+        .column[data-column="Blocked"] .column-header h2 {
+            color: var(--blocked);
+        }
+
+        .column[data-column="Review"] .column-header h2 {
+            color: var(--review);
+        }
+
+        .column[data-column="Done"] .column-header h2 {
+            color: var(--done);
+        }
+
         /* Modals */
         .modal-overlay {
             display: none;
@@ -289,9 +357,11 @@
             align-items: center;
             justify-content: center;
         }
-        
-        .modal-overlay.active { display: flex; }
-        
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
         .modal {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -303,7 +373,7 @@
             display: flex;
             flex-direction: column;
         }
-        
+
         .modal-header {
             padding: 1rem;
             border-bottom: 1px solid var(--border);
@@ -311,9 +381,11 @@
             justify-content: space-between;
             align-items: center;
         }
-        
-        .modal-header h3 { font-size: 1rem; }
-        
+
+        .modal-header h3 {
+            font-size: 1rem;
+        }
+
         .modal-close {
             background: none;
             border: none;
@@ -322,13 +394,13 @@
             cursor: pointer;
             line-height: 1;
         }
-        
+
         .modal-body {
             padding: 1rem;
             flex: 1;
             overflow-y: auto;
         }
-        
+
         .modal-footer {
             padding: 1rem;
             border-top: 1px solid var(--border);
@@ -336,16 +408,18 @@
             justify-content: flex-end;
             gap: 0.5rem;
         }
-        
-        .form-group { margin-bottom: 1rem; }
-        
+
+        .form-group {
+            margin-bottom: 1rem;
+        }
+
         .form-group label {
             display: block;
             font-size: 0.8rem;
             color: var(--text-secondary);
             margin-bottom: 0.375rem;
         }
-        
+
         .form-group input,
         .form-group textarea,
         .form-group select {
@@ -358,9 +432,12 @@
             font-size: 0.875rem;
             font-family: inherit;
         }
-        
-        .form-group textarea { min-height: 80px; resize: vertical; }
-        
+
+        .form-group textarea {
+            min-height: 80px;
+            resize: vertical;
+        }
+
         .terminal {
             background: #0a0a0a;
             border-radius: 0.375rem;
@@ -373,14 +450,14 @@
             white-space: pre-wrap;
             word-break: break-all;
         }
-        
+
         .toast-container {
             position: fixed;
             bottom: 1rem;
             right: 1rem;
             z-index: 200;
         }
-        
+
         .toast {
             background: var(--bg-card);
             border: 1px solid var(--border);
@@ -389,26 +466,38 @@
             margin-top: 0.5rem;
             animation: slideIn 0.3s ease;
         }
-        
+
         @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+            from {
+                transform: translateX(100%);
+                opacity: 0;
+            }
+
+            to {
+                transform: translateX(0);
+                opacity: 1;
+            }
         }
-        
-        .card[draggable="true"] { cursor: grab; }
-        .card.dragging { opacity: 0.5; }
-        
+
+        .card[draggable="true"] {
+            cursor: grab;
+        }
+
+        .card.dragging {
+            opacity: 0.5;
+        }
+
         /* Settings specific */
         .settings-section {
             margin-bottom: 1.5rem;
         }
-        
+
         .settings-section h4 {
             font-size: 0.875rem;
             margin-bottom: 0.75rem;
             color: var(--accent);
         }
-        
+
         .agent-config {
             display: flex;
             align-items: center;
@@ -418,31 +507,35 @@
             border-radius: 0.375rem;
             margin-bottom: 0.5rem;
         }
-        
+
         .agent-config-info {
             display: flex;
             align-items: center;
             gap: 0.5rem;
         }
-        
+
         .agent-config-name {
             font-weight: 500;
             font-size: 0.875rem;
         }
-        
+
         .agent-config-binary {
             font-size: 0.7rem;
             color: var(--text-secondary);
         }
-        
+
         .toggle {
             position: relative;
             width: 40px;
             height: 22px;
         }
-        
-        .toggle input { opacity: 0; width: 0; height: 0; }
-        
+
+        .toggle input {
+            opacity: 0;
+            width: 0;
+            height: 0;
+        }
+
         .toggle-slider {
             position: absolute;
             cursor: pointer;
@@ -451,7 +544,7 @@
             border-radius: 22px;
             transition: 0.3s;
         }
-        
+
         .toggle-slider:before {
             content: "";
             position: absolute;
@@ -463,27 +556,33 @@
             border-radius: 50%;
             transition: 0.3s;
         }
-        
-        .toggle input:checked + .toggle-slider { background: var(--accent); }
-        .toggle input:checked + .toggle-slider:before { transform: translateX(18px); }
-        
+
+        .toggle input:checked+.toggle-slider {
+            background: var(--accent);
+        }
+
+        .toggle input:checked+.toggle-slider:before {
+            transform: translateX(18px);
+        }
+
         /* Empty state */
         .empty-state {
             text-align: center;
             padding: 2rem 1rem;
             color: var(--text-secondary);
         }
-        
+
         .empty-state-icon {
             font-size: 2rem;
             margin-bottom: 0.5rem;
         }
-        
+
         .empty-state-text {
             font-size: 0.8rem;
         }
     </style>
 </head>
+
 <body>
     <header>
         <div class="header-left">
@@ -495,16 +594,17 @@
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
-                <input type="text" class="header-search" id="searchInput" placeholder="Search cards..." oninput="filterCards()">
+                <input type="text" class="header-search" id="searchInput" placeholder="Search cards..."
+                    oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button onclick="openNewCardModal()">+ New Card</button>
         </div>
     </header>
-    
+
     <div class="board" id="board"></div>
-    
+
     <!-- New Card Modal -->
     <div class="modal-overlay" id="newCardModal">
         <div class="modal">
@@ -532,7 +632,7 @@
             </div>
         </div>
     </div>
-    
+
     <!-- Card Detail Modal -->
     <div class="modal-overlay" id="cardDetailModal">
         <div class="modal">
@@ -566,12 +666,15 @@
             </div>
             <div class="modal-footer">
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
+                <div style="flex:1"></div>
+                <button id="stopAgentBtn" class="danger secondary small" style="display:none;"
+                    onclick="stopCurrentAgent()">Stop Agent</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
             </div>
         </div>
     </div>
-    
+
     <!-- Settings Modal -->
     <div class="modal-overlay" id="settingsModal">
         <div class="modal" style="max-width: 550px;">
@@ -602,9 +705,9 @@
             </div>
         </div>
     </div>
-    
+
     <div class="toast-container" id="toastContainer"></div>
-    
+
     <script>
         let cards = [];
         let config = {};
@@ -612,7 +715,7 @@
         let currentCardId = null;
         let terminalRefreshInterval = null;
         let searchFilter = '';
-        
+
         async function init() {
             await loadConfig();
             populateColumnSelects();
@@ -620,40 +723,40 @@
             connectWebSocket();
             renderBoard();
         }
-        
+
         async function loadConfig() {
             const res = await fetch('/api/config');
             config = await res.json();
         }
-        
+
         async function loadCards() {
             const res = await fetch('/api/cards');
             cards = await res.json();
         }
-        
+
         function connectWebSocket() {
             updateConnectionStatus('connecting');
             ws = new WebSocket(`ws://${location.host}/ws`);
-            
+
             ws.onopen = () => updateConnectionStatus('connected');
             ws.onclose = () => { updateConnectionStatus('disconnected'); setTimeout(connectWebSocket, 3000); };
             ws.onerror = () => updateConnectionStatus('disconnected');
-            
+
             ws.onmessage = (event) => {
                 const data = JSON.parse(event.data);
                 handleWebSocketMessage(data);
             };
         }
-        
+
         function updateConnectionStatus(status) {
             const dot = document.getElementById('wsStatus');
             const text = document.getElementById('wsStatusText');
             dot.className = 'status-dot ' + status;
             text.textContent = status === 'connected' ? 'Live' : status === 'connecting' ? 'Connecting...' : 'Disconnected';
         }
-        
+
         function handleWebSocketMessage(data) {
-            switch(data.type) {
+            switch (data.type) {
                 case 'card_created':
                     cards.push(data.card);
                     renderBoard();
@@ -674,11 +777,11 @@
                     if (currentCardId === data.card_id) {
                         const terminal = document.getElementById('terminalOutput');
                         const wasAtBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 1;
-                        
+
                         const entry = document.createElement('div');
                         entry.textContent = data.entry;
                         terminal.appendChild(entry);
-                        
+
                         if (wasAtBottom) {
                             terminal.scrollTop = terminal.scrollHeight;
                         }
@@ -686,7 +789,7 @@
                     break;
             }
         }
-        
+
         function populateColumnSelects() {
             const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
             const selects = ['cardColumn', 'detailColumn'];
@@ -694,43 +797,43 @@
                 const sel = document.getElementById(id);
                 sel.innerHTML = columns.map(c => `<option value="${c}">${c}</option>`).join('');
             });
-            
+
             // Populate assignees
             const assigneeSel = document.getElementById('detailAssignee');
             const agents = Object.keys(config.agents || {});
-            assigneeSel.innerHTML = '<option value="">Unassigned</option>' + 
+            assigneeSel.innerHTML = '<option value="">Unassigned</option>' +
                 agents.map(a => `<option value="${a}">${a}</option>`).join('');
         }
-        
+
         function filterCards() {
             searchFilter = document.getElementById('searchInput').value;
             document.getElementById('searchClear').classList.toggle('visible', searchFilter.length > 0);
             renderBoard();
         }
-        
+
         function clearSearch() {
             document.getElementById('searchInput').value = '';
             filterCards();
         }
-        
+
         function renderBoard() {
             const board = document.getElementById('board');
             board.innerHTML = '';
-            
+
             const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
-            
+
             columns.forEach(column => {
                 let columnCards = cards.filter(c => c.column === column);
-                
+
                 // Apply search filter
                 if (searchFilter) {
                     const filter = searchFilter.toLowerCase();
-                    columnCards = columnCards.filter(c => 
-                        c.title.toLowerCase().includes(filter) || 
+                    columnCards = columnCards.filter(c =>
+                        c.title.toLowerCase().includes(filter) ||
                         (c.description && c.description.toLowerCase().includes(filter))
                     );
                 }
-                
+
                 const colDiv = document.createElement('div');
                 colDiv.className = 'column';
                 colDiv.dataset.column = column;
@@ -739,33 +842,33 @@
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
                     </div>
                     <div class="column-body" data-column="${column}">
-                        ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') : 
+                        ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') :
                         `<div class="empty-state"><div class="empty-state-icon">${searchFilter ? '🔍' : '📭'}</div><div class="empty-state-text">${searchFilter ? 'No matching cards' : 'No cards'}</div></div>`}
                     </div>
                 `;
-                
+
                 const colBody = colDiv.querySelector('.column-body');
                 colBody.addEventListener('dragover', handleDragOver);
                 colBody.addEventListener('drop', handleDrop);
                 colBody.addEventListener('dragleave', handleDragLeave);
-                
+
                 board.appendChild(colDiv);
             });
-            
+
             document.querySelectorAll('.card').forEach(card => {
                 card.addEventListener('dragstart', handleDragStart);
                 card.addEventListener('dragend', handleDragEnd);
                 card.addEventListener('click', () => openCardDetail(parseInt(card.dataset.id)));
             });
         }
-        
+
         function renderCard(card) {
             const age = formatRelativeTime(card.updated_at);
             let statusClass = '';
             if (card.status === 'running') statusClass = 'status-running';
             else if (card.status === 'completed') statusClass = 'status-completed';
             else if (card.column === 'Blocked') statusClass = 'status-blocked';
-            
+
             return `
                 <div class="card" draggable="true" data-id="${card.id}">
                     <div class="card-title">${escapeHtml(card.title)}</div>
@@ -779,33 +882,33 @@
                 </div>
             `;
         }
-        
+
         let draggedCardId = null;
-        
+
         function handleDragStart(e) {
             draggedCardId = parseInt(e.target.dataset.id);
             e.target.classList.add('dragging');
         }
-        
+
         function handleDragEnd(e) {
             e.target.classList.remove('dragging');
             document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over'));
         }
-        
+
         function handleDragOver(e) {
             e.preventDefault();
             e.currentTarget.classList.add('drag-over');
         }
-        
+
         function handleDragLeave(e) {
             e.currentTarget.classList.remove('drag-over');
         }
-        
+
         async function handleDrop(e) {
             e.preventDefault();
             const column = e.currentTarget.dataset.column;
             const card = cards.find(c => c.id === draggedCardId);
-            
+
             if (card && card.column !== column) {
                 if (card.column !== 'Review' && column === 'Review') {
                     showToast('⚠️ Only humans can move to Review!');
@@ -813,57 +916,60 @@
                 }
                 await fetch(`/api/cards/${card.id}`, {
                     method: 'PATCH',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ column })
                 });
             }
             draggedCardId = null;
         }
-        
+
         // Modals
         function openNewCardModal() {
             document.getElementById('newCardModal').classList.add('active');
             document.getElementById('cardTitle').focus();
         }
-        
+
         async function createCard() {
             const title = document.getElementById('cardTitle').value.trim();
             const description = document.getElementById('cardDescription').value;
             const column = document.getElementById('cardColumn').value;
-            
+
             if (!title) { showToast('Title is required'); return; }
-            
+
             await fetch('/api/cards', {
                 method: 'POST',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ title, description, column })
             });
-            
+
             closeModal('newCardModal');
             document.getElementById('cardTitle').value = '';
             document.getElementById('cardDescription').value = '';
         }
-        
+
         async function openCardDetail(cardId) {
             currentCardId = cardId;
             const card = cards.find(c => c.id === cardId);
             if (!card) return;
-            
+
             document.getElementById('detailTitleInput').value = card.title;
             document.getElementById('detailDescription').value = card.description || '';
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
-            
-            if (card.status === 'running' || (card.logs && card.logs.length > 0)) {
+
+            const isRunning = card.status === 'running';
+            document.getElementById('stopAgentBtn').style.display = isRunning ? 'block' : 'none';
+
+            if (isRunning || (card.logs && card.logs.length > 0)) {
                 document.getElementById('terminalSection').style.display = 'block';
                 loadTerminalLogs(cardId);
             } else {
                 document.getElementById('terminalSection').style.display = 'none';
             }
-            
+
             document.getElementById('cardDetailModal').classList.add('active');
         }
-        
+
         async function loadTerminalLogs(cardId) {
             try {
                 const res = await fetch(`/api/cards/${cardId}/logs`);
@@ -871,11 +977,11 @@
                 const terminal = document.getElementById('terminalOutput');
                 terminal.innerHTML = data.logs?.map(l => `<div>${escapeHtml(l)}</div>`).join('') || 'Waiting for agent output...';
                 terminal.scrollTop = terminal.scrollHeight;
-            } catch(e) {
+            } catch (e) {
                 document.getElementById('terminalOutput').textContent = 'No logs available';
             }
         }
-        
+
         async function saveCardDetails() {
             const updates = {
                 title: document.getElementById('detailTitleInput').value,
@@ -883,40 +989,50 @@
                 assignee: document.getElementById('detailAssignee').value || null,
                 column: document.getElementById('detailColumn').value
             };
-            
+
             await fetch(`/api/cards/${currentCardId}`, {
                 method: 'PATCH',
-                headers: {'Content-Type': 'application/json'},
+                headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(updates)
             });
-            
+
             closeModal('cardDetailModal');
             if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
         }
-        
+
         async function deleteCurrentCard() {
             if (!confirm('Delete this card?')) return;
-            await fetch(`/api/cards/${currentCardId}`, {method: 'DELETE'});
+            await fetch(`/api/cards/${currentCardId}`, { method: 'DELETE' });
             closeModal('cardDetailModal');
-            if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
         }
-        
+
+        async function stopCurrentAgent() {
+            if (!confirm('Stop the running agent?')) return;
+            const res = await fetch(`/api/cards/${currentCardId}/agent`, { method: 'DELETE' });
+            if (res.ok) {
+                showToast('Agent stop signal sent');
+                document.getElementById('stopAgentBtn').style.display = 'none';
+            } else {
+                showToast('Failed to stop agent');
+            }
+        }
+
         function openSettingsModal() {
             renderAgentConfigs();
             document.getElementById('configPollingRate').value = config.polling_rate_ms || 5000;
             document.getElementById('configMaxAgents').value = config.max_concurrent_agents || 4;
             document.getElementById('settingsModal').classList.add('active');
         }
-        
+
         function renderAgentConfigs() {
             const container = document.getElementById('agentConfigs');
             const agents = config.agents || {};
-            
+
             if (Object.keys(agents).length === 0) {
                 container.innerHTML = '<p style="color:var(--text-secondary);font-size:0.8rem;">No agents configured. Edit aegis.config.json to add agents.</p>';
                 return;
             }
-            
+
             container.innerHTML = Object.entries(agents).map(([name, agent]) => `
                 <div class="agent-config">
                     <div class="agent-config-info">
@@ -932,34 +1048,34 @@
                 </div>
             `).join('');
         }
-        
+
         async function toggleAgent(name, enabled) {
             config.agents[name].enabled = enabled;
             await saveSettings();
         }
-        
+
         async function saveSettings() {
             config.polling_rate_ms = parseInt(document.getElementById('configPollingRate').value);
             config.max_concurrent_agents = parseInt(document.getElementById('configMaxAgents').value);
-            
+
             try {
                 const res = await fetch('/api/config', {
                     method: 'POST',
-                    headers: {'Content-Type': 'application/json'},
+                    headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config)
                 });
-                
+
                 if (res.ok) {
                     showToast('Settings saved');
                     closeModal('settingsModal');
                 } else {
                     showToast('Failed to save settings');
                 }
-            } catch(e) {
+            } catch (e) {
                 showToast('Error saving settings');
             }
         }
-        
+
         function closeModal(id) {
             document.getElementById(id).classList.remove('active');
             if (id === 'cardDetailModal' && terminalRefreshInterval) {
@@ -967,7 +1083,7 @@
                 terminalRefreshInterval = null;
             }
         }
-        
+
         function showToast(message) {
             const container = document.getElementById('toastContainer');
             const toast = document.createElement('div');
@@ -976,13 +1092,13 @@
             container.appendChild(toast);
             setTimeout(() => toast.remove(), 3000);
         }
-        
+
         function escapeHtml(text) {
             const div = document.createElement('div');
             div.textContent = text;
             return div.innerHTML;
         }
-        
+
         function formatRelativeTime(isoString) {
             if (!isoString) return '';
             const date = new Date(isoString);
@@ -992,21 +1108,22 @@
             const diffMin = Math.floor(diffSec / 60);
             const diffHour = Math.floor(diffMin / 60);
             const diffDay = Math.floor(diffHour / 24);
-            
+
             if (diffSec < 60) return 'now';
             if (diffMin < 60) return `${diffMin}m`;
             if (diffHour < 24) return `${diffHour}h`;
             if (diffDay < 7) return `${diffDay}d`;
             return `${Math.floor(diffDay / 7)}w`;
         }
-        
+
         document.querySelectorAll('.modal-overlay').forEach(overlay => {
             overlay.addEventListener('click', (e) => {
                 if (e.target === overlay) overlay.classList.remove('active');
             });
         });
-        
+
         init();
     </script>
 </body>
+
 </html>

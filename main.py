@@ -258,9 +258,15 @@ class AgentManager:
             return
 
         command = agent_config.get("binary")
-        # In a real scenario, we might want to pass task description as args
-        # For now, we'll just run the binary
+        card = store.get_card(card_id)
         
+        # Inject context via environment variables
+        env = os.environ.copy()
+        env["AEGIS_CARD_ID"] = str(card_id)
+        env["AEGIS_CARD_TITLE"] = card.get("title", "")
+        env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
+        env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
+
         try:
             store.update_card(card_id, status="running")
             await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
@@ -268,12 +274,13 @@ class AgentManager:
             process = await asyncio.create_subprocess_shell(
                 command,
                 stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE
+                stderr=asyncio.subprocess.PIPE,
+                env=env # Pass context
             )
             
             self.running_tasks[card_id] = process
             
-            # Stream logs
+            # Stream logs (Helper functions)
             async def stream_output(stream, log_type):
                 while True:
                     line = await stream.readline()
@@ -282,9 +289,11 @@ class AgentManager:
                     decoded_line = line.decode().strip()
                     if decoded_line:
                         log_entry = f"[{log_type}] {decoded_line}"
-                        # Update DB logs
-                        card = store.get_card(card_id)
-                        logs = card.get("logs", [])
+                        # Update DB logs efficiently (batch or append)
+                        # For now, append and save
+                        current_card = store.get_card(card_id)
+                        if not current_card: break # Card deleted
+                        logs = current_card.get("logs", [])
                         logs.append(log_entry)
                         store.update_card(card_id, logs=json.dumps(logs))
                         # Broadcast
@@ -300,7 +309,12 @@ class AgentManager:
             )
             
             return_code = await process.wait()
-            status = "completed" if return_code == 0 else "failed"
+            
+            # Check if process was terminated manually
+            if card_id not in self.running_tasks:
+                status = "terminated"
+            else:
+                status = "completed" if return_code == 0 else "failed"
             
             store.update_card(card_id, status=status)
             await manager.broadcast({"type": "card_updated", "card": store.get_card(card_id)})
@@ -313,7 +327,25 @@ class AgentManager:
             if card_id in self.running_tasks:
                 del self.running_tasks[card_id]
 
+    async def stop_agent(self, card_id: int):
+        if card_id in self.running_tasks:
+            process = self.running_tasks[card_id]
+            try:
+                process.terminate()
+                # We'll let the wait() in run_agent handle the status update
+                logger.info(f"Terminating agent for card {card_id}")
+                return True
+            except Exception as e:
+                logger.error(f"Error terminating agent {card_id}: {e}")
+        return False
+
 agent_manager = AgentManager()
+
+@app.delete("/api/cards/{card_id}/agent")
+async def stop_card_agent(card_id: int):
+    if await agent_manager.stop_agent(card_id):
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="No running agent found for this card")
 
 @app.get("/api/cards/{card_id}/logs")
 async def get_card_logs(card_id: int):
@@ -345,24 +377,34 @@ async def polling_loop():
         try:
             await asyncio.sleep(CONFIG["polling_rate_ms"] / 1000)
             
-            # Find planned cards without assignees
-            planned_cards = [c for c in store.get_cards(column="Planned") if not c.get("assignee")]
+            # Check concurrency limit
+            running_count = len(agent_manager.running_tasks)
+            max_agents = CONFIG.get("max_concurrent_agents", 4)
             
-            for card in planned_cards:
-                # Try to assign to an available agent
-                for agent_name, agent_config in CONFIG.get("agents", {}).items():
-                    if agent_config.get("enabled"):
-                        store.update_card(card["id"], assignee=agent_name, status="assigned")
-                        logger.info(f"Routed card {card['id']} to {agent_name}")
-                        await manager.broadcast({
-                            "type": "card_assigned",
-                            "card_id": card["id"],
-                            "agent": agent_name
-                        })
-                        
-                        # Trigger actual agent execution
-                        asyncio.create_task(agent_manager.run_agent(card["id"], agent_name))
+            if running_count < max_agents:
+                # Find planned cards without assignees
+                planned_cards = [c for c in store.get_cards(column="Planned") if not c.get("assignee")]
+                
+                for card in planned_cards:
+                    # Check if we still have room
+                    if len(agent_manager.running_tasks) >= max_agents:
                         break
+                        
+                    # Try to assign to an available agent
+                    for agent_name, agent_config in CONFIG.get("agents", {}).items():
+                        if agent_config.get("enabled"):
+                            # ... assignment logic ...
+                            store.update_card(card["id"], assignee=agent_name, status="assigned")
+                            logger.info(f"Routed card {card['id']} to {agent_name}")
+                            await manager.broadcast({
+                                "type": "card_assigned",
+                                "card_id": card["id"],
+                                "agent": agent_name
+                            })
+                            
+                            # Trigger actual agent execution
+                            asyncio.create_task(agent_manager.run_agent(card["id"], agent_name))
+                            break
                         
         except Exception as e:
             logger.error(f"Polling error: {e}")

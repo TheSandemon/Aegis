@@ -16,7 +16,7 @@
   ],
   "agents": {
     "architect": {
-      "binary": "openclaw",
+      "binary": "python mock_agent.py",
       "profile": "sys_arch",
       "enabled": true
     },

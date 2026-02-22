@@ -809,26 +809,49 @@ async def polling_loop():
                     if deps and not all(d in done_ids for d in deps):
                         continue
 
-                    for agent_name, agent_config in CONFIG.get("agents", {}).items():
-                        if agent_config.get("enabled"):
-                            registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_name), None)
+                    instances = load_instances()
+                    active_instances = [i for i in instances if i.get("enabled", True)]
+                    
+                    if not active_instances:
+                        break # No workers available
 
-                            store.update_card(card["id"], assignee=agent_name, status="assigned")
-                            logger.info(f"Routed card {card['id']} to {agent_name}")
-                            await manager.broadcast({
-                                "type": "card_assigned",
-                                "card_id": card["id"],
-                                "agent": agent_name
-                            })
+                    # Pick the first available instance (could be expanded to load balancing later)
+                    for inst in active_instances:
+                        instance_id = inst["instance_id"]
+                        template_id = inst["template_id"]
+                        
+                        # Verify the template exists
+                        registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == template_id), None)
+                        if not registry_entry:
+                            continue
 
-                            # Single unified call — tracks process, streams logs, broadcasts status
-                            asyncio.create_task(
-                                engine.run_agent(
-                                    card["id"], agent_name, agent_config,
-                                    card, store, registry_entry
-                                )
+                        # Merge configs
+                        agent_config = CONFIG.get("agents", {}).get(template_id, {})
+                        agent_config.setdefault("execution", registry_entry.get("execution", {}))
+
+                        # Avoid assigning to an instance that is already running
+                        if instance_id in engine.active and engine.active[instance_id].status == "running":
+                            continue
+
+                        store.update_card(card["id"], assignee=inst["instance_name"], status="assigned")
+                        logger.info(f"Routed card {card['id']} to instance '{inst['instance_name']}'")
+                        
+                        await manager.broadcast({
+                            "type": "card_assigned",
+                            "card_id": card["id"],
+                            "agent": inst["instance_name"]
+                        })
+
+                        # Single unified call — tracks process, streams logs, broadcasts status
+                        asyncio.create_task(
+                            engine.run_agent(
+                                card["id"], template_id, agent_config,
+                                card, store, registry_entry,
+                                instance_id=instance_id,
+                                instance_name=inst["instance_name"]
                             )
-                            break
+                        )
+                        break  # Move to next card
 
         except Exception as e:
             logger.error(f"Polling error: {e}")

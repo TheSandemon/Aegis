@@ -753,6 +753,28 @@
         
         // Start
         init();
+        
+        // Keyboard shortcuts
+        document.addEventListener('keydown', (e) => {
+            // Escape to close modals
+            if (e.key === 'Escape') {
+                const activeModal = document.querySelector('.modal-overlay.active');
+                if (activeModal) {
+                    activeModal.classList.remove('active');
+                    if (terminalRefreshInterval) {
+                        clearInterval(terminalRefreshInterval);
+                        terminalRefreshInterval = null;
+                    }
+                }
+            }
+            // Enter in new card modal to create
+            if (e.key === 'Enter' && e.ctrlKey) {
+                const newCardModal = document.getElementById('newCardModal');
+                if (newCardModal.classList.contains('active')) {
+                    createCard();
+                }
+            }
+        });
     </script>
 </body>
 </html>

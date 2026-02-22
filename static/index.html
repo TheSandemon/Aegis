@@ -229,6 +229,21 @@
             display: flex;
             justify-content: space-between;
             align-items: center;
+            cursor: pointer;
+        }
+        
+        .column-header:hover { background: rgba(255,255,255,0.02); }
+        
+        .column.collapsed .column-body { display: none; }
+        .column.collapsed { min-width: 48px; max-width: 48px; }
+        .column.collapsed .column-header h2,
+        .column.collapsed .column-header .count { display: none; }
+        .column.collapsed .collapse-icon { transform: rotate(90deg); }
+        
+        .collapse-icon {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
         }
 
         .column-header h2 {
@@ -859,11 +874,12 @@
                 }
 
                 const colDiv = document.createElement('div');
-                colDiv.className = 'column';
+                colDiv.className = 'column' + (collapsedColumns[column] ? ' collapsed' : '');
                 colDiv.dataset.column = column;
                 colDiv.innerHTML = `
-                    <div class="column-header">
+                    <div class="column-header" onclick="toggleColumn('${column}')">
                         <h2>${column} <span class="count">${columnCards.length}</span></h2>
+                        <span class="collapse-icon">▼</span>
                     </div>
                     <div class="column-body" data-column="${column}">
                         ${columnCards.length ? columnCards.map(card => renderCard(card)).join('') :
@@ -884,6 +900,13 @@
                 card.addEventListener('dragend', handleDragEnd);
                 card.addEventListener('click', () => openCardDetail(parseInt(card.dataset.id)));
             });
+        }
+        
+        const collapsedColumns = {};
+        
+        function toggleColumn(column) {
+            collapsedColumns[column] = !collapsedColumns[column];
+            renderBoard();
         }
 
         function renderCard(card) {

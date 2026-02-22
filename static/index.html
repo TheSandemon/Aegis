@@ -276,6 +276,20 @@
         .status-completed { background: rgba(34, 197, 94, 0.2); color: #22c55e; }
         .status-blocked { background: rgba(239, 68, 68, 0.2); color: #ef4444; }
         
+        .card-due-date {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            margin-right: 0.5rem;
+        }
+        
+        .card-due-date.overdue {
+            color: #ef4444;
+        }
+        
+        .card-due-date.soon {
+            color: #f59e0b;
+        }
+        
         .column[data-column="Inbox"] .column-header h2 { color: var(--inbox); }
         .column[data-column="Planned"] .column-header h2 { color: var(--planned); }
         .column[data-column="In Progress"] .column-header h2 { color: var(--in-progress); }
@@ -529,6 +543,18 @@
                     <label>Column</label>
                     <select id="cardColumn"></select>
                 </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="cardPriority">
+                        <option value="low">Low</option>
+                        <option value="medium" selected>Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Due Date</label>
+                    <input type="date" id="cardDueDate">
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('newCardModal')">Cancel</button>
@@ -562,6 +588,18 @@
                 <div class="form-group">
                     <label>Column</label>
                     <select id="detailColumn"></select>
+                </div>
+                <div class="form-group">
+                    <label>Priority</label>
+                    <select id="detailPriority">
+                        <option value="low">Low</option>
+                        <option value="medium">Medium</option>
+                        <option value="high">High</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Due Date</label>
+                    <input type="date" id="detailDueDate">
                 </div>
                 <div class="form-group" id="terminalSection" style="display:none;">
                     <label>Live Terminal</label>
@@ -756,6 +794,22 @@
             else if (card.status === 'completed') statusClass = 'status-completed';
             else if (card.column === 'Blocked') statusClass = 'status-blocked';
             
+            // Format due date
+            let dueDateHtml = '';
+            if (card.due_date) {
+                const dueDate = new Date(card.due_date);
+                const today = new Date();
+                today.setHours(0, 0, 0, 0);
+                const dueDateOnly = new Date(dueDate);
+                dueDateOnly.setHours(0, 0, 0, 0);
+                
+                let dueClass = '';
+                if (dueDateOnly < today) dueClass = 'overdue';
+                else if ((dueDateOnly - today) <= 2 * 24 * 60 * 60 * 1000) dueClass = 'soon';
+                
+                dueDateHtml = `<span class="card-due-date ${dueClass}">📅 ${dueDate.toLocaleDateString()}</span>`;
+            }
+            
             return `
                 <div class="card" draggable="true" data-id="${card.id}">
                     <div class="card-title">${escapeHtml(card.title)}</div>
@@ -764,7 +818,7 @@
                             ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}
                             ${card.status ? `<span class="card-status ${statusClass}">${card.status}</span>` : ''}
                         </div>
-                        <span class="card-age">${age}</span>
+                        <span class="card-age">${dueDateHtml}${age}</span>
                     </div>
                 </div>
             `;
@@ -820,18 +874,21 @@
             const title = document.getElementById('cardTitle').value.trim();
             const description = document.getElementById('cardDescription').value;
             const column = document.getElementById('cardColumn').value;
+            const priority = document.getElementById('cardPriority')?.value || 'medium';
+            const due_date = document.getElementById('cardDueDate').value || null;
             
             if (!title) { showToast('Title is required'); return; }
             
             await fetch('/api/cards', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({ title, description, column })
+                body: JSON.stringify({ title, description, column, priority, due_date })
             });
             
             closeModal('newCardModal');
             document.getElementById('cardTitle').value = '';
             document.getElementById('cardDescription').value = '';
+            document.getElementById('cardDueDate').value = '';
         }
         
         async function openCardDetail(cardId) {
@@ -843,6 +900,8 @@
             document.getElementById('detailDescription').value = card.description || '';
             document.getElementById('detailAssignee').value = card.assignee || '';
             document.getElementById('detailColumn').value = card.column;
+            document.getElementById('detailPriority').value = card.priority || 'medium';
+            document.getElementById('detailDueDate').value = card.due_date || '';
             
             if (card.status === 'running') {
                 document.getElementById('terminalSection').style.display = 'block';
@@ -873,7 +932,9 @@
                 title: document.getElementById('detailTitleInput').value,
                 description: document.getElementById('detailDescription').value,
                 assignee: document.getElementById('detailAssignee').value || null,
-                column: document.getElementById('detailColumn').value
+                column: document.getElementById('detailColumn').value,
+                priority: document.getElementById('detailPriority').value,
+                due_date: document.getElementById('detailDueDate').value || null
             };
             
             await fetch(`/api/cards/${currentCardId}`, {

@@ -23,13 +23,15 @@ from datetime import datetime
 import sys
 from typing import Optional
 from contextlib import asynccontextmanager
+import glob
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+import httpx
 
-# ─── Logging ─────────────────────────────────────────────────────────────────────
+# ─── Initialization & Config ─────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("aegis")
 
@@ -728,6 +730,131 @@ async def get_instance_logs(instance_id: str, tail: int = 100):
     """Get recent logs for an instance process."""
     logs = engine.get_logs(instance_id, tail)
     return {"instance_id": instance_id, "logs": logs}
+
+# ─── API Key Verification ────────────────────────────────────────────────────────
+
+class VerifyKeyRequest(BaseModel):
+    api_key: str
+
+@app.post("/api/keys/verify")
+async def verify_api_key(req: VerifyKeyRequest):
+    """
+    Intelligently detect the provider from the API key prefix, test it,
+    and return the live list of models available.
+    """
+    key = req.api_key.strip()
+    if not key:
+        raise HTTPException(status_code=400, detail="Empty API key")
+
+    # 1. Google (Gemini) - Keys usually start with AIza
+    if key.startswith("AIza"):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(f"https://generativelanguage.googleapis.com/v1beta/models?key={key}")
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Filter for models that support generateContent
+                    models = [
+                        {"id": m["name"].replace("models/", ""), "name": m.get("displayName", m["name"].replace("models/", ""))}
+                        for m in data.get("models", [])
+                        if "generateContent" in m.get("supportedGenerationMethods", [])
+                    ]
+                    # Sort default recent models
+                    default_model = "gemini-2.5-pro" if any("2.5" in m["id"] for m in models) else "gemini-1.5-pro"
+                    return {
+                        "valid": True,
+                        "service": "google",
+                        "env_key_name": "GOOGLE_API_KEY",
+                        "models": models,
+                        "default_model": default_model
+                    }
+        except Exception:
+            pass
+
+    # 2. Anthropic - Keys start with sk-ant-
+    if key.startswith("sk-ant-"):
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.anthropic.com/v1/models",
+                    headers={"x-api-key": key, "anthropic-version": "2023-06-01"}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [
+                        {"id": m["id"], "name": m.get("display_name", m["id"])}
+                        for m in data.get("data", [])
+                        if m.get("type") == "model"
+                    ]
+                    default_model = "claude-3-7-sonnet-latest" if any("3-7" in m["id"] for m in models) else "claude-3-5-sonnet-latest"
+                    return {
+                        "valid": True,
+                        "service": "anthropic",
+                        "env_key_name": "ANTHROPIC_API_KEY",
+                        "models": models,
+                        "default_model": default_model
+                    }
+        except Exception:
+            pass
+
+    # 3. OpenAI / DeepSeek - Both use sk-
+    if key.startswith("sk-"):
+        # Try OpenAI First
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.openai.com/v1/models",
+                    headers={"Authorization": f"Bearer {key}"}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    # Filter for typical Chat models (gpt, o1, o3)
+                    models = [
+                        {"id": m["id"], "name": m["id"]}
+                        for m in data.get("data", [])
+                        if m["id"].startswith(("gpt-", "o1", "o3"))
+                    ]
+                    if models:
+                        # Sort to put best models first heuristically
+                        default_model = "gpt-4o"
+                        return {
+                            "valid": True,
+                            "service": "openai",
+                            "env_key_name": "OPENAI_API_KEY",
+                            "models": models,
+                            "default_model": default_model
+                        }
+        except Exception:
+            pass
+            
+        # Try DeepSeek if OpenAI failed
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                resp = await client.get(
+                    "https://api.deepseek.com/models",
+                    headers={"Authorization": f"Bearer {key}"}
+                )
+                if resp.status_code == 200:
+                    data = resp.json()
+                    models = [
+                        {"id": m["id"], "name": m["id"]}
+                        for m in data.get("data", [])
+                    ]
+                    if models:
+                        return {
+                            "valid": True,
+                            "service": "deepseek",
+                            "env_key_name": "DEEPSEEK_API_KEY",
+                            "models": models,
+                            "default_model": "deepseek-chat"
+                        }
+        except Exception:
+            pass
+
+    return {
+        "valid": False,
+        "error": "Invalid API key or unknown provider format."
+    }
 
 
 @app.post("/api/agents/params/{agent_id}")

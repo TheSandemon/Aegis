@@ -1,9 +1,9 @@
 [
     {
-        "id": "openclaw-core",
+        "id": "openclaw",
         "name": "OpenClaw",
-        "version": "1.2.0",
-        "description": "Autonomous coding agent powered by Claude. Reads repo context, writes code, creates PRs.",
+        "version": "2.0.0",
+        "description": "The flagship open-source, Node.js-based self-hosted agent that connects to messaging apps and executes tasks locally via your machine.",
         "github_url": "https://github.com/TheSandemon/OpenClaw",
         "support_url": "https://github.com/TheSandemon/OpenClaw",
         "license": "MIT",
@@ -15,7 +15,7 @@
             ]
         },
         "execution": {
-            "working_dir": "./agents/openclaw-core",
+            "working_dir": "./agents/openclaw",
             "command": "node index.js",
             "env_vars_required": [
                 "ANTHROPIC_API_KEY"
@@ -28,24 +28,26 @@
         ]
     },
     {
-        "id": "picoclaw",
-        "name": "PicoClaw",
-        "version": "0.8.0",
-        "description": "Lightweight, compiled task runner for rapid-fire operations. Low memory footprint.",
-        "github_url": "https://github.com/TheSandemon/PicoClaw",
-        "support_url": "https://github.com/TheSandemon/PicoClaw",
+        "id": "memu-bot",
+        "name": "memU Bot",
+        "version": "1.0.0",
+        "description": "An autonomous daemon specifically focused on proactive memory management and long-term context building.",
+        "github_url": "https://github.com/TheSandemon/memU-Bot",
+        "support_url": "https://github.com/TheSandemon/memU-Bot",
         "license": "MIT",
-        "icon": "🦀",
+        "icon": "🧠",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
-                "cargo build --release"
+                "pip install -r requirements.txt"
             ]
         },
         "execution": {
-            "working_dir": "./agents/picoclaw",
-            "command": "./target/release/picoclaw",
-            "env_vars_required": []
+            "working_dir": "./agents/memu-bot",
+            "command": "python daemon.py",
+            "env_vars_required": [
+                "OPENAI_API_KEY"
+            ]
         },
         "permissions": [
             "read_file",
@@ -54,23 +56,23 @@
         ]
     },
     {
-        "id": "gemini-cli-agent",
-        "name": "Gemini CLI",
-        "version": "2.1.0",
-        "description": "Google's Gemini-powered CLI agent. Multi-modal reasoning with code generation.",
-        "github_url": "https://github.com/google-gemini/gemini-cli",
-        "support_url": "https://github.com/google-gemini/gemini-cli",
-        "license": "Apache-2.0",
-        "icon": "💎",
+        "id": "picoclaw",
+        "name": "PicoClaw",
+        "version": "1.0.0",
+        "description": "An ultra-lightweight, Go-based agent built for $10 embedded hardware (RISC-V/ARM) with a sub-10MB RAM footprint and lightning-fast boot time.",
+        "github_url": "https://github.com/TheSandemon/PicoClaw",
+        "support_url": "https://github.com/TheSandemon/PicoClaw",
+        "license": "MIT",
+        "icon": "🦀",
         "installation": {
-            "method": "npm_global",
+            "method": "git_clone",
             "setup_commands": [
-                "npm install -g @google/gemini-cli"
+                "go build -o picoclaw main.go"
             ]
         },
         "execution": {
-            "working_dir": ".",
-            "command": "gemini",
+            "working_dir": "./agents/picoclaw",
+            "command": "./picoclaw",
             "env_vars_required": [
                 "GOOGLE_API_KEY"
             ]
@@ -82,23 +84,77 @@
         ]
     },
     {
-        "id": "claude-code-agent",
-        "name": "Claude Code",
+        "id": "nanoclaw",
+        "name": "NanoClaw",
         "version": "1.0.0",
-        "description": "Anthropic's agentic coding tool. Terminal-native with full project context.",
-        "github_url": "https://github.com/anthropics/claude-code",
-        "support_url": "https://github.com/anthropics/claude-code",
-        "license": "Apache-2.0",
-        "icon": "🧠",
+        "description": "A containerized, security-first alternative built heavily around Anthropic's Agents SDK to prevent dangerous system access.",
+        "github_url": "https://github.com/TheSandemon/NanoClaw",
+        "support_url": "https://github.com/TheSandemon/NanoClaw",
+        "license": "MIT",
+        "icon": "🛡️",
         "installation": {
-            "method": "npm_global",
+            "method": "git_clone",
             "setup_commands": [
-                "npm install -g @anthropic-ai/claude-code"
+                "pip install anthropic"
             ]
         },
         "execution": {
-            "working_dir": ".",
-            "command": "claude",
+            "working_dir": "./agents/nanoclaw",
+            "command": "python nanoclaw.py",
+            "env_vars_required": [
+                "ANTHROPIC_API_KEY"
+            ]
+        },
+        "permissions": [
+            "read_file"
+        ]
+    },
+    {
+        "id": "trustclaw",
+        "name": "TrustClaw",
+        "version": "1.0.0",
+        "description": "A hardened agent optimized specifically for verifiable execution and secure cloud/API interactions.",
+        "github_url": "https://github.com/TheSandemon/TrustClaw",
+        "support_url": "https://github.com/TheSandemon/TrustClaw",
+        "license": "MIT",
+        "icon": "🔐",
+        "installation": {
+            "method": "git_clone",
+            "setup_commands": [
+                "npm install",
+                "npm run build"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/trustclaw",
+            "command": "node dist/index.js",
+            "env_vars_required": [
+                "OPENAI_API_KEY"
+            ]
+        },
+        "permissions": [
+            "read_file",
+            "list_dir"
+        ]
+    },
+    {
+        "id": "zeroclaw",
+        "name": "ZeroClaw",
+        "version": "1.0.0",
+        "description": "A high-performance, memory-safe autonomous agent written entirely in Rust for maximum speed.",
+        "github_url": "https://github.com/TheSandemon/ZeroClaw",
+        "support_url": "https://github.com/TheSandemon/ZeroClaw",
+        "license": "MIT",
+        "icon": "⚡",
+        "installation": {
+            "method": "git_clone",
+            "setup_commands": [
+                "cargo build --release"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/zeroclaw",
+            "command": "./target/release/zeroclaw",
             "env_vars_required": [
                 "ANTHROPIC_API_KEY"
             ]
@@ -110,29 +166,58 @@
         ]
     },
     {
-        "id": "codex-agent",
-        "name": "OpenAI Codex CLI",
-        "version": "0.9.0",
-        "description": "OpenAI's lightweight coding agent. Runs in your terminal with sandboxed execution.",
-        "github_url": "https://github.com/openai/codex",
-        "support_url": "https://github.com/openai/codex",
-        "license": "Apache-2.0",
-        "icon": "🤖",
+        "id": "nanobot",
+        "name": "NanoBot",
+        "version": "1.0.0",
+        "description": "A minimalist Python daemon (under 4,000 lines of code) designed for complete transparency, easy auditing, and custom modification.",
+        "github_url": "https://github.com/TheSandemon/NanoBot",
+        "support_url": "https://github.com/TheSandemon/NanoBot",
+        "license": "MIT",
+        "icon": "🦠",
         "installation": {
-            "method": "npm_global",
+            "method": "git_clone",
             "setup_commands": [
-                "npm install -g @openai/codex"
+                "pip install -r requirements.txt"
             ]
         },
         "execution": {
-            "working_dir": ".",
-            "command": "codex",
+            "working_dir": "./agents/nanobot",
+            "command": "python nanobot.py",
             "env_vars_required": [
                 "OPENAI_API_KEY"
             ]
         },
         "permissions": [
             "read_file",
+            "write_file",
+            "list_dir"
+        ]
+    },
+    {
+        "id": "ironclaw",
+        "name": "IronClaw",
+        "version": "1.0.0",
+        "description": "A highly scalable, modular agent framework designed for production-grade backend pipelines.",
+        "github_url": "https://github.com/TheSandemon/IronClaw",
+        "support_url": "https://github.com/TheSandemon/IronClaw",
+        "license": "MIT",
+        "icon": "⚙️",
+        "installation": {
+            "method": "git_clone",
+            "setup_commands": [
+                "pip install -r reqs.txt"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/ironclaw",
+            "command": "python worker.py",
+            "env_vars_required": [
+                "ANTHROPIC_API_KEY"
+            ]
+        },
+        "permissions": [
+            "read_file",
+            "write_file",
             "list_dir"
         ]
     }

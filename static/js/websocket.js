@@ -80,14 +80,13 @@ function handleWebSocketMessage(data) {
             }
             break;
         case 'log_entry':
-            if (currentCardId === data.card_id) {
-                const terminal = document.getElementById('terminalOutput');
-                const wasAtBottom = terminal.scrollHeight - terminal.clientHeight <= terminal.scrollTop + 1;
-                const entry = document.createElement('div');
-                entry.textContent = data.entry;
-                terminal.appendChild(entry);
-                if (wasAtBottom) terminal.scrollTop = terminal.scrollHeight;
-            }
+            appendLogEntry(data.card_id, data.entry);
+            break;
+        case 'agent_paused':
+            showToast(`⏸ ${data.agent_id} paused`);
+            break;
+        case 'agent_resumed':
+            showToast(`▶ ${data.agent_id} resumed`);
             break;
     }
 }

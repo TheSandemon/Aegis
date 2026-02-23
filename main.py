@@ -731,6 +731,55 @@ async def get_instance_logs(instance_id: str, tail: int = 100):
     logs = engine.get_logs(instance_id, tail)
     return {"instance_id": instance_id, "logs": logs}
 
+# ─── Instance Intervention (Glass Box) ───────────────────────────────────────────
+
+@app.post("/api/instances/{instance_id}/pause")
+async def pause_instance(instance_id: str):
+    """Pause (suspend) a running instance."""
+    result = await engine.pause_agent(instance_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+@app.post("/api/instances/{instance_id}/resume")
+async def resume_instance(instance_id: str):
+    """Resume a paused instance."""
+    result = await engine.resume_agent(instance_id)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+class InjectRequest(BaseModel):
+    text: str
+
+@app.post("/api/instances/{instance_id}/inject")
+async def inject_instance_context(instance_id: str, req: InjectRequest):
+    """Inject context text into a running instance's stdin."""
+    result = await engine.inject_stdin(instance_id, req.text)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+# ─── Instance Artifacts ──────────────────────────────────────────────────────────
+
+@app.get("/api/instances/{instance_id}/artifacts")
+async def list_instance_artifacts(instance_id: str):
+    """List files in an instance's working directory."""
+    from execution_engine import INSTANCES_DIR
+    inst_dir = INSTANCES_DIR / instance_id
+    if not inst_dir.exists():
+        return {"files": []}
+    files = []
+    for f in inst_dir.rglob("*"):
+        if f.is_file() and not f.name.startswith("."):
+            files.append({
+                "name": f.name,
+                "path": str(f.relative_to(inst_dir)),
+                "size": f.stat().st_size,
+                "modified": f.stat().st_mtime
+            })
+    return {"files": files}
+
 # ─── API Key Verification ────────────────────────────────────────────────────────
 
 class VerifyKeyRequest(BaseModel):

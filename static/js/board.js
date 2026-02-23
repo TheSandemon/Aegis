@@ -145,6 +145,8 @@ async function createCard() {
     document.getElementById('cardDescription').value = '';
 }
 
+let currentInstanceId = null;
+
 async function openCardDetail(cardId) {
     currentCardId = cardId;
     const card = cards.find(c => c.id === cardId);
@@ -155,12 +157,37 @@ async function openCardDetail(cardId) {
     document.getElementById('detailColumn').value = card.column;
     const dp = document.getElementById('detailPriority');
     if (dp) dp.value = card.priority || 'normal';
-    document.getElementById('stopAgentBtn').style.display = card.status === 'running' ? 'block' : 'none';
-    document.getElementById('approveBtn').style.display = card.column === 'Review' ? 'block' : 'none';
-    if (card.status === 'running' || (card.logs && card.logs.length > 0)) {
-        document.getElementById('terminalSection').style.display = 'block';
-        loadTerminalLogs(cardId);
-    } else { document.getElementById('terminalSection').style.display = 'none'; }
+
+    const isRunning = card.status === 'running';
+    const hasLogs = card.logs && card.logs.length > 0;
+    const isReview = card.column === 'Review';
+    const isDone = card.column === 'Done' || card.column === 'Review';
+
+    // Terminal section always visible when running or has logs
+    const termSec = document.getElementById('terminalSection');
+    termSec.style.display = (isRunning || hasLogs) ? 'flex' : 'none';
+
+    // Intervention controls
+    document.getElementById('injectSection').style.display = isRunning ? 'block' : 'none';
+    document.getElementById('interventionBar').style.display = isRunning ? 'flex' : 'none';
+    document.getElementById('stopAgentBtn').style.display = isRunning ? 'inline-block' : 'none';
+    document.getElementById('approveBtn').style.display = isReview ? 'inline-block' : 'none';
+    document.getElementById('pauseBtn').style.display = isRunning ? 'inline-block' : 'none';
+    document.getElementById('resumeBtn').style.display = 'none';
+
+    // Find the instance ID for intervention
+    currentInstanceId = card.assignee || null;
+
+    // Load initial logs
+    if (isRunning || hasLogs) loadTerminalLogs(cardId);
+
+    // Artifacts for done/review cards
+    if (isDone && currentInstanceId) {
+        loadArtifacts(currentInstanceId);
+    } else {
+        document.getElementById('artifactsSection').style.display = 'none';
+    }
+
     document.getElementById('cardDetailModal').classList.add('active');
 }
 
@@ -171,6 +198,81 @@ async function loadTerminalLogs(cardId) {
         t.innerHTML = data.logs?.map(l => `<div>${escapeHtml(l)}</div>`).join('') || 'Waiting...';
         t.scrollTop = t.scrollHeight;
     } catch (e) { document.getElementById('terminalOutput').textContent = 'No logs available'; }
+}
+
+// Real-time WebSocket log appending (called from the WebSocket handler)
+function appendLogEntry(cardId, entry) {
+    if (currentCardId !== cardId) return;
+    const t = document.getElementById('terminalOutput');
+    if (!t) return;
+    if (t.textContent === 'Waiting for output...' || t.textContent === 'Waiting...') t.innerHTML = '';
+    const div = document.createElement('div');
+    div.textContent = entry;
+    // Color code injection entries
+    if (entry.startsWith('[INJECT]')) div.style.color = '#f59e0b';
+    if (entry.startsWith('[STDERR]')) div.style.color = '#ef4444';
+    t.appendChild(div);
+    t.scrollTop = t.scrollHeight;
+}
+
+// ─── Intervention Functions ─────────────────────────────────────────────────
+
+async function pauseAgent() {
+    if (!currentInstanceId) { showToast('No instance to pause'); return; }
+    try {
+        const res = await fetch(`/api/instances/${currentInstanceId}/pause`, { method: 'POST' });
+        if (res.ok) {
+            showToast('⏸ Agent paused');
+            document.getElementById('pauseBtn').style.display = 'none';
+            document.getElementById('resumeBtn').style.display = 'inline-block';
+        } else { const err = await res.json(); showToast(`⚠️ ${err.detail || 'Pause failed'}`); }
+    } catch (e) { showToast('Pause failed'); }
+}
+
+async function resumeAgent() {
+    if (!currentInstanceId) { showToast('No instance to resume'); return; }
+    try {
+        const res = await fetch(`/api/instances/${currentInstanceId}/resume`, { method: 'POST' });
+        if (res.ok) {
+            showToast('▶ Agent resumed');
+            document.getElementById('resumeBtn').style.display = 'none';
+            document.getElementById('pauseBtn').style.display = 'inline-block';
+        } else { const err = await res.json(); showToast(`⚠️ ${err.detail || 'Resume failed'}`); }
+    } catch (e) { showToast('Resume failed'); }
+}
+
+async function injectContext() {
+    if (!currentInstanceId) { showToast('No instance running'); return; }
+    const input = document.getElementById('injectInput');
+    const text = input.value.trim();
+    if (!text) return;
+    try {
+        const res = await fetch(`/api/instances/${currentInstanceId}/inject`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text })
+        });
+        if (res.ok) {
+            input.value = '';
+            showToast('💉 Context injected');
+        } else { const err = await res.json(); showToast(`⚠️ ${err.detail || 'Inject failed'}`); }
+    } catch (e) { showToast('Inject failed'); }
+}
+
+async function loadArtifacts(instanceId) {
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/artifacts`);
+        const data = await res.json();
+        const section = document.getElementById('artifactsSection');
+        const list = document.getElementById('artifactsList');
+        if (data.files && data.files.length > 0) {
+            section.style.display = 'block';
+            list.innerHTML = data.files.map(f => {
+                const sizeKb = (f.size / 1024).toFixed(1);
+                return `<div style="padding:0.2rem 0;border-bottom:1px solid var(--border);">📄 ${escapeHtml(f.name)} <span style="color:var(--text-secondary);">(${sizeKb} KB)</span></div>`;
+            }).join('');
+        } else { section.style.display = 'none'; }
+    } catch (e) { document.getElementById('artifactsSection').style.display = 'none'; }
 }
 
 async function saveCardDetails() {
@@ -187,11 +289,19 @@ async function deleteCurrentCard() {
     await fetch(`/api/cards/${currentCardId}`, { method: 'DELETE' });
     closeModal('cardDetailModal');
 }
+
 async function stopCurrentAgent() {
     if (!confirm('Stop the running agent?')) return;
     const res = await fetch(`/api/cards/${currentCardId}/agent`, { method: 'DELETE' });
-    res.ok ? (showToast('Agent stop signal sent'), document.getElementById('stopAgentBtn').style.display = 'none') : showToast('Failed to stop agent');
+    if (res.ok) {
+        showToast('⏹ Agent stopped');
+        document.getElementById('stopAgentBtn').style.display = 'none';
+        document.getElementById('pauseBtn').style.display = 'none';
+        document.getElementById('resumeBtn').style.display = 'none';
+        document.getElementById('injectSection').style.display = 'none';
+    } else { showToast('Failed to stop agent'); }
 }
+
 async function approveCurrentCard() {
     const res = await fetch(`/api/cards/${currentCardId}/approve`, { method: 'POST' });
     if (res.ok) { showToast('✅ Card approved!'); document.getElementById('approveBtn').style.display = 'none'; closeModal('cardDetailModal'); }

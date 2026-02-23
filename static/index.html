@@ -259,39 +259,71 @@
         </div>
     </div>
 
-    <!-- Card Detail Modal -->
+    <!-- Card Detail Modal — Glass Box Control Panel -->
     <div class="modal-overlay" id="cardDetailModal">
-        <div class="modal">
+        <div class="modal" style="max-width:900px;width:95%;">
             <div class="modal-header">
-                <h3>Card Details</h3><button class="modal-close"
+                <h3>🔍 Glass Box</h3><button class="modal-close"
                     onclick="closeModal('cardDetailModal')">&times;</button>
             </div>
-            <div class="modal-body">
-                <div class="form-group"><label>Title</label><input type="text" id="detailTitleInput"></div>
-                <div class="form-group"><label>Description</label><textarea id="detailDescription"></textarea></div>
-                <div class="form-group"><label>Assignee</label><select id="detailAssignee">
-                        <option value="">Unassigned</option>
-                    </select></div>
-                <div class="form-group"><label>Column</label><select id="detailColumn"></select></div>
-                <div class="form-group"><label>Priority</label>
-                    <select id="detailPriority">
-                        <option value="low">Low</option>
-                        <option value="normal" selected>Normal</option>
-                        <option value="high">High</option>
-                    </select>
+            <div class="modal-body" style="display:flex;gap:1rem;min-height:400px;">
+                <!-- Left Pane: Card Metadata -->
+                <div style="flex:1;min-width:0;">
+                    <div class="form-group"><label>Title</label><input type="text" id="detailTitleInput"></div>
+                    <div class="form-group"><label>Description</label><textarea id="detailDescription"
+                            rows="3"></textarea></div>
+                    <div class="form-group"><label>Assignee</label><select id="detailAssignee">
+                            <option value="">Unassigned</option>
+                        </select></div>
+                    <div class="form-group"><label>Column</label><select id="detailColumn"></select></div>
+                    <div class="form-group"><label>Priority</label>
+                        <select id="detailPriority">
+                            <option value="low">Low</option>
+                            <option value="normal" selected>Normal</option>
+                            <option value="high">High</option>
+                        </select>
+                    </div>
+                    <!-- Artifacts Panel -->
+                    <div id="artifactsSection" style="display:none;">
+                        <label>📂 Artifacts</label>
+                        <div id="artifactsList"
+                            style="max-height:120px;overflow-y:auto;font-size:0.8rem;margin-top:0.25rem;"></div>
+                    </div>
                 </div>
-                <div class="form-group" id="terminalSection" style="display:none;">
-                    <label>Live Terminal</label>
-                    <div class="terminal" id="terminalOutput">Waiting for output...</div>
+                <!-- Right Pane: Live Terminal + Intervention -->
+                <div id="terminalSection" style="flex:1.2;min-width:0;display:flex;flex-direction:column;">
+                    <label style="margin-bottom:0.25rem;">🖥️ Live Terminal</label>
+                    <div class="terminal" id="terminalOutput"
+                        style="flex:1;min-height:200px;max-height:350px;overflow-y:auto;font-size:0.75rem;">Waiting for
+                        output...</div>
+                    <!-- Inject Context -->
+                    <div id="injectSection" style="display:none;margin-top:0.5rem;">
+                        <div style="display:flex;gap:0.25rem;">
+                            <input type="text" id="injectInput" placeholder="💉 Inject context..."
+                                style="flex:1;font-size:0.8rem;">
+                            <button onclick="injectContext()"
+                                style="font-size:0.75rem;padding:0.25rem 0.5rem;">Send</button>
+                        </div>
+                    </div>
+                    <!-- Intervention Buttons -->
+                    <div id="interventionBar"
+                        style="display:none;margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
+                        <button id="pauseBtn" onclick="pauseAgent()"
+                            style="font-size:0.75rem;padding:0.25rem 0.5rem;background:#f59e0b;">⏸ Pause</button>
+                        <button id="resumeBtn" onclick="resumeAgent()"
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">▶
+                            Resume</button>
+                        <button id="stopAgentBtn" class="danger" onclick="stopCurrentAgent()"
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;">⏹ Stop</button>
+                        <button id="approveBtn" onclick="approveCurrentCard()"
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">✓
+                            Approve</button>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
                 <button class="danger" onclick="deleteCurrentCard()">Delete</button>
                 <div style="flex:1"></div>
-                <button id="approveBtn" style="display:none;background:#22c55e;" onclick="approveCurrentCard()">✓
-                    Approve</button>
-                <button id="stopAgentBtn" class="danger secondary small" style="display:none;"
-                    onclick="stopCurrentAgent()">Stop Agent</button>
                 <button class="secondary" onclick="closeModal('cardDetailModal')">Cancel</button>
                 <button onclick="saveCardDetails()">Save</button>
             </div>

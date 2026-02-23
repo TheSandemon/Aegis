@@ -52,6 +52,7 @@ class AgentProcess:
         self.pid = pid
         self.process = process
         self.status = "running"
+        self.paused = False
         self.card_id = card_id
         self.color = color
         self.started_at = datetime.now().isoformat()
@@ -65,6 +66,7 @@ class AgentProcess:
             "instance_name": self.instance_name,
             "pid": self.pid,
             "status": self.status,
+            "paused": self.paused,
             "card_id": self.card_id,
             "color": self.color,
             "started_at": self.started_at,
@@ -121,6 +123,7 @@ class SubprocessAdapter(ExecutionAdapter):
 
         process = await asyncio.create_subprocess_shell(
             command,
+            stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(working_dir) if working_dir.exists() else None,
@@ -452,6 +455,108 @@ class ExecutionEngine:
                 result = await self.stop_agent(agent_id)
                 return "error" not in result
         return False
+
+    # ─── Intervention: Pause / Resume / Inject ────────────────────────────────
+
+    async def pause_agent(self, agent_id: str) -> dict:
+        """Pause (suspend) a running agent process."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc or agent_proc.status != "running":
+            return {"error": f"Agent '{agent_id}' is not running"}
+        if agent_proc.paused:
+            return {"error": f"Agent '{agent_id}' is already paused"}
+
+        try:
+            if os.name == 'nt':
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x1F0FFF, False, agent_proc.pid)
+                ntdll = ctypes.windll.ntdll
+                ntdll.NtSuspendProcess(handle)
+                kernel32.CloseHandle(handle)
+            else:
+                import signal
+                os.kill(agent_proc.pid, signal.SIGSTOP)
+
+            agent_proc.paused = True
+            logger.info(f"Paused agent '{agent_id}' (PID: {agent_proc.pid})")
+
+            if self.broadcaster:
+                await self.broadcaster({
+                    "type": "agent_paused",
+                    "agent_id": agent_id,
+                    "instance_id": agent_proc.instance_id
+                })
+
+            return {"success": True, "status": "paused"}
+        except Exception as e:
+            logger.error(f"Failed to pause '{agent_id}': {e}")
+            return {"error": str(e)}
+
+    async def resume_agent(self, agent_id: str) -> dict:
+        """Resume a paused agent process."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc or agent_proc.status != "running":
+            return {"error": f"Agent '{agent_id}' is not running"}
+        if not agent_proc.paused:
+            return {"error": f"Agent '{agent_id}' is not paused"}
+
+        try:
+            if os.name == 'nt':
+                import ctypes
+                kernel32 = ctypes.windll.kernel32
+                handle = kernel32.OpenProcess(0x1F0FFF, False, agent_proc.pid)
+                ntdll = ctypes.windll.ntdll
+                ntdll.NtResumeProcess(handle)
+                kernel32.CloseHandle(handle)
+            else:
+                import signal
+                os.kill(agent_proc.pid, signal.SIGCONT)
+
+            agent_proc.paused = False
+            logger.info(f"Resumed agent '{agent_id}' (PID: {agent_proc.pid})")
+
+            if self.broadcaster:
+                await self.broadcaster({
+                    "type": "agent_resumed",
+                    "agent_id": agent_id,
+                    "instance_id": agent_proc.instance_id
+                })
+
+            return {"success": True, "status": "running"}
+        except Exception as e:
+            logger.error(f"Failed to resume '{agent_id}': {e}")
+            return {"error": str(e)}
+
+    async def inject_stdin(self, agent_id: str, text: str) -> dict:
+        """Write text to a running agent's stdin pipe."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc or agent_proc.status != "running":
+            return {"error": f"Agent '{agent_id}' is not running"}
+
+        try:
+            if agent_proc.process.stdin:
+                agent_proc.process.stdin.write((text + "\n").encode())
+                await agent_proc.process.stdin.drain()
+
+                # Log the injection
+                entry = f"[INJECT] {text}"
+                agent_proc.logs.append(entry)
+
+                if self.broadcaster:
+                    await self.broadcaster({
+                        "type": "log_entry",
+                        "card_id": agent_proc.card_id,
+                        "entry": entry
+                    })
+
+                logger.info(f"Injected stdin to '{agent_id}': {text[:50]}")
+                return {"success": True}
+            else:
+                return {"error": "Process stdin not available (pipe not open)"}
+        except Exception as e:
+            logger.error(f"Failed to inject stdin to '{agent_id}': {e}")
+            return {"error": str(e)}
 
     # ─── Status Queries ───────────────────────────────────────────────────────
 

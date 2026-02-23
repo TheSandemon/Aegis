@@ -174,9 +174,9 @@ function renderModelDropdown(service, selectEl, customInputEl, selectedValue = '
 
 let apiKeyDebounceTimer = null;
 
-async function verifyApiKey(keyStr, containerId, keyName) {
+async function verifyApiKey(keyStr, mode) {
     if (!keyStr || keyStr.length < 10) return;
-    const feedbackEl = document.getElementById(`feedback-${containerId}-${keyName}`);
+    const feedbackEl = document.getElementById(`feedback-${mode}-apikey`);
     if (feedbackEl) feedbackEl.innerHTML = ' ⏳ <i>Verifying...</i>';
 
     try {
@@ -190,22 +190,16 @@ async function verifyApiKey(keyStr, containerId, keyName) {
         if (data.valid) {
             if (feedbackEl) feedbackEl.innerHTML = ' ✅ <span style="color:var(--success);font-size:0.8rem;">Verified</span>';
 
-            // Auto Update UI
-            const mode = containerId === 'createEnvVarsSection' ? 'create' : 'edit';
             const prefix = mode === 'create' ? 'worker' : 'instSettings';
-
-            // 1. Swap Service
             const serviceStr = data.service;
             document.getElementById(`${prefix}Service`).value = serviceStr;
 
-            // 2. Inject Live Models into SERVICE_MODELS
             if (data.models && data.models.length > 0) {
                 if (SERVICE_MODELS[serviceStr]) {
                     SERVICE_MODELS[serviceStr].models = data.models;
                 }
             }
 
-            // 3. Re-render the Model Dropdown
             const selectEl = document.getElementById(`${prefix}ModelSelect`);
             const customEl = document.getElementById(`${prefix}ModelCustom`);
             renderModelDropdown(serviceStr, selectEl, customEl, data.default_model);
@@ -213,6 +207,10 @@ async function verifyApiKey(keyStr, containerId, keyName) {
             if (data.default_model) {
                 selectEl.value = data.default_model;
             }
+
+            // Reveal model selection
+            const modelGroup = document.getElementById(`modelGroup-${mode}`);
+            if (modelGroup) modelGroup.style.display = 'block';
 
         } else {
             if (feedbackEl) feedbackEl.innerHTML = ' ❌ <span style="color:var(--danger);font-size:0.8rem;">Invalid Key</span>';
@@ -222,54 +220,11 @@ async function verifyApiKey(keyStr, containerId, keyName) {
     }
 }
 
-function handleKeyInput(e, containerId, keyName) {
+function handleUnifiedKeyInput(e, mode) {
     clearTimeout(apiKeyDebounceTimer);
     apiKeyDebounceTimer = setTimeout(() => {
-        verifyApiKey(e.target.value.trim(), containerId, keyName);
+        verifyApiKey(e.target.value.trim(), mode);
     }, 800);
-}
-
-function renderApiKeys(service, templateId, containerId, savedEnv = {}) {
-    const section = document.getElementById(containerId);
-    const tmpl = registryData.find(a => a.id === templateId);
-
-    // Base keys required by template
-    let requiredKeys = new Set();
-    if (tmpl && tmpl.execution && tmpl.execution.env_vars_required) {
-        tmpl.execution.env_vars_required.forEach(k => requiredKeys.add(k));
-    }
-
-    // If we have an intelligent service mapping, ensure the correct key is required
-    const svc = SERVICE_MODELS[service];
-    if (svc && svc.key_env) {
-        requiredKeys.add(svc.key_env);
-    }
-
-    // Also include any extra keys that were previously saved to the instance
-    const allKeys = new Set([...requiredKeys, ...Object.keys(savedEnv)]);
-
-    // Only remove "default" keys from other services if they aren't explicitly saved
-    const serviceKeysToExclude = Object.values(SERVICE_MODELS).map(s => s.key_env).filter(k => k && k !== svc?.key_env);
-
-    let html = '';
-    allKeys.forEach(key => {
-        if (serviceKeysToExclude.includes(key) && !savedEnv[key] && !requiredKeys.has(key)) return;
-
-        const val = savedEnv[key] || '';
-        html += `
-            <div class="form-group">
-                <label>🔑 ${key} <span id="feedback-${containerId}-${key}"></span></label>
-                <input type="password" 
-                       class="${containerId === 'createEnvVarsSection' ? 'create' : 'inst'}-env-input" 
-                       data-key="${key}" 
-                       value="${escapeHtml(val)}" 
-                       placeholder="Enter ${key}"
-                       oninput="handleKeyInput(event, '${containerId}', '${key}')"
-                       onpaste="handleKeyInput(event, '${containerId}', '${key}')">
-            </div>
-        `;
-    });
-    section.innerHTML = html;
 }
 
 function onServiceChange(mode) {
@@ -280,15 +235,6 @@ function onServiceChange(mode) {
     const customEl = document.getElementById(`${prefix}ModelCustom`);
 
     renderModelDropdown(service, selectEl, customEl);
-
-    // Update API keys mapping
-    if (isCreate) {
-        renderApiKeys(service, document.getElementById('workerTemplate').value, 'createEnvVarsSection');
-    } else {
-        const instId = document.getElementById('instSettingsId').value;
-        const inst = instancesData.find(i => i.instance_id === instId);
-        renderApiKeys(service, inst.template_id, 'instEnvVarsSection', inst.env_vars);
-    }
 }
 
 function onModelSelectChange(mode) {
@@ -382,7 +328,7 @@ async function openCreateWorkerModal() {
         const res = await fetch('/api/registry');
         registryData = await res.json();
         const select = document.getElementById('workerTemplate');
-        select.innerHTML = '<option value="">Select a template...</option>';
+        select.innerHTML = '<option value="">Select an agent type...</option>';
         registryData.filter(a => a.installed).forEach(a => {
             select.innerHTML += `<option value="${a.id}">${a.icon || '🤖'} ${escapeHtml(a.name)} (${a.id})</option>`;
         });
@@ -393,23 +339,17 @@ async function openCreateWorkerModal() {
     // Clear fields
     document.getElementById('workerName').value = '';
     document.getElementById('workerModelCustom').value = '';
-    document.getElementById('workerService').value = 'anthropic';
-    document.getElementById('createEnvVarsSection').innerHTML = '';
-    onServiceChange('create');
+    document.getElementById('workerService').value = '';
+    document.getElementById('unifiedApiKey-create').value = '';
+    document.getElementById('feedback-create-apikey').innerHTML = '';
+    document.getElementById('modelGroup-create').style.display = 'none';
+    document.getElementById('createConfigSection').innerHTML = '';
 }
 
 function onTemplateChange() {
     const templateId = document.getElementById('workerTemplate').value;
     const tmpl = registryData.find(a => a.id === templateId);
     if (!tmpl) return;
-
-    // Auto-select service based on template's required keys
-    if (tmpl.execution && tmpl.execution.env_vars_required) {
-        const firstKey = tmpl.execution.env_vars_required[0];
-        const svcMatch = Object.entries(SERVICE_MODELS).find(([k, v]) => v.key_env === firstKey);
-        if (svcMatch) { document.getElementById('workerService').value = svcMatch[0]; }
-    }
-    onServiceChange('create');
 
     // Render config schema
     renderConfigSchema(templateId, 'createConfigSection');
@@ -425,15 +365,14 @@ async function createWorkerInstance() {
         model = document.getElementById('workerModelCustom').value.trim();
     }
 
-    if (!templateId) { showToast('Select a template'); return; }
+    if (!templateId) { showToast('Select an agent type'); return; }
     if (!instanceName) { showToast('Enter a worker name'); return; }
 
-    // Gather env vars from inputs
+    const apiKey = document.getElementById('unifiedApiKey-create').value.trim();
     const env_vars = {};
-    document.querySelectorAll('.create-env-input').forEach(input => {
-        const key = input.dataset.key;
-        if (key && input.value) env_vars[key] = input.value;
-    });
+    if (apiKey && SERVICE_MODELS[service]) {
+        env_vars[SERVICE_MODELS[service].key_env] = apiKey;
+    }
 
     // Gather config schema values
     const config = collectConfigValues('createConfigSection');
@@ -467,8 +406,11 @@ async function openInstanceSettings(instanceId) {
     document.getElementById('instSettingsName').value = inst.instance_name;
     document.getElementById('instSettingsEnabled').checked = inst.enabled !== false;
 
-    const svc = inst.service || 'anthropic';
+    const svc = inst.service || '';
     document.getElementById('instSettingsService').value = svc;
+
+    document.getElementById('unifiedApiKey-edit').value = ''; // Don't show the saved key
+    document.getElementById('feedback-edit-apikey').innerHTML = '';
 
     // Render the dropdowns and API keys based on service
     onServiceChange('edit');
@@ -476,7 +418,14 @@ async function openInstanceSettings(instanceId) {
     // Now set the model value
     const modelSelect = document.getElementById('instSettingsModelSelect');
     const modelCustom = document.getElementById('instSettingsModelCustom');
+    const modelGroup = document.getElementById('modelGroup-edit');
     const savedModel = inst.model || '';
+
+    if (svc) {
+        modelGroup.style.display = 'block';
+    } else {
+        modelGroup.style.display = 'none';
+    }
 
     const svcData = SERVICE_MODELS[svc];
     if (svcData && svcData.models.find(m => m.id === savedModel)) {
@@ -506,11 +455,11 @@ async function saveInstanceSettings() {
 
     const enabled = document.getElementById('instSettingsEnabled').checked;
 
+    const apiKey = document.getElementById('unifiedApiKey-edit').value.trim();
     const env_vars = {};
-    document.querySelectorAll('.inst-env-input').forEach(input => {
-        const key = input.dataset.key;
-        if (key && input.value) env_vars[key] = input.value;
-    });
+    if (apiKey && SERVICE_MODELS[service]) {
+        env_vars[SERVICE_MODELS[service].key_env] = apiKey;
+    }
 
     // Gather config schema values
     const config = collectConfigValues('editConfigSection');

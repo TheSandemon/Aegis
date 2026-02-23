@@ -170,8 +170,6 @@
             </div>
             <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
-            <button class="secondary" style="background:#8b5cf6;color:#fff;" onclick="openGoalModal()">🎯 New
-                Goal</button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
         </div>
     </header>
@@ -341,32 +339,34 @@
             </div>
             <div class="modal-body">
                 <div class="form-group">
-                    <label>Template</label>
+                    <label>Agent Type</label>
                     <select id="workerTemplate" onchange="onTemplateChange()">
-                        <option value="">Select a template...</option>
+                        <option value="">Select an agent type...</option>
                     </select>
                 </div>
                 <div class="form-group">
                     <label>Worker Name</label>
                     <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
                 </div>
+
+                <input type="hidden" id="workerService" value="">
+
                 <div class="form-group">
-                    <label>Service</label>
-                    <select id="workerService" onchange="onServiceChange('create')">
-                        <option value="anthropic">Anthropic</option>
-                        <option value="google">Google</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="custom">Custom</option>
-                    </select>
+                    <label>🔑 API Key <span id="feedback-create-apikey"></span></label>
+                    <input type="password" id="unifiedApiKey-create" placeholder="sk-ant-..., sk-..., AIza..."
+                        oninput="handleUnifiedKeyInput(event, 'create')"
+                        onpaste="handleUnifiedKeyInput(event, 'create')">
+                    <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or Gemini
+                        key.</small>
                 </div>
-                <div class="form-group">
+
+                <div class="form-group" id="modelGroup-create" style="display:none; margin-top:0.5rem;">
                     <label>Model</label>
                     <select id="workerModelSelect" onchange="onModelSelectChange('create')"></select>
                     <input type="text" id="workerModelCustom" placeholder="e.g. custom-model-name"
                         style="display:none; margin-top:0.5rem;">
                 </div>
-                <div id="createEnvVarsSection"></div>
+
                 <div id="createConfigSection" style="margin-top:0.5rem;"></div>
             </div>
             <div class="modal-footer">
@@ -389,23 +389,25 @@
                     <label>Worker Name</label>
                     <input type="text" id="instSettingsName">
                 </div>
+
+                <input type="hidden" id="instSettingsService" value="">
+
                 <div class="form-group">
-                    <label>Service</label>
-                    <select id="instSettingsService" onchange="onServiceChange('edit')">
-                        <option value="anthropic">Anthropic</option>
-                        <option value="google">Google</option>
-                        <option value="openai">OpenAI</option>
-                        <option value="deepseek">DeepSeek</option>
-                        <option value="custom">Custom</option>
-                    </select>
+                    <label>🔑 API Key <span id="feedback-edit-apikey"></span></label>
+                    <input type="password" id="unifiedApiKey-edit"
+                        placeholder="Update API Key (sk-ant-..., sk-..., AIza...)"
+                        oninput="handleUnifiedKeyInput(event, 'edit')" onpaste="handleUnifiedKeyInput(event, 'edit')">
+                    <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or Gemini
+                        key.</small>
                 </div>
-                <div class="form-group">
+
+                <div class="form-group" id="modelGroup-edit" style="display:none; margin-top:0.5rem;">
                     <label>Model</label>
                     <select id="instSettingsModelSelect" onchange="onModelSelectChange('edit')"></select>
                     <input type="text" id="instSettingsModelCustom" placeholder="e.g. custom-model-name"
                         style="display:none; margin-top:0.5rem;">
                 </div>
-                <div id="instEnvVarsSection"></div>
+
                 <div id="editConfigSection" style="margin-top:0.5rem;"></div>
                 <div class="form-group" style="margin-top:1rem;">
                     <label>Enabled</label>
@@ -416,30 +418,6 @@
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('instanceSettingsModal')">Cancel</button>
                 <button onclick="saveInstanceSettings()">Save Settings</button>
-            </div>
-        </div>
-    </div>
-
-    <!-- Goal Decomposition Modal (Planner Agent) -->
-    <div class="modal-overlay" id="goalModal">
-        <div class="modal" style="max-width:600px;">
-            <div class="modal-header">
-                <h3>🎯 Decompose Goal</h3><button class="modal-close" onclick="closeModal('goalModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="form-group">
-                    <label>What's your high-level goal?</label>
-                    <textarea id="goalInput" rows="3"
-                        placeholder="e.g. Create a 2-minute informational video about a Child Advocacy Center"></textarea>
-                </div>
-                <div id="goalStatus"
-                    style="display:none;font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">
-                    🔄 Decomposing goal into tasks...
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="secondary" onclick="closeModal('goalModal')">Cancel</button>
-                <button onclick="submitGoal()" style="background:#8b5cf6;">🚀 Decompose</button>
             </div>
         </div>
     </div>

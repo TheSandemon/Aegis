@@ -324,6 +324,7 @@ class ExecutionEngine:
         env["AEGIS_CARD_TITLE"] = card.get("title", "")
         env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
         env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
+        env["AEGIS_API_URL"] = os.environ.get("AEGIS_API_URL", "http://localhost:8080/api")
         if instance_id:
             env["AEGIS_INSTANCE_ID"] = instance_id
             env["AEGIS_INSTANCE_NAME"] = instance_name or ""

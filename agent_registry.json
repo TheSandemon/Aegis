@@ -7,7 +7,7 @@
         "github_url": "https://github.com/TheSandemon/OpenClaw",
         "support_url": "https://github.com/TheSandemon/OpenClaw",
         "license": "MIT",
-        "icon": "🦞",
+        "icon": "\ud83e\udd9e",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -16,10 +16,8 @@
         },
         "execution": {
             "working_dir": "./agents/openclaw",
-            "command": "node index.js",
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -27,9 +25,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are OpenClaw, an autonomous coding agent. Read the task, analyze the repo, write clean code, and create PRs."
             },
             "temperature": {
@@ -71,7 +69,7 @@
         "github_url": "https://github.com/TheSandemon/memU-Bot",
         "support_url": "https://github.com/TheSandemon/memU-Bot",
         "license": "MIT",
-        "icon": "🧠",
+        "icon": "\ud83e\udde0",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -80,10 +78,8 @@
         },
         "execution": {
             "working_dir": "./agents/memu-bot",
-            "command": "python daemon.py",
-            "env_vars_required": [
-                "OPENAI_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -91,9 +87,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are memU, a proactive memory agent. Continuously monitor conversations, extract key facts, and build a structured long-term knowledge graph."
             },
             "temperature": {
@@ -124,7 +120,7 @@
         "github_url": "https://github.com/TheSandemon/PicoClaw",
         "support_url": "https://github.com/TheSandemon/PicoClaw",
         "license": "MIT",
-        "icon": "🦀",
+        "icon": "\ud83e\udd80",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -133,10 +129,8 @@
         },
         "execution": {
             "working_dir": "./agents/picoclaw",
-            "command": "./picoclaw",
-            "env_vars_required": [
-                "GOOGLE_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -144,9 +138,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are PicoClaw, a lean task executor. Complete tasks with minimal resource usage."
             },
             "temperature": {
@@ -172,7 +166,7 @@
         "github_url": "https://github.com/TheSandemon/NanoClaw",
         "support_url": "https://github.com/TheSandemon/NanoClaw",
         "license": "MIT",
-        "icon": "🛡️",
+        "icon": "\ud83d\udee1\ufe0f",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -181,18 +175,16 @@
         },
         "execution": {
             "working_dir": "./agents/nanoclaw",
-            "command": "python nanoclaw.py",
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are NanoClaw, a security-first agent. All actions must be safe and verifiable. Never execute destructive operations."
             },
             "temperature": {
@@ -228,7 +220,7 @@
         "github_url": "https://github.com/TheSandemon/TrustClaw",
         "support_url": "https://github.com/TheSandemon/TrustClaw",
         "license": "MIT",
-        "icon": "🔐",
+        "icon": "\ud83d\udd10",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -238,19 +230,17 @@
         },
         "execution": {
             "working_dir": "./agents/trustclaw",
-            "command": "node dist/index.js",
-            "env_vars_required": [
-                "OPENAI_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are TrustClaw, an execution verifier. Confirm all outputs are correct and audit all API calls for safety."
             },
             "temperature": {
@@ -286,7 +276,7 @@
         "github_url": "https://github.com/TheSandemon/ZeroClaw",
         "support_url": "https://github.com/TheSandemon/ZeroClaw",
         "license": "MIT",
-        "icon": "⚡",
+        "icon": "\u26a1",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -295,10 +285,8 @@
         },
         "execution": {
             "working_dir": "./agents/zeroclaw",
-            "command": "./target/release/zeroclaw",
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -306,9 +294,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are ZeroClaw, a high-performance task executor. Prioritize speed and correctness."
             },
             "temperature": {
@@ -339,7 +327,7 @@
         "github_url": "https://github.com/TheSandemon/NanoBot",
         "support_url": "https://github.com/TheSandemon/NanoBot",
         "license": "MIT",
-        "icon": "🦠",
+        "icon": "\ud83e\udda0",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -348,10 +336,8 @@
         },
         "execution": {
             "working_dir": "./agents/nanobot",
-            "command": "python nanobot.py",
-            "env_vars_required": [
-                "OPENAI_API_KEY"
-            ]
+            "command": "python worker.py",
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -359,9 +345,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are NanoBot, a transparent and auditable agent. Log every decision with clear reasoning."
             },
             "temperature": {
@@ -396,7 +382,7 @@
         "github_url": "https://github.com/TheSandemon/IronClaw",
         "support_url": "https://github.com/TheSandemon/IronClaw",
         "license": "MIT",
-        "icon": "⚙️",
+        "icon": "\u2699\ufe0f",
         "installation": {
             "method": "git_clone",
             "setup_commands": [
@@ -406,9 +392,7 @@
         "execution": {
             "working_dir": "./agents/ironclaw",
             "command": "python worker.py",
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "env_vars_required": []
         },
         "permissions": [
             "read_file",
@@ -416,9 +400,9 @@
             "list_dir"
         ],
         "config_schema": {
-            "system_prompt": {
+            "goals": {
                 "type": "textarea",
-                "label": "System Prompt",
+                "label": "Agent Goals",
                 "default": "You are IronClaw, a production pipeline worker. Process tasks reliably at scale."
             },
             "temperature": {

@@ -324,6 +324,16 @@ class ExecutionEngine:
         if instance_id:
             env["AEGIS_INSTANCE_ID"] = instance_id
             env["AEGIS_INSTANCE_NAME"] = instance_name or ""
+            
+            # Inject service and model if available in instance data
+            try:
+                instances = load_instances()
+                inst_meta = next((i for i in instances if i["instance_id"] == instance_id), None)
+                if inst_meta:
+                    env["AEGIS_SERVICE"] = inst_meta.get("service", "")
+                    env["AEGIS_MODEL"] = inst_meta.get("model", "")
+            except Exception as e:
+                logger.warning(f"Failed to load instance service/model: {e}")
 
         adapter = self._get_adapter(merged_config)
 

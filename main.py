@@ -37,12 +37,12 @@ logger = logging.getLogger("aegis")
 
 # ─── Configuration ───────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
-with open(CONFIG_PATH) as f:
+with open(CONFIG_PATH, encoding="utf-8") as f:
     CONFIG = json.load(f)
 
 # ─── Agent Registry ──────────────────────────────────────────────────────────────
 REGISTRY_PATH = Path(__file__).parent / "agent_registry.json"
-with open(REGISTRY_PATH) as f:
+with open(REGISTRY_PATH, encoding="utf-8") as f:
     AGENT_REGISTRY = json.load(f)
 
 # Default colors for agents if not specified
@@ -340,7 +340,7 @@ async def get_config():
 async def update_config(updates: dict):
     global CONFIG
     CONFIG.update(updates)
-    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w') as f:
+    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w', encoding="utf-8") as f:
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
 
@@ -959,7 +959,7 @@ async def update_agent_params(agent_id: str, updates: dict):
         
     CONFIG["agents"][agent_id].update(updates)
     
-    with open(CONFIG_PATH, 'w') as f:
+    with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
         json.dump(CONFIG, f, indent=2)
         
     # Broadcast the change

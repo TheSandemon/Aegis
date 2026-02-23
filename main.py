@@ -218,9 +218,9 @@ broker = PromptBroker(
 
 # Valid column transitions (from -> allowed destinations)
 VALID_TRANSITIONS = {
-    "Inbox":       ["Planned", "Blocked", "Done"],
+    "Inbox":       ["Planned", "In Progress", "Blocked", "Done"],
     "Planned":     ["In Progress", "Blocked", "Inbox"],
-    "In Progress": ["Review", "Blocked", "Planned"],
+    "In Progress": ["Review", "Blocked", "Planned", "Done"],
     "Blocked":     ["Planned", "In Progress", "Inbox"],
     "Review":      ["Done", "In Progress", "Blocked"],  # Review→Done only by humans
     "Done":        ["Inbox"],  # Reopen

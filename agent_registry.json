@@ -58,6 +58,16 @@
                     "file_write",
                     "git_operations"
                 ]
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -109,6 +119,16 @@
                 "type": "number",
                 "label": "Consolidation Interval (sec)",
                 "default": 300
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -155,6 +175,16 @@
                 "type": "number",
                 "label": "Max Tokens",
                 "default": 2048
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -209,6 +239,16 @@
                     "off"
                 ],
                 "default": "strict"
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -265,6 +305,16 @@
                     "never"
                 ],
                 "default": "always"
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -316,6 +366,16 @@
                 "type": "number",
                 "label": "Max Parallel Tasks",
                 "default": 4
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -371,6 +431,16 @@
                     "off"
                 ],
                 "default": "on"
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     },
@@ -427,6 +497,16 @@
                 "type": "number",
                 "label": "Max Retries",
                 "default": 3
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
             }
         }
     }

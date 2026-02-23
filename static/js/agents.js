@@ -101,6 +101,148 @@ async function viewInstanceLogs(instanceId) {
     } catch (e) { showToast('Failed to load logs'); }
 }
 
+// ─── Service & Model Definitions ──────────────────────────────────────────
+
+const SERVICE_MODELS = {
+    'anthropic': {
+        name: 'Anthropic',
+        key_env: 'ANTHROPIC_API_KEY',
+        models: [
+            { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
+            { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
+            { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
+            { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' }
+        ]
+    },
+    'google': {
+        name: 'Google',
+        key_env: 'GOOGLE_API_KEY',
+        models: [
+            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
+            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
+            { id: 'gemini-2.0-pro-exp-02-05', name: 'Gemini 2.0 Pro Experimental' },
+            { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' }
+        ]
+    },
+    'openai': {
+        name: 'OpenAI',
+        key_env: 'OPENAI_API_KEY',
+        models: [
+            { id: 'o3-mini', name: 'o3-mini' },
+            { id: 'o1', name: 'o1' },
+            { id: 'gpt-4o', name: 'GPT-4o' },
+            { id: 'gpt-4o-mini', name: 'GPT-4o Mini' }
+        ]
+    },
+    'deepseek': {
+        name: 'DeepSeek',
+        key_env: 'DEEPSEEK_API_KEY',
+        models: [
+            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)' },
+            { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)' }
+        ]
+    },
+    'custom': {
+        name: 'Custom',
+        key_env: '',
+        models: []
+    }
+};
+
+function renderModelDropdown(service, selectEl, customInputEl, selectedValue = '') {
+    const svc = SERVICE_MODELS[service];
+    if (!svc || service === 'custom') {
+        selectEl.style.display = 'none';
+        customInputEl.style.display = 'block';
+        if (selectedValue && !svc?.models.find(m => m.id === selectedValue)) {
+            customInputEl.value = selectedValue;
+        }
+        return;
+    }
+
+    selectEl.style.display = 'block';
+    customInputEl.style.display = 'none';
+    selectEl.innerHTML = svc.models.map(m => `<option value="${m.id}" ${m.id === selectedValue ? 'selected' : ''}>${m.name}</option>`).join('') + '<option value="custom">-- Custom --</option>';
+
+    // If the saved value isn't in the list, pre-select custom
+    if (selectedValue && !svc.models.find(m => m.id === selectedValue)) {
+        selectEl.value = 'custom';
+        customInputEl.style.display = 'block';
+        customInputEl.value = selectedValue;
+    }
+}
+
+function renderApiKeys(service, templateId, containerId, savedEnv = {}) {
+    const section = document.getElementById(containerId);
+    const tmpl = registryData.find(a => a.id === templateId);
+
+    // Base keys required by template
+    let requiredKeys = new Set();
+    if (tmpl && tmpl.execution && tmpl.execution.env_vars_required) {
+        tmpl.execution.env_vars_required.forEach(k => requiredKeys.add(k));
+    }
+
+    // If we have an intelligent service mapping, ensure the correct key is required
+    const svc = SERVICE_MODELS[service];
+    if (svc && svc.key_env) {
+        requiredKeys.add(svc.key_env);
+    }
+
+    // Also include any extra keys that were previously saved to the instance
+    const allKeys = new Set([...requiredKeys, ...Object.keys(savedEnv)]);
+
+    // Only remove "default" keys from other services if they aren't explicitly saved
+    // e.g., if switching from Anthropic to Google, remove ANTHROPIC_API_KEY from requirements
+    // unless it was explicitly saved in the instance's env vars.
+    const serviceKeysToExclude = Object.values(SERVICE_MODELS).map(s => s.key_env).filter(k => k && k !== svc?.key_env);
+
+    let html = '';
+    allKeys.forEach(key => {
+        // Skip keys that belong to OTHER services, UNLESS they are explicitly saved
+        if (serviceKeysToExclude.includes(key) && !savedEnv[key] && !requiredKeys.has(key)) return;
+
+        const val = savedEnv[key] || '';
+        html += `
+            <div class="form-group">
+                <label>🔑 ${key}</label>
+                <input type="password" class="${containerId === 'createEnvVarsSection' ? 'create' : 'inst'}-env-input" data-key="${key}" value="${escapeHtml(val)}" placeholder="Enter ${key}">
+            </div>
+        `;
+    });
+    section.innerHTML = html;
+}
+
+function onServiceChange(mode) {
+    const isCreate = mode === 'create';
+    const prefix = isCreate ? 'worker' : 'instSettings';
+    const service = document.getElementById(`${prefix}Service`).value;
+    const selectEl = document.getElementById(`${prefix}ModelSelect`);
+    const customEl = document.getElementById(`${prefix}ModelCustom`);
+
+    renderModelDropdown(service, selectEl, customEl);
+
+    // Update API keys mapping
+    if (isCreate) {
+        renderApiKeys(service, document.getElementById('workerTemplate').value, 'createEnvVarsSection');
+    } else {
+        const instId = document.getElementById('instSettingsId').value;
+        const inst = instancesData.find(i => i.instance_id === instId);
+        renderApiKeys(service, inst.template_id, 'instEnvVarsSection', inst.env_vars);
+    }
+}
+
+function onModelSelectChange(mode) {
+    const prefix = mode === 'create' ? 'worker' : 'instSettings';
+    const selectEl = document.getElementById(`${prefix}ModelSelect`);
+    const customEl = document.getElementById(`${prefix}ModelCustom`);
+    if (selectEl.value === 'custom') {
+        customEl.style.display = 'block';
+        customEl.focus();
+    } else {
+        customEl.style.display = 'none';
+    }
+}
+
 // ─── Create Worker Modal (with per-instance settings) ───────────────────
 
 async function openCreateWorkerModal() {
@@ -119,37 +261,36 @@ async function openCreateWorkerModal() {
     } catch (e) { console.error('Failed to load registry', e); }
     // Clear fields
     document.getElementById('workerName').value = '';
-    document.getElementById('workerModel').value = '';
+    document.getElementById('workerModelCustom').value = '';
+    document.getElementById('workerService').value = 'anthropic';
     document.getElementById('createEnvVarsSection').innerHTML = '';
+    onServiceChange('create');
 }
 
 function onTemplateChange() {
     const templateId = document.getElementById('workerTemplate').value;
     const tmpl = registryData.find(a => a.id === templateId);
-    const section = document.getElementById('createEnvVarsSection');
-    if (!tmpl || !tmpl.execution || !tmpl.execution.env_vars_required || tmpl.execution.env_vars_required.length === 0) {
-        section.innerHTML = '';
-        return;
-    }
-    // Auto-select service based on template
-    const serviceMap = { 'ANTHROPIC_API_KEY': 'anthropic', 'GOOGLE_API_KEY': 'google', 'OPENAI_API_KEY': 'openai' };
+    if (!tmpl || !tmpl.execution || !tmpl.execution.env_vars_required) return;
+
+    // Auto-select service based on template's required keys
     const firstKey = tmpl.execution.env_vars_required[0];
-    if (serviceMap[firstKey]) {
-        document.getElementById('workerService').value = serviceMap[firstKey];
+    const svcMatch = Object.entries(SERVICE_MODELS).find(([k, v]) => v.key_env === firstKey);
+
+    if (svcMatch) {
+        document.getElementById('workerService').value = svcMatch[0];
     }
-    section.innerHTML = tmpl.execution.env_vars_required.map(key => `
-        <div class="form-group">
-            <label>🔑 ${key}</label>
-            <input type="password" class="create-env-input" data-key="${key}" placeholder="Enter ${key}">
-        </div>
-    `).join('');
+    onServiceChange('create');
 }
 
 async function createWorkerInstance() {
     const templateId = document.getElementById('workerTemplate').value;
     const instanceName = document.getElementById('workerName').value.trim();
     const service = document.getElementById('workerService').value;
-    const model = document.getElementById('workerModel').value.trim();
+
+    let model = document.getElementById('workerModelSelect').value;
+    if (model === 'custom' || !model) {
+        model = document.getElementById('workerModelCustom').value.trim();
+    }
 
     if (!templateId) { showToast('Select a template'); return; }
     if (!instanceName) { showToast('Enter a worker name'); return; }
@@ -188,29 +329,28 @@ async function openInstanceSettings(instanceId) {
     document.getElementById('instSettingsId').value = instanceId;
     document.getElementById('instSettingsTitle').textContent = inst.instance_name;
     document.getElementById('instSettingsName').value = inst.instance_name;
-    document.getElementById('instSettingsService').value = inst.service || 'anthropic';
-    document.getElementById('instSettingsModel').value = inst.model || '';
     document.getElementById('instSettingsEnabled').checked = inst.enabled !== false;
 
-    // Render env var inputs
-    const tmpl = registryData.find(a => a.id === inst.template_id);
-    const requiredKeys = (tmpl && tmpl.execution && tmpl.execution.env_vars_required) ? tmpl.execution.env_vars_required : [];
-    const savedEnv = inst.env_vars || {};
+    const svc = inst.service || 'anthropic';
+    document.getElementById('instSettingsService').value = svc;
 
-    // Merge required + any extra saved keys
-    const allKeys = new Set([...requiredKeys, ...Object.keys(savedEnv)]);
+    // Render the dropdowns and API keys based on service
+    onServiceChange('edit');
 
-    const section = document.getElementById('instEnvVarsSection');
-    let html = '';
-    allKeys.forEach(key => {
-        html += `
-            <div class="form-group">
-                <label>🔑 ${key}</label>
-                <input type="password" class="inst-env-input" data-key="${key}" value="${savedEnv[key] || ''}" placeholder="Enter ${key}">
-            </div>
-        `;
-    });
-    section.innerHTML = html;
+    // Now set the model value
+    const modelSelect = document.getElementById('instSettingsModelSelect');
+    const modelCustom = document.getElementById('instSettingsModelCustom');
+    const savedModel = inst.model || '';
+
+    const svcData = SERVICE_MODELS[svc];
+    if (svcData && svcData.models.find(m => m.id === savedModel)) {
+        modelSelect.value = savedModel;
+        modelCustom.style.display = 'none';
+    } else {
+        modelSelect.value = 'custom';
+        modelCustom.style.display = 'block';
+        modelCustom.value = savedModel;
+    }
 
     document.getElementById('instanceSettingsModal').classList.add('active');
 }
@@ -219,7 +359,12 @@ async function saveInstanceSettings() {
     const instanceId = document.getElementById('instSettingsId').value;
     const instance_name = document.getElementById('instSettingsName').value.trim();
     const service = document.getElementById('instSettingsService').value;
-    const model = document.getElementById('instSettingsModel').value.trim();
+
+    let model = document.getElementById('instSettingsModelSelect').value;
+    if (model === 'custom' || !model) {
+        model = document.getElementById('instSettingsModelCustom').value.trim();
+    }
+
     const enabled = document.getElementById('instSettingsEnabled').checked;
 
     const env_vars = {};

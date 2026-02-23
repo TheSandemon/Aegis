@@ -265,6 +265,26 @@ async def lifespan(app: FastAPI):
     logger.info(f"Polling rate: {CONFIG.get('polling_rate_ms', 5000)}ms")
     logger.info(f"Rate limit: {CONFIG.get('rate_limits', {}).get('prompts_per_minute', 1)} prompt(s)/min")
 
+    # --- Ensure Mandatory Orchestrator Exists ---
+    try:
+        instances = load_instances()
+        if not any(inst.get("template_id") == "aegis-orchestrator" for inst in instances):
+            logger.info("Mandatory 'aegis-orchestrator' instance not found. Auto-creating...")
+            with open(REGISTRY_PATH, encoding="utf-8") as f:
+                live_registry = json.load(f)
+            registry_entry = next((a for a in live_registry if a["id"] == "aegis-orchestrator"), None)
+            if registry_entry:
+                create_instance(
+                    template_id="aegis-orchestrator",
+                    instance_name="Main Orchestrator",
+                    registry_entry=registry_entry
+                )
+            else:
+                logger.error("aegis-orchestrator template missing from registry!")
+    except Exception as e:
+        logger.error(f"Failed to verify/create mandatory orchestrator: {e}")
+    # --------------------------------------------
+
     # Start prompt broker
     await broker.start()
 

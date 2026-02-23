@@ -23,16 +23,31 @@ function renderInstancesSidebar() {
         return;
     }
 
-    list.innerHTML = instancesData.map(inst => {
+    // Sort so orchestrator is always top
+    const sortedInstances = [...instancesData].sort((a, b) => {
+        if (a.template_id === 'aegis-orchestrator') return -1;
+        if (b.template_id === 'aegis-orchestrator') return 1;
+        return 0;
+    });
+
+    list.innerHTML = sortedInstances.map(inst => {
         const isRunning = inst.runtime_status === 'running';
+        const isOrchestrator = inst.template_id === 'aegis-orchestrator';
+        const hasApiKey = inst.env_vars && Object.keys(inst.env_vars).length > 0;
+
         const color = inst.color || '#6366f1';
         const rgb = hexToRgb(color);
         const serviceBadge = inst.service ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.service}</span>` : '';
         const modelBadge = inst.model ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.model}</span>` : '';
+
+        const warningBadge = (isOrchestrator && !hasApiKey) ?
+            `<div style="font-size:0.65rem; color:#ef4444; background:rgba(239, 68, 68, 0.1); padding:0.2rem 0.4rem; border-radius:4px; margin-top:0.3rem; text-align:center; font-weight:bold;">⚠️ API Key Required</div>` : '';
+
         return `
             <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
-                 style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b}"
+                 style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b}; ${isOrchestrator ? 'border-top: 2px solid ' + color + ';' : ''}"
                  data-instance-id="${inst.instance_id}">
+                ${isOrchestrator ? '<div style="font-size:0.6rem;text-transform:uppercase;color:var(--text-secondary);letter-spacing:1px;margin-bottom:0.4rem;">Main Orchestrator</div>' : ''}
                 <div class="agent-sidebar-header">
                     <div class="agent-avatar" style="border-color: ${color}">${inst.icon || '🤖'}</div>
                     <div class="agent-info-main">
@@ -47,12 +62,14 @@ function renderInstancesSidebar() {
                     <div class="param-row"><span>Template</span><b>${escapeHtml(inst.template_id)}</b></div>
                     <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">${serviceBadge}${modelBadge}</div>
                 </div>
+                ${warningBadge}
                 <div style="display:flex;gap:0.25rem;margin-top:0.5rem;">
-                    ${!isRunning ? `<button onclick="startInstance('${inst.instance_id}')" style="flex:1;background:#22c55e;font-size:0.7rem;">▶ Start</button>` : ''}
+                    ${!isRunning && !(!hasApiKey && isOrchestrator) ? `<button onclick="startInstance('${inst.instance_id}')" style="flex:1;background:#22c55e;font-size:0.7rem;">▶ Start</button>` : ''}
+                    ${(!hasApiKey && isOrchestrator) ? `<button class="secondary" onclick="openInstanceSettings('${inst.instance_id}')" style="flex:1;font-size:0.7rem;color:#ef4444;border-color:#ef4444;">Configure Key</button>` : ''}
                     ${isRunning ? `<button class="danger" onclick="stopInstance('${inst.instance_id}')" style="flex:1;font-size:0.7rem;">⏹ Stop</button>` : ''}
                     <button class="secondary" onclick="openInstanceSettings('${inst.instance_id}')" style="font-size:0.7rem;" title="Settings">⚙️</button>
                     <button class="secondary" onclick="viewInstanceLogs('${inst.instance_id}')" style="font-size:0.7rem;">📋</button>
-                    ${!isRunning ? `<button class="danger" onclick="deleteWorkerInstance('${inst.instance_id}')" style="font-size:0.7rem;">🗑</button>` : ''}
+                    ${(!isRunning && !isOrchestrator) ? `<button class="danger" onclick="deleteWorkerInstance('${inst.instance_id}')" style="font-size:0.7rem;">🗑</button>` : ''}
                 </div>
             </div>`;
     }).join('');
@@ -410,6 +427,12 @@ async function openInstanceSettings(instanceId) {
     document.getElementById('instSettingsTitle').textContent = inst.instance_name;
     document.getElementById('instSettingsName').value = inst.instance_name;
     document.getElementById('instSettingsEnabled').checked = inst.enabled !== false;
+
+    // Show orchestrator specific tip
+    const orchTip = document.getElementById('orchestratorModelTip');
+    if (orchTip) {
+        orchTip.style.display = (inst.template_id === 'aegis-orchestrator') ? 'block' : 'none';
+    }
 
     const svc = inst.service || '';
     document.getElementById('instSettingsService').value = svc;

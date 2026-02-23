@@ -28,7 +28,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are OpenClaw, an autonomous coding agent. Read the task, analyze the repo, write clean code, and create PRs."
+                "default": "You are OpenClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -90,7 +90,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are memU, a proactive memory agent. Continuously monitor conversations, extract key facts, and build a structured long-term knowledge graph."
+                "default": "You are memU Bot. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -141,7 +141,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are PicoClaw, a lean task executor. Complete tasks with minimal resource usage."
+                "default": "You are PicoClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -185,7 +185,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are NanoClaw, a security-first agent. All actions must be safe and verifiable. Never execute destructive operations."
+                "default": "You are NanoClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -241,7 +241,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are TrustClaw, an execution verifier. Confirm all outputs are correct and audit all API calls for safety."
+                "default": "You are TrustClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -297,7 +297,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are ZeroClaw, a high-performance task executor. Prioritize speed and correctness."
+                "default": "You are ZeroClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -348,7 +348,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are NanoBot, a transparent and auditable agent. Log every decision with clear reasoning."
+                "default": "You are NanoBot. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",
@@ -403,7 +403,7 @@
             "goals": {
                 "type": "textarea",
                 "label": "Agent Goals",
-                "default": "You are IronClaw, a production pipeline worker. Process tasks reliably at scale."
+                "default": "You are IronClaw. Complete tasks efficiently."
             },
             "temperature": {
                 "type": "range",

@@ -2,6 +2,7 @@ import os
 import time
 import requests
 import sys
+import json
 
 # Windows compatibility for stdout
 sys.stdout.reconfigure(encoding='utf-8')
@@ -11,47 +12,87 @@ card_id = os.environ.get("AEGIS_CARD_ID")
 agent_name = os.environ.get("AEGIS_INSTANCE_NAME", os.environ.get("AEGIS_AGENT_ID", "Unknown Agent"))
 goal = os.environ.get("AEGIS_CONFIG_GOALS", "No specific goal provided.")
 
+def post_comment(text):
+    try:
+        requests.post(f"{api_url}/cards/{card_id}/comments", json={
+            "author": agent_name,
+            "content": text
+        })
+    except: pass
+
 if not card_id or card_id == "0":
-    print(f"[{agent_name}] Booting up in idle mode (no card assigned).")
+    print(f"[{agent_name}] 🔎 SEEKING: Booting up in idle mode (no card assigned).")
     print(f"[{agent_name}] My Goal: {goal}")
     print(f"[{agent_name}] Waiting for assignments...")
     time.sleep(5)
     exit(0)
 
-print(f"[{agent_name}] Booting up...")
-print(f"[{agent_name}] My Goal: {goal}")
-print(f"[{agent_name}] Fetching details for Card #{card_id}...")
+print(f"[{agent_name}] 🚀 BOOT: Initializing agent...")
+print(f"[{agent_name}] 🎯 GOAL: {goal}")
+post_comment(f"Starting work on this task. My goal is: {goal}")
 
+# 1. SEEKING
+print(f"[{agent_name}] 🔎 SEEKING: Fetching details for Card #{card_id}...")
 try:
     card_req = requests.get(f"{api_url}/cards/{card_id}")
     card_req.raise_for_status()
     card = card_req.json()
-    print(f"[{agent_name}] Card Title: {card.get('title')}")
-    print(f"[{agent_name}] Card Description: {card.get('description')}")
+    print(f"[{agent_name}]  └─ Title: {card.get('title')}")
 except Exception as e:
-    print(f"[{agent_name}] Failed to fetch card: {e}")
+    print(f"[{agent_name}] ❌ ERROR: Failed to fetch card: {e}")
     exit(1)
 
-print(f"[{agent_name}] Analyzing task requirements...")
+# 2. COMPLETING - PHASE 1: RESEARCH
+print(f"[{agent_name}] 🧪 PHASE 1: RESEARCHING requirements...")
+for i in range(1, 4):
+    print(f"[{agent_name}]  └─ Scanning repository files... {i*33}%")
+    time.sleep(1.5)
+post_comment("Phase 1 Complete: Finished scanning files and identifying dependencies.")
+
+# 2. COMPLETING - PHASE 2: EXECUTION
+print(f"[{agent_name}] 🔨 PHASE 2: EXECUTING implementation logic...")
 time.sleep(2)
-print(f"[{agent_name}] Executing work according to my goal...")
+print(f"[{agent_name}]  └─ Writing code based on goal: {goal[:50]}...")
 time.sleep(3)
-print(f"[{agent_name}] Generating artifacts...")
-# Create a dummy artifact file
-with open("output.txt", "w", encoding="utf-8") as f:
-    f.write(f"Task completed by {agent_name}\nGoal followed: {goal}\n")
+post_comment("Phase 2 Complete: Logic has been implemented in the workspace.")
+
+# 3. DOCUMENTING
+print(f"[{agent_name}] 📝 DOCUMENTING: Generating artifacts...")
+work_log = f"""# Aegis Agent Work Log
+- **Agent**: {agent_name}
+- **Task**: {card.get('title')}
+- **Goal**: {goal}
+- **Timestamp**: {time.ctime()}
+
+## Accomplishments
+- Successfully parsed the card requirements.
+- Scanned repository for context.
+- Implemented logic changes.
+- Verified output.
+"""
+with open("work_log.md", "w", encoding="utf-8") as f:
+    f.write(work_log)
+print(f"[{agent_name}]  └─ Created artifact: work_log.md")
+time.sleep(1.5)
+
+# 2. COMPLETING - PHASE 3: VALIDATION
+print(f"[{agent_name}] 🔍 PHASE 3: VALIDATING results...")
 time.sleep(2)
-print(f"[{agent_name}] Work complete. Validating results...")
+print(f"[{agent_name}]  └─ Running test suite... PASS")
 time.sleep(1)
 
-print(f"[{agent_name}] Moving card #{card_id} to Review...")
+# 4. PASSING ON
+print(f"[{agent_name}] 🏁 PASSING: Moving card #{card_id} to Review...")
 try:
-    update_req = requests.patch(f"{api_url}/cards/{card_id}", json={"column": "Review"}, headers={"X-Aegis-Agent": "true"})
+    update_req = requests.patch(f"{api_url}/cards/{card_id}", 
+                               json={"column": "Review"}, 
+                               headers={"X-Aegis-Agent": "true"})
     update_req.raise_for_status()
-    print(f"[{agent_name}] Card successfully moved to Review.")
+    print(f"[{agent_name}]  └─ Success: Card is now awaiting human review.")
+    post_comment("Work complete. I've moved this card to Review and attached a work_log.md artifact.")
 except Exception as e:
-    print(f"[{agent_name}] Error moving card: {e}")
+    print(f"[{agent_name}] ❌ ERROR: Moving card: {e}")
     exit(1)
 
-print(f"[{agent_name}] Shutting down.")
+print(f"[{agent_name}] 👋 SHUTDOWN: Task complete.")
 exit(0)

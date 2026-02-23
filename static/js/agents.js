@@ -194,6 +194,11 @@ async function verifyApiKey(keyStr, mode) {
             const serviceStr = data.service;
             document.getElementById(`${prefix}Service`).value = serviceStr;
 
+            // Clear existing models for this service before adding new ones to prevent duplicates
+            if (SERVICE_MODELS[serviceStr]) {
+                SERVICE_MODELS[serviceStr].models = [];
+            }
+
             if (data.models && data.models.length > 0) {
                 if (SERVICE_MODELS[serviceStr]) {
                     SERVICE_MODELS[serviceStr].models = data.models;
@@ -464,11 +469,17 @@ async function saveInstanceSettings() {
     // Gather config schema values
     const config = collectConfigValues('editConfigSection');
 
+    const updateData = { instance_name, service, model, enabled, config };
+    // Only include env_vars if a new API key was actually entered
+    if (Object.keys(env_vars).length > 0) {
+        updateData.env_vars = env_vars;
+    }
+
     try {
         const res = await fetch(`/api/instances/${instanceId}/settings`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instance_name, service, model, enabled, env_vars, config })
+            body: JSON.stringify(updateData)
         });
         if (res.ok) {
             showToast('⚙️ Settings saved');

@@ -172,6 +172,63 @@ function renderModelDropdown(service, selectEl, customInputEl, selectedValue = '
     }
 }
 
+let apiKeyDebounceTimer = null;
+
+async function verifyApiKey(keyStr, containerId, keyName) {
+    if (!keyStr || keyStr.length < 10) return;
+    const feedbackEl = document.getElementById(`feedback-${containerId}-${keyName}`);
+    if (feedbackEl) feedbackEl.innerHTML = ' ⏳ <i>Verifying...</i>';
+
+    try {
+        const res = await fetch('/api/keys/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: keyStr })
+        });
+        const data = await res.json();
+
+        if (data.valid) {
+            if (feedbackEl) feedbackEl.innerHTML = ' ✅ <span style="color:var(--success);font-size:0.8rem;">Verified</span>';
+
+            // Auto Update UI
+            const mode = containerId === 'createEnvVarsSection' ? 'create' : 'edit';
+            const prefix = mode === 'create' ? 'worker' : 'instSettings';
+
+            // 1. Swap Service
+            const serviceStr = data.service;
+            document.getElementById(`${prefix}Service`).value = serviceStr;
+
+            // 2. Inject Live Models into SERVICE_MODELS
+            if (data.models && data.models.length > 0) {
+                if (SERVICE_MODELS[serviceStr]) {
+                    SERVICE_MODELS[serviceStr].models = data.models;
+                }
+            }
+
+            // 3. Re-render the Model Dropdown
+            const selectEl = document.getElementById(`${prefix}ModelSelect`);
+            const customEl = document.getElementById(`${prefix}ModelCustom`);
+            renderModelDropdown(serviceStr, selectEl, customEl, data.default_model);
+
+            if (data.default_model) {
+                selectEl.value = data.default_model;
+            }
+
+        } else {
+            if (feedbackEl) feedbackEl.innerHTML = ' ❌ <span style="color:var(--danger);font-size:0.8rem;">Invalid Key</span>';
+        }
+    } catch (e) {
+        if (feedbackEl) feedbackEl.innerHTML = ' ⚠️ <span style="color:var(--warning);font-size:0.8rem;">Check failed</span>';
+    }
+}
+
+function handleKeyInput(e, containerId, keyName) {
+    clearTimeout(apiKeyDebounceTimer);
+    apiKeyDebounceTimer = setTimeout(() => {
+        verifyApiKey(e.target.value.trim(), containerId, keyName);
+    }, 800);
+}
+
 function renderApiKeys(service, templateId, containerId, savedEnv = {}) {
     const section = document.getElementById(containerId);
     const tmpl = registryData.find(a => a.id === templateId);
@@ -192,20 +249,23 @@ function renderApiKeys(service, templateId, containerId, savedEnv = {}) {
     const allKeys = new Set([...requiredKeys, ...Object.keys(savedEnv)]);
 
     // Only remove "default" keys from other services if they aren't explicitly saved
-    // e.g., if switching from Anthropic to Google, remove ANTHROPIC_API_KEY from requirements
-    // unless it was explicitly saved in the instance's env vars.
     const serviceKeysToExclude = Object.values(SERVICE_MODELS).map(s => s.key_env).filter(k => k && k !== svc?.key_env);
 
     let html = '';
     allKeys.forEach(key => {
-        // Skip keys that belong to OTHER services, UNLESS they are explicitly saved
         if (serviceKeysToExclude.includes(key) && !savedEnv[key] && !requiredKeys.has(key)) return;
 
         const val = savedEnv[key] || '';
         html += `
             <div class="form-group">
-                <label>🔑 ${key}</label>
-                <input type="password" class="${containerId === 'createEnvVarsSection' ? 'create' : 'inst'}-env-input" data-key="${key}" value="${escapeHtml(val)}" placeholder="Enter ${key}">
+                <label>🔑 ${key} <span id="feedback-${containerId}-${key}"></span></label>
+                <input type="password" 
+                       class="${containerId === 'createEnvVarsSection' ? 'create' : 'inst'}-env-input" 
+                       data-key="${key}" 
+                       value="${escapeHtml(val)}" 
+                       placeholder="Enter ${key}"
+                       oninput="handleKeyInput(event, '${containerId}', '${key}')"
+                       onpaste="handleKeyInput(event, '${containerId}', '${key}')">
             </div>
         `;
     });

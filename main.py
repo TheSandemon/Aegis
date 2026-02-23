@@ -641,6 +641,7 @@ class InstanceCreateRequest(BaseModel):
     service: str = ""
     model: str = ""
     env_vars: Optional[dict] = None
+    config: Optional[dict] = None
 
 @app.post("/api/instances/create")
 async def create_instance_endpoint(req: InstanceCreateRequest):
@@ -648,7 +649,8 @@ async def create_instance_endpoint(req: InstanceCreateRequest):
     registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == req.template_id), None)
     result = create_instance(
         req.template_id, req.instance_name, registry_entry,
-        env_vars=req.env_vars or {}, service=req.service, model=req.model
+        env_vars=req.env_vars or {}, service=req.service, model=req.model,
+        config=req.config or {}
     )
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
@@ -684,7 +686,7 @@ async def update_instance_settings(instance_id: str, updates: dict):
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
     
-    for key in ["instance_name", "service", "model", "env_vars", "enabled"]:
+    for key in ["instance_name", "service", "model", "env_vars", "enabled", "config"]:
         if key in updates:
             inst[key] = updates[key]
     

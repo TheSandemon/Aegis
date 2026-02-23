@@ -25,7 +25,43 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are OpenClaw, an autonomous coding agent. Read the task, analyze the repo, write clean code, and create PRs."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 2,
+                "step": 0.1,
+                "default": 0.7
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 8192
+            },
+            "tools_enabled": {
+                "type": "multiselect",
+                "label": "Allowed Tools",
+                "options": [
+                    "file_read",
+                    "file_write",
+                    "web_search",
+                    "shell_exec",
+                    "git_operations"
+                ],
+                "default": [
+                    "file_read",
+                    "file_write",
+                    "git_operations"
+                ]
+            }
+        }
     },
     {
         "id": "memu-bot",
@@ -53,7 +89,32 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are memU, a proactive memory agent. Continuously monitor conversations, extract key facts, and build a structured long-term knowledge graph."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 1,
+                "step": 0.05,
+                "default": 0.3
+            },
+            "memory_window": {
+                "type": "number",
+                "label": "Memory Window (messages)",
+                "default": 500
+            },
+            "consolidation_interval": {
+                "type": "number",
+                "label": "Consolidation Interval (sec)",
+                "default": 300
+            }
+        }
     },
     {
         "id": "picoclaw",
@@ -81,7 +142,27 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are PicoClaw, a lean task executor. Complete tasks with minimal resource usage."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 1,
+                "step": 0.1,
+                "default": 0.5
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 2048
+            }
+        }
     },
     {
         "id": "nanoclaw",
@@ -107,7 +188,37 @@
         },
         "permissions": [
             "read_file"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are NanoClaw, a security-first agent. All actions must be safe and verifiable. Never execute destructive operations."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 1,
+                "step": 0.1,
+                "default": 0.4
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 4096
+            },
+            "sandbox_mode": {
+                "type": "select",
+                "label": "Sandbox Mode",
+                "options": [
+                    "strict",
+                    "permissive",
+                    "off"
+                ],
+                "default": "strict"
+            }
+        }
     },
     {
         "id": "trustclaw",
@@ -135,7 +246,37 @@
         "permissions": [
             "read_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are TrustClaw, an execution verifier. Confirm all outputs are correct and audit all API calls for safety."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 1,
+                "step": 0.1,
+                "default": 0.2
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 4096
+            },
+            "verify_outputs": {
+                "type": "select",
+                "label": "Output Verification",
+                "options": [
+                    "always",
+                    "on_error",
+                    "never"
+                ],
+                "default": "always"
+            }
+        }
     },
     {
         "id": "zeroclaw",
@@ -163,7 +304,32 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are ZeroClaw, a high-performance task executor. Prioritize speed and correctness."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 2,
+                "step": 0.1,
+                "default": 0.6
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 4096
+            },
+            "concurrency": {
+                "type": "number",
+                "label": "Max Parallel Tasks",
+                "default": 4
+            }
+        }
     },
     {
         "id": "nanobot",
@@ -191,7 +357,36 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are NanoBot, a transparent and auditable agent. Log every decision with clear reasoning."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 2,
+                "step": 0.1,
+                "default": 0.7
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 4096
+            },
+            "verbose_logging": {
+                "type": "select",
+                "label": "Verbose Logging",
+                "options": [
+                    "on",
+                    "off"
+                ],
+                "default": "on"
+            }
+        }
     },
     {
         "id": "ironclaw",
@@ -219,6 +414,36 @@
             "read_file",
             "write_file",
             "list_dir"
-        ]
+        ],
+        "config_schema": {
+            "system_prompt": {
+                "type": "textarea",
+                "label": "System Prompt",
+                "default": "You are IronClaw, a production pipeline worker. Process tasks reliably at scale."
+            },
+            "temperature": {
+                "type": "range",
+                "label": "Creativity",
+                "min": 0,
+                "max": 1,
+                "step": 0.1,
+                "default": 0.3
+            },
+            "max_tokens": {
+                "type": "number",
+                "label": "Max Tokens",
+                "default": 8192
+            },
+            "batch_size": {
+                "type": "number",
+                "label": "Batch Size",
+                "default": 10
+            },
+            "retry_count": {
+                "type": "number",
+                "label": "Max Retries",
+                "default": 3
+            }
+        }
     }
 ]

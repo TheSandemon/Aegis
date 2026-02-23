@@ -335,6 +335,14 @@ class ExecutionEngine:
                 if inst_meta:
                     env["AEGIS_SERVICE"] = inst_meta.get("service", "")
                     env["AEGIS_MODEL"] = inst_meta.get("model", "")
+                    # Inject config schema values as AEGIS_CONFIG_* env vars
+                    inst_config = inst_meta.get("config", {})
+                    for ck, cv in inst_config.items():
+                        env_key = f"AEGIS_CONFIG_{ck.upper()}"
+                        if isinstance(cv, list):
+                            env[env_key] = ",".join(str(v) for v in cv)
+                        else:
+                            env[env_key] = str(cv)
             except Exception as e:
                 logger.warning(f"Failed to load instance service/model: {e}")
 
@@ -763,7 +771,8 @@ def create_instance(template_id: str, instance_name: str,
                     registry_entry: Optional[dict] = None,
                     env_vars: Optional[dict] = None,
                     service: str = "",
-                    model: str = "") -> dict:
+                    model: str = "",
+                    config: Optional[dict] = None) -> dict:
     """
     Create a new instance from an installed template.
     Copies template files into a unique instance directory.
@@ -800,6 +809,7 @@ def create_instance(template_id: str, instance_name: str,
         "service": service,
         "model": model,
         "env_vars": env_vars or {},
+        "config": config or {},
     }
 
     # Persist

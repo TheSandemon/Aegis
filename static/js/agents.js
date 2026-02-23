@@ -303,6 +303,77 @@ function onModelSelectChange(mode) {
     }
 }
 
+// ─── Config Schema Dynamic Forms ────────────────────────────────────────
+
+function renderConfigSchema(templateId, containerId, savedConfig = {}) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    const tmpl = registryData.find(a => a.id === templateId);
+    if (!tmpl || !tmpl.config_schema) { container.innerHTML = ''; return; }
+
+    const schema = tmpl.config_schema;
+    let html = '<label style="font-weight:600;margin-bottom:0.25rem;display:block;">⚙️ Configuration</label>';
+
+    for (const [key, def] of Object.entries(schema)) {
+        const saved = savedConfig[key] !== undefined ? savedConfig[key] : def.default;
+        html += `<div class="form-group" style="margin-bottom:0.5rem;">`;
+        html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
+
+        switch (def.type) {
+            case 'textarea':
+                html += `<textarea class="config-input" data-config-key="${key}" rows="2" style="font-size:0.8rem;">${escapeHtml(String(saved))}</textarea>`;
+                break;
+            case 'range':
+                html += `<div style="display:flex;align-items:center;gap:0.5rem;">`;
+                html += `<input type="range" class="config-input" data-config-key="${key}" min="${def.min}" max="${def.max}" step="${def.step}" value="${saved}" oninput="this.nextElementSibling.textContent=this.value" style="flex:1;">`;
+                html += `<span style="font-size:0.8rem;min-width:2rem;">${saved}</span>`;
+                html += `</div>`;
+                break;
+            case 'number':
+                html += `<input type="number" class="config-input" data-config-key="${key}" value="${saved}" style="font-size:0.8rem;">`;
+                break;
+            case 'select':
+                html += `<select class="config-input" data-config-key="${key}" style="font-size:0.8rem;">`;
+                (def.options || []).forEach(opt => {
+                    html += `<option value="${opt}" ${opt === saved ? 'selected' : ''}>${opt}</option>`;
+                });
+                html += `</select>`;
+                break;
+            case 'multiselect':
+                const selectedArr = Array.isArray(saved) ? saved : [];
+                html += `<div class="config-input" data-config-key="${key}" data-type="multiselect" style="display:flex;flex-wrap:wrap;gap:0.25rem;">`;
+                (def.options || []).forEach(opt => {
+                    const checked = selectedArr.includes(opt) ? 'checked' : '';
+                    html += `<label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;"><input type="checkbox" value="${opt}" ${checked}> ${opt}</label>`;
+                });
+                html += `</div>`;
+                break;
+            default:
+                html += `<input type="text" class="config-input" data-config-key="${key}" value="${escapeHtml(String(saved))}" style="font-size:0.8rem;">`;
+        }
+        html += `</div>`;
+    }
+    container.innerHTML = html;
+}
+
+function collectConfigValues(containerId) {
+    const config = {};
+    const container = document.getElementById(containerId);
+    if (!container) return config;
+    container.querySelectorAll('.config-input').forEach(el => {
+        const key = el.dataset.configKey;
+        if (!key) return;
+        if (el.dataset.type === 'multiselect') {
+            config[key] = [...el.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value);
+        } else if (el.type === 'range' || el.type === 'number') {
+            config[key] = Number(el.value);
+        } else {
+            config[key] = el.value;
+        }
+    });
+    return config;
+}
+
 // ─── Create Worker Modal (with per-instance settings) ───────────────────
 
 async function openCreateWorkerModal() {
@@ -330,16 +401,18 @@ async function openCreateWorkerModal() {
 function onTemplateChange() {
     const templateId = document.getElementById('workerTemplate').value;
     const tmpl = registryData.find(a => a.id === templateId);
-    if (!tmpl || !tmpl.execution || !tmpl.execution.env_vars_required) return;
+    if (!tmpl) return;
 
     // Auto-select service based on template's required keys
-    const firstKey = tmpl.execution.env_vars_required[0];
-    const svcMatch = Object.entries(SERVICE_MODELS).find(([k, v]) => v.key_env === firstKey);
-
-    if (svcMatch) {
-        document.getElementById('workerService').value = svcMatch[0];
+    if (tmpl.execution && tmpl.execution.env_vars_required) {
+        const firstKey = tmpl.execution.env_vars_required[0];
+        const svcMatch = Object.entries(SERVICE_MODELS).find(([k, v]) => v.key_env === firstKey);
+        if (svcMatch) { document.getElementById('workerService').value = svcMatch[0]; }
     }
     onServiceChange('create');
+
+    // Render config schema
+    renderConfigSchema(templateId, 'createConfigSection');
 }
 
 async function createWorkerInstance() {
@@ -362,12 +435,15 @@ async function createWorkerInstance() {
         if (key && input.value) env_vars[key] = input.value;
     });
 
+    // Gather config schema values
+    const config = collectConfigValues('createConfigSection');
+
     showToast(`Creating ${instanceName}...`);
     try {
         const res = await fetch('/api/instances/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_id: templateId, instance_name: instanceName, service, model, env_vars })
+            body: JSON.stringify({ template_id: templateId, instance_name: instanceName, service, model, env_vars, config })
         });
         if (res.ok) {
             showToast(`✅ Worker "${instanceName}" created!`);
@@ -412,6 +488,9 @@ async function openInstanceSettings(instanceId) {
         modelCustom.value = savedModel;
     }
 
+    // Render config schema with saved values
+    renderConfigSchema(inst.template_id, 'editConfigSection', inst.config || {});
+
     document.getElementById('instanceSettingsModal').classList.add('active');
 }
 
@@ -433,11 +512,14 @@ async function saveInstanceSettings() {
         if (key && input.value) env_vars[key] = input.value;
     });
 
+    // Gather config schema values
+    const config = collectConfigValues('editConfigSection');
+
     try {
         const res = await fetch(`/api/instances/${instanceId}/settings`, {
             method: 'PATCH',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ instance_name, service, model, enabled, env_vars })
+            body: JSON.stringify({ instance_name, service, model, enabled, env_vars, config })
         });
         if (res.ok) {
             showToast('⚙️ Settings saved');

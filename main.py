@@ -782,6 +782,46 @@ async def list_instance_artifacts(instance_id: str):
             })
     return {"files": files}
 
+# ─── Planner: Goal Decomposition ─────────────────────────────────────────────
+
+class GoalRequest(BaseModel):
+    goal: str
+
+@app.post("/api/planner/decompose")
+async def decompose_goal(req: GoalRequest):
+    """
+    Decompose a high-level goal into a structured DAG of Kanban cards.
+    Creates sequential cards with dependency links.
+    """
+    goal = req.goal.strip()
+    if not goal:
+        raise HTTPException(status_code=400, detail="Goal cannot be empty")
+
+    # Build a logical task breakdown from the goal
+    tasks = [
+        {"title": f"📋 Research: {goal}", "description": f"Research requirements and gather information for: {goal}", "column": "Inbox"},
+        {"title": f"📝 Plan: {goal}", "description": f"Create a detailed plan and break down the implementation steps for: {goal}", "column": "Inbox"},
+        {"title": f"🔨 Implement: {goal}", "description": f"Execute the plan and build the deliverables for: {goal}", "column": "Inbox"},
+        {"title": f"🔍 Review: {goal}", "description": f"Quality check all deliverables, verify correctness, and refine: {goal}", "column": "Inbox"},
+        {"title": f"📦 Deliver: {goal}", "description": f"Package final outputs and deliver: {goal}", "column": "Inbox"},
+    ]
+
+    created_ids = []
+    for i, task in enumerate(tasks):
+        depends = [created_ids[-1]] if created_ids else None
+        card = store.create_card(
+            title=task["title"],
+            description=task["description"],
+            column=task["column"],
+            depends_on=depends,
+            priority="normal"
+        )
+        created_ids.append(card["id"])
+        await manager.broadcast({"type": "card_created", "card": card})
+
+    logger.info(f"Planner decomposed goal into {len(created_ids)} cards: {goal[:60]}")
+    return {"success": True, "cards_created": len(created_ids), "card_ids": created_ids}
+
 # ─── API Key Verification ────────────────────────────────────────────────────────
 
 class VerifyKeyRequest(BaseModel):

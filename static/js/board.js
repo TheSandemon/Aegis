@@ -308,6 +308,43 @@ async function approveCurrentCard() {
     else { const err = await res.json(); showToast(`⚠️ ${err.detail || 'Approval failed'}`); }
 }
 
+// ─── Planner: Goal Decomposition ────────────────────────────────────────
+
+function openGoalModal() {
+    document.getElementById('goalInput').value = '';
+    document.getElementById('goalStatus').style.display = 'none';
+    document.getElementById('goalModal').classList.add('active');
+}
+
+async function submitGoal() {
+    const goal = document.getElementById('goalInput').value.trim();
+    if (!goal) { showToast('Please enter a goal'); return; }
+
+    const statusEl = document.getElementById('goalStatus');
+    statusEl.style.display = 'block';
+    statusEl.textContent = '🔄 Decomposing goal into tasks...';
+
+    try {
+        const res = await fetch('/api/planner/decompose', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ goal })
+        });
+        if (res.ok) {
+            const data = await res.json();
+            showToast(`🎯 Created ${data.cards_created || 0} cards from goal!`);
+            closeModal('goalModal');
+            await loadCards();
+            renderBoard();
+        } else {
+            const err = await res.json();
+            statusEl.textContent = `⚠️ ${err.detail || 'Decomposition failed'}`;
+        }
+    } catch (e) {
+        statusEl.textContent = '⚠️ Decomposition failed';
+    }
+}
+
 // Utils
 function closeModal(id) { document.getElementById(id).classList.remove('active'); if (id === 'cardDetailModal' && terminalRefreshInterval) { clearInterval(terminalRefreshInterval); terminalRefreshInterval = null; } }
 function showToast(message) {

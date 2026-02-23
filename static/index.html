@@ -170,6 +170,8 @@
             </div>
             <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
+            <button class="secondary" style="background:#8b5cf6;color:#fff;" onclick="openGoalModal()">🎯 New
+                Goal</button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
         </div>
     </header>
@@ -414,6 +416,30 @@
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('instanceSettingsModal')">Cancel</button>
                 <button onclick="saveInstanceSettings()">Save Settings</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Goal Decomposition Modal (Planner Agent) -->
+    <div class="modal-overlay" id="goalModal">
+        <div class="modal" style="max-width:600px;">
+            <div class="modal-header">
+                <h3>🎯 Decompose Goal</h3><button class="modal-close" onclick="closeModal('goalModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group">
+                    <label>What's your high-level goal?</label>
+                    <textarea id="goalInput" rows="3"
+                        placeholder="e.g. Create a 2-minute informational video about a Child Advocacy Center"></textarea>
+                </div>
+                <div id="goalStatus"
+                    style="display:none;font-size:0.85rem;color:var(--text-secondary);margin-top:0.5rem;">
+                    🔄 Decomposing goal into tasks...
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('goalModal')">Cancel</button>
+                <button onclick="submitGoal()" style="background:#8b5cf6;">🚀 Decompose</button>
             </div>
         </div>
     </div>

@@ -168,7 +168,6 @@
                     oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
-            <button class="secondary" onclick="openSettingsModal()">⚙️ Settings</button>
             <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
@@ -299,42 +298,9 @@
         </div>
     </div>
 
-    <!-- Settings Modal -->
-    <div class="modal-overlay" id="settingsModal">
-        <div class="modal" style="max-width:550px;">
-            <div class="modal-header">
-                <h3>⚙️ Settings</h3><button class="modal-close" onclick="closeModal('settingsModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="settings-section">
-                    <h4>🔐 Environment Variables & API Keys</h4>
-                    <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">Required by installed
-                        templates (saved to aegis.config.json)</p>
-                    <div id="envVarsContainer"></div>
-                </div>
-                <div class="settings-section">
-                    <h4>🤖 Agents</h4>
-                    <div id="agentConfigs"></div>
-                </div>
-                <div class="settings-section">
-                    <h4>📊 Configuration</h4>
-                    <div class="form-group"><label>Polling Rate (ms)</label><input type="number" id="configPollingRate"
-                            min="1000" max="60000" step="1000"></div>
-                    <div class="form-group"><label>Max Concurrent Agents</label><input type="number"
-                            id="configMaxAgents" min="1" max="16"></div>
-                    <div class="form-group"><label>Toast Duration (seconds)</label><input type="number"
-                            id="configToastDuration" min="1" max="10" step="1"></div>
-                </div>
-            </div>
-            <div class="modal-footer"><button class="secondary"
-                    onclick="closeModal('settingsModal')">Close</button><button onclick="saveSettings()">Save
-                    Changes</button></div>
-        </div>
-    </div>
-
-    <!-- Create Worker Modal -->
+    <!-- Create Worker Modal (with per-instance settings) -->
     <div class="modal-overlay" id="createWorkerModal">
-        <div class="modal" style="max-width:500px;">
+        <div class="modal" style="max-width:550px;">
             <div class="modal-header">
                 <h3>🏗️ Create Worker</h3><button class="modal-close"
                     onclick="closeModal('createWorkerModal')">&times;</button>
@@ -342,7 +308,7 @@
             <div class="modal-body">
                 <div class="form-group">
                     <label>Template</label>
-                    <select id="workerTemplate">
+                    <select id="workerTemplate" onchange="onTemplateChange()">
                         <option value="">Select a template...</option>
                     </select>
                 </div>
@@ -350,10 +316,64 @@
                     <label>Worker Name</label>
                     <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
                 </div>
+                <div class="form-group">
+                    <label>Service</label>
+                    <select id="workerService">
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="google">Google (Gemini)</option>
+                        <option value="openai">OpenAI (Codex/GPT)</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <input type="text" id="workerModel" placeholder="e.g. claude-sonnet-4-20250514">
+                </div>
+                <div id="createEnvVarsSection"></div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('createWorkerModal')">Cancel</button>
                 <button onclick="createWorkerInstance()">Create Worker</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Instance Settings Modal (for editing existing workers) -->
+    <div class="modal-overlay" id="instanceSettingsModal">
+        <div class="modal" style="max-width:550px;">
+            <div class="modal-header">
+                <h3>⚙️ <span id="instSettingsTitle">Worker Settings</span></h3>
+                <button class="modal-close" onclick="closeModal('instanceSettingsModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="instSettingsId">
+                <div class="form-group">
+                    <label>Worker Name</label>
+                    <input type="text" id="instSettingsName">
+                </div>
+                <div class="form-group">
+                    <label>Service</label>
+                    <select id="instSettingsService">
+                        <option value="anthropic">Anthropic (Claude)</option>
+                        <option value="google">Google (Gemini)</option>
+                        <option value="openai">OpenAI (Codex/GPT)</option>
+                        <option value="custom">Custom</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>Model</label>
+                    <input type="text" id="instSettingsModel">
+                </div>
+                <div id="instEnvVarsSection"></div>
+                <div class="form-group" style="margin-top:1rem;">
+                    <label>Enabled</label>
+                    <label class="toggle"><input type="checkbox" id="instSettingsEnabled"><span
+                            class="toggle-slider"></span></label>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('instanceSettingsModal')">Cancel</button>
+                <button onclick="saveInstanceSettings()">Save Settings</button>
             </div>
         </div>
     </div>

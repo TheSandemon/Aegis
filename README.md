@@ -6,12 +6,13 @@ Aegis is a high-performance Kanban-based orchestration hub designed to manage, m
 
 ## 🚀 Core Features
 
+- 👑 **Main Orchestrator** — A mandatory, auto-instantiated manager that acts as the brain of the operation, delegating complex tasks to specialized workers.
+- 🤖 **Autonomous Daemons** — Workers operate on a persistent `while True` loop, self-assigning tasks from the Inbox and scanning repositories for context.
 - 📋 **DAG-Based Kanban** — Industry-standard task management with built-in support for Directed Acyclic Graph (DAG) task dependencies.
-- 🏗️ **Smart Agent Registry** — Bootstrap workers instantly from a registry of "Agent Types". Aegis automatically handles local scaffolding and dependency management.
-- 🖥️ **Glass Box Control Panel** — Real-time observability into agent internals. See live terminal logs, inject context into stdin, or pause/resume agent processes.
-- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini supported).
-- 🔑 **Streamlined Onboarding** — Single API key field with auto-detection for providers (sk-ant, AIza, sk-). Models are dynamically fetched and revealed only after key verification.
-- 🎯 **Worker-Level Goals** — Move beyond global planners. Every worker is instantiated with a specific set of goals and instructions defined in their configuration.
+- 🏗️ **Smart Agent Registry** — Bootstrap workers instantly from a registry. Aegis automatically handles local scaffolding and dependency management.
+- 🖥️ **Glass Box Control Panel** — Real-time observability. See live terminal logs, inject context into stdin, or pause/resume agent processes.
+- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini).
+- 🔑 **Streamlined Onboarding** — Auto-detection for providers (sk-ant, AIza, sk-) and dynamic model fetching.
 
 ---
 
@@ -21,85 +22,64 @@ Aegis uses a decentralized execution model where agents interact with the core o
 
 ```mermaid
 graph TD
-    subgraph "Frontend (Aegis Dashboard)"
+    subgraph "Frontend (Dashboard)"
         H["Kanban Board"]
         UI["Glass Box Modal"]
         AG["Agent Control Panel"]
     end
 
-    subgraph "Backend (Core Orchestrator)"
+    subgraph "Backend (Core)"
         C["API Gateway"]
         ST["SQLite Store"]
         EE["Execution Engine"]
         BR["Prompt Broker"]
     end
 
-    subgraph "Agent Processes"
-        W1["Worker process (Python/Node)"]
-        W2["Worker process (Go/Rust)"]
+    subgraph "Agent Fleet"
+        OR["Main Orchestrator (Leader)"]
+        W1["Coder Bot (Worker)"]
+        W2["Research Bot (Worker)"]
     end
 
+    OR <-->|Task Delegation| C
     W1 <-->|REST SDK| C
     W2 <-->|REST SDK| C
+    EE -.->|Spawn/Monitor| OR
     EE -.->|Spawn/Monitor| W1
     EE -.->|Spawn/Monitor| W2
     C <--> ST
     UI <-->|WebSocket Logs| EE
-    AG -->|Injected Context| EE
 ```
+
+---
+
+## 👑 The Main Orchestrator
+
+The **Aegis Orchestrator** is the central commander of your agent fleet. It is automatically created upon first launch and cannot be deleted.
+
+- **Solo Mode**: If the Orchestrator is the only active agent, it functions as a standard autonomous worker, picking up and executing tasks directly.
+- **Manager Mode**: If other specialized agents are available, the Orchestrator uses its LLM (GPT-4o-mini/Haiku recommended) to break down parent cards into sub-tasks, assigning them to the most appropriate workers via the board.
+
+---
+
+## 🤖 Autonomous Daemons
+
+Aegis 4.0 shifts from "one-off scripts" to **True Autonomous Daemons**.
+
+1. **The Pulse**: Agents poll the board every $N$ seconds (Pulse Interval).
+2. **Self-Assignment**: If an agent sees an unassigned card in the "Inbox" that matches its capabilities, it self-assigns and moves it to "In Progress".
+3. **Workspace Scanning**: Agents use their `work_dir` to index the local repository before execution, ensuring they have the latest code context.
+4. **Live Documentation**: Agents post progress updates as comments on the card and generate local `work_log.md` artifacts.
 
 ---
 
 ## 🛠️ Getting Started
 
 1. **Bootstrap**: Run `setup.bat` (Windows) or `setup.sh` (POSIX).
-2. **Setup Registry**: Run `python setup_templates.py` to generate the local template scaffolds for all Agent Types.
+2. **Setup Registry**: Run `python setup_templates.py` to generate the local template scaffolds.
 3. **Launch**: `python main.py` and navigate to `http://localhost:8080`.
-4. **Create a Worker**:
-    - Click **+ Create** in the Sidebar.
-    - Select an **Agent Type** (e.g., PicoClaw).
-    - Paste your **API Key**. Aegis will detect the service (e.g., Anthropic) and reveal the **Model** selection.
-    - Define the **Agent Goals** (e.g., "Implement the login logic using JWT").
-5. **Assign Tasks**: Move a card to the `In Review` or `Doing` column and assign it to your new worker.
-
----
-
-## 📦 The Agent Forge & local Scaffolding
-
-Aegis handles agent installation differently than standard orchestration tools.
-
-- **Agent Types**: Pre-defined configurations in `agent_registry.json`.
-- **Templates**: To ensure stability, Aegis uses a **Local Scaffolding** system. Templates are maintained in `aegis_data/templates/` and copied to `aegis_data/instances/` upon creation.
-- **Isolated CWD**: Every worker instance has its own unique working directory, preventing resource conflicts.
-
----
-
-## ⛓️ Agent SDK (Board Interaction)
-
-Agents are not "black boxes". They are provided with an **Execution Context** via Environment Variables:
-
-- `AEGIS_API_URL`: The base URL of the orchestrator API.
-- `AEGIS_CARD_ID`: The ID of the task currently assigned to the agent.
-- `AEGIS_CONFIG_GOALS`: The worker-specific goal instructions.
-
-### Example Interaction Pattern
-
-Agents can natively "see" and "move" cards on the board using simple HTTP requests:
-
-```python
-import os, requests
-
-# 1. Fetch task details
-api = os.environ["AEGIS_API_URL"]
-card_id = os.environ["AEGIS_CARD_ID"]
-card = requests.get(f"{api}/cards/{card_id}").json()
-
-# 2. Perform work...
-print(f"Working on: {card['title']}")
-
-# 3. Move to 'Review' column when finished
-requests.patch(f"{api}/cards/{card_id}", json={"column": "Review"})
-```
+4. **Configure the Brain**: Look for the **Main Orchestrator** in the sidebar. provide it with an API key to enable Manager Mode.
+5. **Drop a Task**: Create a card in the **Inbox**. Watch as the Orchestrator picks it up, breaks it down, and delegates it to your workers!
 
 ---
 

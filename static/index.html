@@ -169,6 +169,7 @@
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
             <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
+            <button class="secondary" onclick="openNewColumnModal()">+ Add Column</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
         </div>
@@ -228,6 +229,23 @@
                 <div class="tab-content" id="tab-runtimes">
                     <div id="runtimesList">No active runtimes</div>
                 </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- New Column Modal -->
+    <div class="modal-overlay" id="newColumnModal">
+        <div class="modal" style="max-width:400px;">
+            <div class="modal-header">
+                <h3>Add Column</h3><button class="modal-close" onclick="closeModal('newColumnModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <div class="form-group"><label>Column Name *</label><input type="text" id="columnName"
+                        placeholder="e.g. Backlog"></div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('newColumnModal')">Cancel</button>
+                <button onclick="createColumn()">Create</button>
             </div>
         </div>
     </div>
@@ -406,11 +424,6 @@
                     <select id="instSettingsModelSelect" onchange="onModelSelectChange('edit')"></select>
                     <input type="text" id="instSettingsModelCustom" placeholder="e.g. custom-model-name"
                         style="display:none; margin-top:0.5rem;">
-                    <small id="orchestratorModelTip"
-                        style="display:none; color:var(--text-muted); font-size: 0.75rem; margin-top:0.5rem;">
-                        💡 <b>Tip</b>: The Main Orchestrator manages other bots. A fast, cost-effective model (e.g.,
-                        <i>gpt-4o-mini</i> or <i>gemini-2.5-flash</i>) is highly recommended.
-                    </small>
                 </div>
 
                 <div id="editConfigSection" style="margin-top:0.5rem;"></div>

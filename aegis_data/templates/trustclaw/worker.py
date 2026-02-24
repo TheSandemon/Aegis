@@ -3,115 +3,111 @@ import time
 import requests
 import sys
 import json
-from pathlib import Path
 
-# Windows compatibility for stdout
 sys.stdout.reconfigure(encoding='utf-8')
 
 api_url = os.environ.get("AEGIS_API_URL", "http://localhost:8080/api")
-agent_name = os.environ.get("AEGIS_INSTANCE_NAME", os.environ.get("AEGIS_AGENT_ID", "Unknown Agent"))
-goal = os.environ.get("AEGIS_CONFIG_GOALS", "No specific goal provided.")
-work_dir = os.environ.get("AEGIS_CONFIG_WORK_DIR", "./")
+agent_name = os.environ.get("AEGIS_INSTANCE_NAME", os.environ.get("AEGIS_AGENT_ID", "Agent"))
+goal = os.environ.get("AEGIS_CONFIG_GOALS", "Process tasks and help the team.")
 try:
-    pulse_interval = int(os.environ.get("AEGIS_CONFIG_PULSE_INTERVAL", "60"))
+    pulse_interval = int(os.environ.get("AEGIS_CONFIG_PULSE_INTERVAL", "30"))
 except ValueError:
-    pulse_interval = 60
+    pulse_interval = 30
 
-def post_comment(card_id, text):
+openai_key = os.environ.get("OPENAI_API_KEY", "")
+anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
+gemini_key = os.environ.get("GEMINI_API_KEY", "")
+
+def fetch_board_state():
     try:
-        requests.post(f"{api_url}/cards/{card_id}/comments", json={
-            "author": agent_name,
-            "content": text
-        })
-    except: pass
+        cards = requests.get(f"{api_url}/cards").json()
+        cols = requests.get(f"{api_url}/columns").json()
+        return cards, cols
+    except Exception as e:
+        print(f"[{agent_name}] ❌ API Error: {e}")
+        return [], []
 
-print(f"[{agent_name}] 🚀 BOOT: Initializing Autonomous Daemon...")
+def prompt_llm(system_prompt, user_text):
+    if openai_key:
+        res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": "gpt-4o-mini", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
+        return json.loads(res.json()["choices"][0]["message"]["content"])
+    elif gemini_key:
+        res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}", 
+            json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json"}})
+        return json.loads(res.json()["candidates"][0]["content"]["parts"][0]["text"])
+    elif anthropic_key:
+        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": "claude-3-haiku-20240307", "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
+        return json.loads(res.json()["content"][0]["text"])
+    return None
+
+system_prompt = f"""You are an autonomous AI agent working on a Kanban board via REST API.
+Your Name: {agent_name}
+Your Goal: {goal}
+
+Available Actions:
+1. create_card: {{"title": str, "description": str, "column": str, "assignee": str}}
+2. update_card: {{"card_id": int, "column": str, "assignee": str, "status": str}} 
+3. post_comment: {{"card_id": int, "content": str}}
+4. wait: {{"reason": str}} - use this if no action is needed right now or you are blocked.
+
+Response Format (JSON ONLY):
+{{
+    "thought": "Your reasoning for the next action based on the board state and your goal.",
+    "action": "action_name",
+    "args": {{"key": "value"}}
+}}
+"""
+
+print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
 print(f"[{agent_name}] 🎯 GOAL: {goal}")
-print(f"[{agent_name}] 📂 WORK DIR: {work_dir}")
-print(f"[{agent_name}] ⏱️ PULSE RATE: {pulse_interval}s")
 
 while True:
-    print(f"\n[{agent_name}] 📡 PULSE: Checking for new assignments...")
-    try:
-        # Fetch all cards
-        cards_req = requests.get(f"{api_url}/cards")
-        cards_req.raise_for_status()
-        all_cards = cards_req.json()
+    print(f"\n[{agent_name}] 📡 PULSE: Fetching board state...")
+    cards, cols = fetch_board_state()
+    
+    if not isinstance(cards, list) or not isinstance(cols, list):
+        print(f"[{agent_name}] ❌ API Error: Invalid state format received. Waiting...")
+        time.sleep(pulse_interval)
+        continue
         
-        # Look for cards assigned to me that are 'In Progress' or 'Planned' (direct assignment)
-        # OR unassigned cards in 'Inbox' or 'To Do' (autonomous pickup)
-        target_card = None
-        for c in all_cards:
-            if c.get("assignee") == agent_name and c.get("column") in ["Planned", "In Progress"]:
-                target_card = c
-                break
-            elif not c.get("assignee") and c.get("column") in ["Inbox", "To Do"]:
-                target_card = c
-                break
-                
-        if not target_card:
-            print(f"[{agent_name}] 💤 IDLE: No available tasks. Sleeping for {pulse_interval}s...")
+    board_context = f"COLUMNS: {[c['name'] for c in cols]}\n\nCARDS:\n"
+    for c in cards:
+        board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')}\n  Desc: {c.get('description', '')[:100]}\n"
+        
+    print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
+    try:
+        if not (openai_key or anthropic_key or gemini_key):
+             raise Exception("No API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY.")
+             
+        res = prompt_llm(system_prompt, board_context)
+        if not res:
+            raise Exception("Empty response from LLM")
+            
+        thought = res.get("thought", "...")
+        action = res.get("action", "wait")
+        args = res.get("args", {})
+        
+        print(f"[{agent_name}] 🤔 THOUGHT: {thought}")
+        print(f"[{agent_name}] ⚡ ACTION: {action} {args}")
+        
+        if action == "create_card":
+            requests.post(f"{api_url}/cards", json=args)
+        elif action == "update_card":
+            cid = args.pop("card_id", None)
+            if cid: requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+        elif action == "post_comment":
+            cid = args.get("card_id")
+            content = args.get("content")
+            if cid and content:
+                requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
+        elif action == "wait":
+            print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
             time.sleep(pulse_interval)
             continue
             
-        card_id = target_card["id"]
-        # Claim the card autonomously
-        if target_card.get("assignee") != agent_name or target_card.get("column") != "In Progress":
-            print(f"[{agent_name}] ✋ CLAIMING: Assigning Card #{card_id} to myself...")
-            requests.patch(f"{api_url}/cards/{card_id}", 
-                          json={"column": "In Progress", "assignee": agent_name}, 
-                          headers={"X-Aegis-Agent": "true"})
-                          
-        print(f"[{agent_name}] 🛠️ WORKING: Card #{card_id} - {target_card.get('title')}")
-        post_comment(card_id, f"I have claimed this task. My goal is: {goal}")
-
-        # 1. RESEARCH & SCAN
-        print(f"[{agent_name}] 🧪 PHASE 1: RESEARCHING repository...")
-        scan_target = Path(work_dir)
-        if scan_target.exists():
-            files_found = 0
-            for ext in ["py", "js", "html", "css", "ts", "json", "md"]:
-                files_found += len(list(scan_target.rglob(f"*.{ext}")))
-            print(f"[{agent_name}]  └─ Scanned {scan_target.absolute()} and found {files_found} relevant files.")
-            time.sleep(2)
-        else:
-            print(f"[{agent_name}]  └─ Target directory '{work_dir}' not found. Simulating web search...")
-            time.sleep(2)
-            
-        post_comment(card_id, "Phase 1 Complete: Finished scanning files and identifying dependencies.")
-
-        # 2. EXECUTION
-        print(f"[{agent_name}] 🔨 PHASE 2: EXECUTING implementation logic...")
-        time.sleep(3)
-        print(f"[{agent_name}]  └─ Writing code based on goal: {goal[:50]}...")
-        time.sleep(3)
-        post_comment(card_id, "Phase 2 Complete: Logic has been implemented in the workspace.")
-
-        # 3. DOCUMENTING
-        print(f"[{agent_name}] 📝 DOCUMENTING: Generating artifacts...")
-        work_log = f"# Aegis Agent Work Log\n- **Agent**: {agent_name}\n- **Task**: {target_card.get('title')}\n- **Goal**: {goal}\n- **Workspace**: {work_dir}\n- **Timestamp**: {time.ctime()}\n\n## Accomplishments\n- Successfully claimed the card.\n- Scanned repository context.\n- Implemented logic changes.\n- Verified output.\n"
-        with open("work_log.md", "w", encoding="utf-8") as f:
-            f.write(work_log)
-        print(f"[{agent_name}]  └─ Created artifact: work_log.md")
-        time.sleep(1.5)
-
-        # 4. VALIDATION
-        print(f"[{agent_name}] 🔍 PHASE 3: VALIDATING results...")
-        time.sleep(2)
-        print(f"[{agent_name}]  └─ Running test suite... PASS")
-        time.sleep(1)
-
-        # 5. PASSING ON
-        print(f"[{agent_name}] 🏁 PASSING: Moving card #{card_id} to Review...")
-        requests.patch(f"{api_url}/cards/{card_id}", 
-                    json={"column": "Review"}, 
-                    headers={"X-Aegis-Agent": "true"})
-        print(f"[{agent_name}]  └─ Success: Card is now awaiting human review.")
-        post_comment(card_id, "Work complete. I've moved this card to Review and attached a work_log.md artifact.")
-        
-        print(f"[{agent_name}] ✨ DONE: Task complete. Sleeping for {pulse_interval}s before next pulse...")
+        print(f"[{agent_name}] ✅ Action complete. Sleeping {pulse_interval}s...")
         time.sleep(pulse_interval)
         
     except Exception as e:
-        print(f"[{agent_name}] ❌ ERROR during pulse: {e}")
+        print(f"[{agent_name}] ❌ ERROR: {e}")
         time.sleep(pulse_interval)

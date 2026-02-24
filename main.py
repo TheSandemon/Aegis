@@ -79,7 +79,23 @@ class AegisStore:
                     priority TEXT DEFAULT 'normal'
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS columns (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL UNIQUE,
+                    position INTEGER NOT NULL
+                )
+            """)
             conn.commit()
+            
+            # Seed default columns if none exist
+            cursor = conn.execute("SELECT COUNT(*) FROM columns")
+            if cursor.fetchone()[0] == 0:
+                defaults = ["Inbox", "Planned", "In Progress", "Blocked", "Review", "Done"]
+                for i, col in enumerate(defaults):
+                    conn.execute("INSERT INTO columns (name, position) VALUES (?, ?)", (col, i))
+                conn.commit()
+
             # Migration: add new columns to existing tables
             try:
                 conn.execute('ALTER TABLE cards ADD COLUMN depends_on TEXT DEFAULT "[]"')
@@ -90,6 +106,27 @@ class AegisStore:
             except sqlite3.OperationalError:
                 pass
             conn.commit()
+
+    def get_columns(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute('SELECT * FROM columns ORDER BY position ASC').fetchall()
+            return [dict(r) for r in rows]
+
+    def create_column(self, name: str, position: int):
+        with sqlite3.connect(self.db_path) as conn:
+            try:
+                cursor = conn.execute('INSERT INTO columns (name, position) VALUES (?, ?)', (name, position))
+                conn.commit()
+                return {"id": cursor.lastrowid, "name": name, "position": position}
+            except sqlite3.IntegrityError:
+                return None  # Already exists
+
+    def delete_column(self, col_id: int):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('DELETE FROM columns WHERE id = ?', (col_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def create_card(self, title, description="", column="Inbox", assignee=None, **kwargs):
         now = datetime.now().isoformat()
@@ -213,18 +250,8 @@ broker = PromptBroker(
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# HITL — State Transition Validation (Phase 5)
+# HITL — State Transition Hooks (Phase 5)
 # ═══════════════════════════════════════════════════════════════════════════════════
-
-# Valid column transitions (from -> allowed destinations)
-VALID_TRANSITIONS = {
-    "Inbox":       ["Planned", "In Progress", "Blocked", "Done"],
-    "Planned":     ["In Progress", "Blocked", "Inbox"],
-    "In Progress": ["Review", "Blocked", "Planned", "Done"],
-    "Blocked":     ["Planned", "In Progress", "Inbox"],
-    "Review":      ["Done", "In Progress", "Blocked"],  # Review→Done only by humans
-    "Done":        ["Inbox"],  # Reopen
-}
 
 
 async def send_discord_webhook(card: dict):
@@ -264,26 +291,6 @@ async def lifespan(app: FastAPI):
     logger.info(f"Orchestration mode: {CONFIG.get('orchestration_mode', 'supervisor')}")
     logger.info(f"Polling rate: {CONFIG.get('polling_rate_ms', 5000)}ms")
     logger.info(f"Rate limit: {CONFIG.get('rate_limits', {}).get('prompts_per_minute', 1)} prompt(s)/min")
-
-    # --- Ensure Mandatory Orchestrator Exists ---
-    try:
-        instances = load_instances()
-        if not any(inst.get("template_id") == "aegis-orchestrator" for inst in instances):
-            logger.info("Mandatory 'aegis-orchestrator' instance not found. Auto-creating...")
-            with open(REGISTRY_PATH, encoding="utf-8") as f:
-                live_registry = json.load(f)
-            registry_entry = next((a for a in live_registry if a["id"] == "aegis-orchestrator"), None)
-            if registry_entry:
-                create_instance(
-                    template_id="aegis-orchestrator",
-                    instance_name="Main Orchestrator",
-                    registry_entry=registry_entry
-                )
-            else:
-                logger.error("aegis-orchestrator template missing from registry!")
-    except Exception as e:
-        logger.error(f"Failed to verify/create mandatory orchestrator: {e}")
-    # --------------------------------------------
 
     # Start prompt broker
     await broker.start()
@@ -343,10 +350,35 @@ class CommentCreate(BaseModel):
     author: str
     content: str
 
+class ColumnCreate(BaseModel):
+    name: str
+    position: Optional[int] = 0
+
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # API ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/columns")
+async def get_columns():
+    return store.get_columns()
+
+@app.post("/api/columns")
+async def create_column(col: ColumnCreate):
+    new_col = store.create_column(col.name, col.position)
+    if not new_col:
+        raise HTTPException(status_code=400, detail="Column already exists")
+    await manager.broadcast({"type": "column_created", "column": new_col})
+    return new_col
+
+@app.delete("/api/columns/{col_id}")
+async def delete_column(col_id: int):
+    # Depending on how UI handles it, might need to reassign cards or just block delete if not empty.
+    # For now, just delete.
+    if store.delete_column(col_id):
+        await manager.broadcast({"type": "column_deleted", "column_id": col_id})
+        return {"success": True}
+    raise HTTPException(status_code=404, detail="Column not found")
 
 @app.get("/")
 async def root():
@@ -392,10 +424,7 @@ async def get_card(card_id: int):
 
 @app.patch("/api/cards/{card_id}")
 async def update_card(card_id: int, update: CardUpdate, request: Request):
-    """
-    Update a card with state-transition validation (Phase 5).
-    Agent-initiated Review→Done is blocked.
-    """
+    """Update a card. Arbitrary transitions are now allowed for Sandbox Agents."""
     existing = store.get_card(card_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Card not found")
@@ -406,18 +435,10 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
     if "depends_on" in updates:
         updates["depends_on"] = json.dumps(updates["depends_on"])
 
-    # ── Phase 5: State-transition validation ──
     new_column = updates.get("column")
     if new_column and new_column != existing["column"]:
         old_col = existing["column"]
-        allowed = VALID_TRANSITIONS.get(old_col, [])
-
-        if new_column not in allowed:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Invalid transition: {old_col} → {new_column}. Allowed: {allowed}"
-            )
-
+        
         # Block agent-initiated Review → Done
         is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
         if old_col == "Review" and new_column == "Done" and is_agent:

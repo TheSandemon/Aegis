@@ -1,5 +1,6 @@
 /* Aegis Board Module — Card CRUD, rendering, drag & drop, modals */
 let cards = [];
+let columns = [];
 let config = {};
 let currentCardId = null;
 let terminalRefreshInterval = null;
@@ -8,6 +9,7 @@ const collapsedColumns = {};
 
 async function init() {
     await loadConfig();
+    await loadColumns();
     populateColumnSelects();
     await loadAgents();
     await loadCards();
@@ -22,16 +24,21 @@ async function loadConfig() {
     catch (e) { console.error('Error loading config:', e); showToast('Failed to load configuration'); }
 }
 
+async function loadColumns() {
+    try { const res = await fetch('/api/columns'); if (!res.ok) throw 0; columns = await res.json(); }
+    catch (e) { console.error('Error loading columns:', e); showToast('Failed to load columns'); }
+}
+
 async function loadCards() {
     try { const res = await fetch('/api/cards'); if (!res.ok) throw 0; cards = await res.json(); updateGlowEffects(); }
     catch (e) { console.error('Error loading cards:', e); showToast('Failed to load cards'); }
 }
 
 function populateColumnSelects() {
-    const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
+    const colNames = columns.map(c => c.name);
     ['cardColumn', 'detailColumn'].forEach(id => {
         const sel = document.getElementById(id);
-        sel.innerHTML = columns.map(c => `<option value="${c}">${c}</option>`).join('');
+        if (sel) sel.innerHTML = colNames.map(c => `<option value="${c}">${c}</option>`).join('');
     });
     const assigneeSel = document.getElementById('detailAssignee');
     const agents = Object.keys(config.agents || {});
@@ -48,10 +55,10 @@ function clearSearch() { document.getElementById('searchInput').value = ''; filt
 function renderBoard() {
     const board = document.getElementById('board');
     board.innerHTML = '';
-    const columns = config.columns || ['Inbox', 'Planned', 'In Progress', 'Blocked', 'Review', 'Done'];
-    const doneIds = new Set(cards.filter(c => c.column === 'Done').map(c => c.id));
+    const doneIds = new Set(cards.filter(c => c.column === 'Done' || c.column === columns[columns.length - 1]?.name).map(c => c.id));
 
-    columns.forEach(column => {
+    columns.forEach(colObj => {
+        const column = colObj.name;
         let columnCards = cards.filter(c => c.column === column);
         if (searchFilter) {
             const f = searchFilter.toLowerCase();
@@ -61,9 +68,10 @@ function renderBoard() {
         colDiv.className = 'column' + (collapsedColumns[column] ? ' collapsed' : '');
         colDiv.dataset.column = column;
         colDiv.innerHTML = `
-            <div class="column-header" onclick="toggleColumn('${column}')">
-                <h2>${column} <span class="count">${columnCards.length}</span></h2>
-                <span class="collapse-icon">▼</span>
+            <div class="column-header">
+                <h2 onclick="toggleColumn('${column}')" style="cursor:pointer; flex:1;">${column} <span class="count">${columnCards.length}</span></h2>
+                <button class="secondary" onclick="deleteColumn(${colObj.id}, '${column}')" style="padding:0.1rem 0.3rem; font-size:0.7rem; margin-right:0.25rem; border:none; background:transparent;" title="Delete Column">🗑</button>
+                <span class="collapse-icon" onclick="toggleColumn('${column}')" style="cursor:pointer;">▼</span>
             </div>
             <div class="column-body" data-column="${column}">
                 ${columnCards.length ? columnCards.map(card => renderCard(card, doneIds)).join('') :
@@ -132,6 +140,39 @@ async function handleDrop(e) {
 
 // Modals
 function openNewCardModal() { document.getElementById('newCardModal').classList.add('active'); document.getElementById('cardTitle').focus(); }
+
+function openNewColumnModal() { document.getElementById('newColumnModal').classList.add('active'); document.getElementById('columnName').focus(); }
+
+async function createColumn() {
+    const name = document.getElementById('columnName').value.trim();
+    if (!name) { showToast('Name is required'); return; }
+    const position = columns.length;
+    const res = await fetch('/api/columns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, position }) });
+    if (res.ok) {
+        closeModal('newColumnModal');
+        document.getElementById('columnName').value = '';
+        await loadColumns();
+        populateColumnSelects();
+        renderBoard();
+        showToast('Column added');
+    } else {
+        const err = await res.json();
+        showToast(`⚠️ ${err.detail || 'Failed to add column'}`);
+    }
+}
+
+async function deleteColumn(id, name) {
+    if (!confirm(`Delete column '${name}'?`)) return;
+    const res = await fetch(`/api/columns/${id}`, { method: 'DELETE' });
+    if (res.ok) {
+        await loadColumns();
+        populateColumnSelects();
+        renderBoard();
+        showToast('Column deleted');
+    } else {
+        showToast('Failed to delete column (make sure it has no cards)');
+    }
+}
 
 async function createCard() {
     const title = document.getElementById('cardTitle').value.trim();

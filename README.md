@@ -6,9 +6,8 @@ Aegis is a high-performance Kanban-based orchestration hub designed to manage, m
 
 ## 🚀 Core Features
 
-- 👑 **Main Orchestrator** — A mandatory, auto-instantiated manager that acts as the brain of the operation, delegating complex tasks to specialized workers.
-- 🤖 **Autonomous Daemons** — Workers operate on a persistent `while True` loop, self-assigning tasks from the Inbox and scanning repositories for context.
-- 📋 **DAG-Based Kanban** — Industry-standard task management with built-in support for Directed Acyclic Graph (DAG) task dependencies.
+- 🤖 **Autonomous Sandbox Bots** — Workers operate on a persistent ReAct loop, self-assigning tasks and using LLM tool calling to interact with the board.
+- 📋 **Dynamic Board Architecture** — Fully customizable Kanban workflows. Add or remove columns to fit your specific pipeline needs, and agents will adapt.
 - 🏗️ **Smart Agent Registry** — Bootstrap workers instantly from a registry. Aegis automatically handles local scaffolding and dependency management.
 - 🖥️ **Glass Box Control Panel** — Real-time observability. See live terminal logs, inject context into stdin, or pause/resume agent processes.
 - 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini).
@@ -36,15 +35,12 @@ graph TD
     end
 
     subgraph "Agent Fleet"
-        OR["Main Orchestrator (Leader)"]
-        W1["Coder Bot (Worker)"]
-        W2["Research Bot (Worker)"]
+        W1["Generic Bot (Worker)"]
+        W2["Custom Bot (Worker)"]
     end
 
-    OR <-->|Task Delegation| C
-    W1 <-->|REST SDK| C
-    W2 <-->|REST SDK| C
-    EE -.->|Spawn/Monitor| OR
+    W1 <-->|REST SDK Tools| C
+    W2 <-->|REST SDK Tools| C
     EE -.->|Spawn/Monitor| W1
     EE -.->|Spawn/Monitor| W2
     C <--> ST
@@ -53,23 +49,14 @@ graph TD
 
 ---
 
-## 👑 The Main Orchestrator
+## 🤖 Autonomous Sandbox Bots
 
-The **Aegis Orchestrator** is the central commander of your agent fleet. It is automatically created upon first launch and cannot be deleted.
+Aegis 4.0 shifts from specialized scripts to **Fully Autonomous Sandbox Bots**.
 
-- **Solo Mode**: If the Orchestrator is the only active agent, it functions as a standard autonomous worker, picking up and executing tasks directly.
-- **Manager Mode**: If other specialized agents are available, the Orchestrator uses its LLM (GPT-4o-mini/Haiku recommended) to break down parent cards into sub-tasks, assigning them to the most appropriate workers via the board.
-
----
-
-## 🤖 Autonomous Daemons
-
-Aegis 4.0 shifts from "one-off scripts" to **True Autonomous Daemons**.
-
-1. **The Pulse**: Agents poll the board every $N$ seconds (Pulse Interval).
-2. **Self-Assignment**: If an agent sees an unassigned card in the "Inbox" that matches its capabilities, it self-assigns and moves it to "In Progress".
-3. **Workspace Scanning**: Agents use their `work_dir` to index the local repository before execution, ensuring they have the latest code context.
-4. **Live Documentation**: Agents post progress updates as comments on the card and generate local `work_log.md` artifacts.
+1. **The ReAct Loop**: Agents poll the board every $N$ seconds (Pulse Interval), fetching all cards and the current custom column state.
+2. **Tool-Driven Execution**: By passing the board state and the user-defined `AEGIS_CONFIG_GOALS` to an LLM, the agent decides its next action.
+3. **Board Manipulation**: Agents can execute tools to create new cards, update existing cards across columns, or post comments.
+4. **Resiliency**: If no tools are needed or the agent is blocked, it seamlessly enters a waiting state until the next pulse.
 
 ---
 
@@ -78,8 +65,8 @@ Aegis 4.0 shifts from "one-off scripts" to **True Autonomous Daemons**.
 1. **Bootstrap**: Run `setup.bat` (Windows) or `setup.sh` (POSIX).
 2. **Setup Registry**: Run `python setup_templates.py` to generate the local template scaffolds.
 3. **Launch**: `python main.py` and navigate to `http://localhost:8080`.
-4. **Configure the Brain**: Look for the **Main Orchestrator** in the sidebar. provide it with an API key to enable Manager Mode.
-5. **Drop a Task**: Create a card in the **Inbox**. Watch as the Orchestrator picks it up, breaks it down, and delegates it to your workers!
+4. **Define Workflows**: Use the "+ Add Column" button to structure your board.
+5. **Drop a Task**: Create a worker, give it an API key and an arbitrary goal, and drop a task in its intended start column!
 
 ---
 

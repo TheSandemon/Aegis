@@ -10,8 +10,11 @@ Aegis is a high-performance Kanban-based orchestration hub designed to manage, m
 - 📋 **Dynamic Board Architecture** — Fully customizable Kanban workflows. Add or remove columns to fit your specific pipeline needs, and agents will adapt.
 - 🏗️ **Smart Agent Registry** — Bootstrap workers instantly from a registry. Aegis automatically handles local scaffolding and dependency management.
 - 🖥️ **Glass Box Control Panel** — Real-time observability. See live terminal logs, inject context into stdin, or pause/resume agent processes.
-- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini).
+- 📡 **Live Activity Monitoring** — Real-time indicators showing exactly what an agent is doing (Thinking, Processing, Acting) via WebSockets.
+- ⚙️ **Dynamic Goal Tuning** — Change agent goals on the fly. Update an agent's objective while paused and resume work without a rebuild.
+- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini, DeepSeek).
 - 🔑 **Streamlined Onboarding** — Auto-detection for providers (sk-ant, AIza, sk-) and dynamic model fetching.
+- 🌍 **Cross-Platform Stability** — Full UTF-8/Unicode support for Windows and Linux environments.
 
 ---
 

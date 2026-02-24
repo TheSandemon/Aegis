@@ -19,13 +19,13 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-echo   ✓ Python found
+echo   [OK] Python found
 
 REM Check Node.js (optional)
 echo [2/5] Checking for Node.js...
 node --version >nul 2>&1
 if %errorlevel% equ 0 (
-    echo   ✓ Node.js found
+    echo   [OK] Node.js found
 ) else (
     echo   - Node.js not found (optional - for advanced features)
 )
@@ -34,9 +34,9 @@ REM Create virtual environment
 echo [3/5] Setting up Python environment...
 if not exist "venv" (
     python -m venv venv
-    echo   ✓ Virtual environment created
+    echo   [OK] Virtual environment created
 ) else (
-    echo   ✓ Virtual environment already exists
+    echo   [OK] Virtual environment already exists
 )
 
 REM Activate virtual environment and install
@@ -48,15 +48,15 @@ if %errorlevel% neq 0 (
     pause
     exit /b 1
 )
-echo   ✓ Dependencies installed
+echo   [OK] Dependencies installed
 
 REM Create .env if not exists
 echo [5/5] Configuration...
 if not exist ".env" (
     copy .env.example .env >nul
-    echo   ✓ Configuration created
+    echo   [OK] Configuration created
 ) else (
-    echo   ✓ Configuration already exists
+    echo   [OK] Configuration already exists
 )
 
 echo.
@@ -75,8 +75,13 @@ timeout /t 2 >nul
 REM Generate agent templates
 echo Initializing agent templates...
 python setup_templates.py
-echo   ✓ Templates generated
+echo   [OK] Templates generated
 echo.
 
 REM Start the server
 python main.py
+if %errorlevel% neq 0 (
+    echo.
+    echo ERROR: Aegis failed to start or was closed unexpectedly.
+    pause
+)

@@ -265,27 +265,37 @@ for agent in registry:
         
     agent["config_schema"] = new_schema
 
-    if TEMPLATES_DIR.exists():
-        for t_dir in TEMPLATES_DIR.iterdir():
-            if t_dir.is_dir() and (t_dir / "worker.py").exists():
-                (t_dir / "worker.py").write_text(worker_code, encoding='utf-8')
-                print(f"Synced latest worker.py to template {t_dir.name}")
-                
-    INSTANCES_DIR = Path("aegis_data/instances")
-    if INSTANCES_DIR.exists():
-        for i_dir in INSTANCES_DIR.iterdir():
-            if i_dir.is_dir() and (i_dir / "worker.py").exists():
-                (i_dir / "worker.py").write_text(worker_code, encoding='utf-8')
-                print(f"Synced latest worker.py to instance {i_dir.name}")
     # 3. Pre-create the local template to bypass git clone
     agent_dir = TEMPLATES_DIR / agent["id"]
     agent_dir.mkdir(parents=True, exist_ok=True)
     
     # Write worker.py
-    (agent_dir / "worker.py").write_text(worker_code, encoding="utf-8")
-    
-    # Write requirements.txt
-    (agent_dir / "requirements.txt").write_text("requests==2.31.0\\n", encoding="utf-8")
+    try:
+        (agent_dir / "worker.py").write_text(worker_code, encoding="utf-8")
+        # Write requirements.txt
+        (agent_dir / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not write to template directory for {agent['id']}: {e}")
+
+# Bulk sync latest worker.py to ALL existing templates and instances once
+if TEMPLATES_DIR.exists():
+    for t_dir in TEMPLATES_DIR.iterdir():
+        if t_dir.is_dir() and (t_dir / "worker.py").exists():
+            try:
+                (t_dir / "worker.py").write_text(worker_code, encoding='utf-8')
+                print(f"Synced latest worker.py to template {t_dir.name}")
+            except Exception as e:
+                print(f"Warning: Could not sync template {t_dir.name}: {e}")
+            
+INSTANCES_DIR = Path("aegis_data/instances")
+if INSTANCES_DIR.exists():
+    for i_dir in INSTANCES_DIR.iterdir():
+        if i_dir.is_dir() and (i_dir / "worker.py").exists():
+            try:
+                (i_dir / "worker.py").write_text(worker_code, encoding='utf-8')
+                print(f"Synced latest worker.py to instance {i_dir.name}")
+            except Exception as e:
+                print(f"Warning: Could not sync instance {i_dir.name}: {e}")
 
 with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
     json.dump(registry, f, indent=4)

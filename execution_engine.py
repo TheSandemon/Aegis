@@ -14,6 +14,7 @@ import secrets
 from pathlib import Path
 from typing import Optional, Callable, Coroutine, Any
 from datetime import datetime
+import sys
 
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
 from abc import ABC, abstractmethod
@@ -121,12 +122,24 @@ class SubprocessAdapter(ExecutionAdapter):
                 exe += ".exe"
             command = exe + (" " + parts[1] if len(parts) > 1 else "")
 
+        # Use sys.executable instead of "python" to ensure we use the same environment
+        if command.startswith("python "):
+            command = command.replace("python ", f'"{sys.executable}" ', 1)
+
+        if working_dir and working_dir.exists():
+             worker_exists = (working_dir / "worker.py").exists()
+             logger.info(f"Subprocess starting: command={command}, cwd={working_dir}, worker_exists={worker_exists}")
+             if not worker_exists:
+                 logger.error(f"CRITICAL: worker.py MISSING in {working_dir}")
+        else:
+             logger.warning(f"Subprocess starting with NO CWD or non-existent CWD: {working_dir}")
+
         process = await asyncio.create_subprocess_shell(
             command,
             stdin=asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            cwd=str(working_dir) if working_dir.exists() else None,
+            cwd=str(working_dir) if working_dir and working_dir.exists() else None,
             env=env
         )
         return process

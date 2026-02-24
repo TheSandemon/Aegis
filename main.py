@@ -21,6 +21,7 @@ import httpx
 from pathlib import Path
 from datetime import datetime
 import sys
+from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 import glob
 
@@ -35,7 +36,6 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Requ
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
-import httpx
 
 # ─── Initialization & Config ─────────────────────────────────────────────────────────────────────
 logging.basicConfig(level=logging.INFO)

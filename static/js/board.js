@@ -41,8 +41,8 @@ function populateColumnSelects() {
         if (sel) sel.innerHTML = colNames.map(c => `<option value="${c}">${c}</option>`).join('');
     });
     const assigneeSel = document.getElementById('detailAssignee');
-    const agents = Object.keys(config.agents || {});
-    assigneeSel.innerHTML = '<option value="">Unassigned</option>' + agents.map(a => `<option value="${a}">${a}</option>`).join('');
+    const activeInstances = typeof instancesData !== 'undefined' ? instancesData.map(i => i.instance_name) : [];
+    assigneeSel.innerHTML = '<option value="">Unassigned</option>' + activeInstances.map(a => `<option value="${escapeHtml(a)}">${escapeHtml(a)}</option>`).join('');
 }
 
 function filterCards() {

@@ -69,7 +69,8 @@ echo.
 echo The dashboard will open at: http://localhost:8080
 echo.
 echo Press Ctrl+C to stop the server
-echo.
+REM Small delay to ensure ports/files are released
+timeout /t 2 >nul
 
 REM Start the server
 python main.py

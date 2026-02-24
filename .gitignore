@@ -17,6 +17,7 @@ env/
 # Aegis
 *.log
 aegis.db
+aegis_data/
 
 # Node
 node_modules/

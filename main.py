@@ -21,9 +21,15 @@ import httpx
 from pathlib import Path
 from datetime import datetime
 import sys
-from typing import Optional
 from contextlib import asynccontextmanager
 import glob
+
+# Ensure UTF-8 output for Windows console
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
 from fastapi.staticfiles import StaticFiles

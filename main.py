@@ -56,6 +56,48 @@ AGENT_COLORS = [
     "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"
 ]
 
+# ─── System Prompt ───────────────────────────────────────────────────────────────
+SYSTEM_PROMPT_PATH = Path(__file__).parent / "aegis_data" / "system_prompt.txt"
+DEFAULT_SYSTEM_PROMPT = """You are an autonomous AI agent working on a Kanban board via a REST API.
+Your Name: {agent_name}
+Your Goal: {goal}
+
+Core Workspace Mechanics:
+1. The Kanban board is composed of Columns (e.g., 'Inbox', 'In Progress', 'Done').
+2. Tasks are represented as Cards inside these columns.
+3. You MUST take action to achieve your goal. Do NOT just output text. Use the JSON tools provided.
+4. If your goal is to "create ideas in the inbox", you must use the 'create_card' tool and set the 'column' argument to 'Inbox' (or whatever column is requested).
+5. If you see a card you need to work on, use 'update_card' to move it, change its status, or claim it as the assignee.
+6. Use 'post_comment' to add notes to cards you are working on.
+7. Use 'wait' ONLY if you are truly blocked waiting for a human or another agent to do something.
+
+Available Actions (Tools):
+1. create_card: {"title": str, "description": str, "column": str, "assignee": str} - Create a new task in a specific column.
+2. update_card: {"card_id": int, "column": str, "assignee": str, "status": str, "priority": "low"|"normal"|"high"} - Move a card, assign it, or update it.
+3. delete_card: {"card_id": int} - Remove a card.
+4. post_comment: {"card_id": int, "content": str} - Add details or ask questions on a card.
+5. create_column: {"name": str, "position": int} - Add a new Kanban column.
+6. delete_column: {"column_id": int} - Remove a column.
+7. wait: {"reason": str} - Pause until the next pulse (use sparingly).
+
+Response Format (JSON Array ONLY):
+[
+    {
+        "thought": "Brief reasoning for this action.",
+        "action": "action_name",
+        "args": {...}
+    }
+]"""
+
+def load_system_prompt():
+    if SYSTEM_PROMPT_PATH.exists():
+        return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
+    SYSTEM_PROMPT_PATH.parent.mkdir(exist_ok=True)
+    SYSTEM_PROMPT_PATH.write_text(DEFAULT_SYSTEM_PROMPT, encoding="utf-8")
+    return DEFAULT_SYSTEM_PROMPT
+
+SYSTEM_PROMPT = load_system_prompt()
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # PERSISTENCE LAYER (Phase 4: Firebase or SQLite)
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -360,6 +402,9 @@ class ColumnCreate(BaseModel):
     name: str
     position: Optional[int] = 0
 
+class SystemPromptUpdate(BaseModel):
+    prompt: str
+
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # API ROUTES
@@ -402,6 +447,16 @@ async def update_config(updates: dict):
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
 
+@app.get("/api/system_prompt")
+async def get_system_prompt():
+    return {"prompt": SYSTEM_PROMPT}
+
+@app.put("/api/system_prompt")
+async def update_system_prompt(update: SystemPromptUpdate):
+    global SYSTEM_PROMPT
+    SYSTEM_PROMPT = update.prompt
+    SYSTEM_PROMPT_PATH.write_text(SYSTEM_PROMPT, encoding="utf-8")
+    return {"success": True, "prompt": SYSTEM_PROMPT}
 
 
 # ─── Cards CRUD ──────────────────────────────────────────────────────────────────

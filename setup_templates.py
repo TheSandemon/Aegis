@@ -47,15 +47,6 @@ if not service:
     elif google_key: service = "google"
     elif deepseek_key: service = "deepseek"
 
-def fetch_board_state():
-    try:
-        cards = requests.get(f"{api_url}/cards").json()
-        cols = requests.get(f"{api_url}/columns").json()
-        return cards, cols
-    except Exception as e:
-        print(f"[{agent_name}] ❌ API Error: {e}")
-        return [], []
-
 def prompt_llm(system_prompt, user_text):
     def parse_json(text):
         try:
@@ -93,47 +84,25 @@ def prompt_llm(system_prompt, user_text):
     print(f"[{agent_name}] ❌ ERROR: Unsupported service '{service}' or missing API key.")
     return None
 
-system_prompt = f"""You are an autonomous AI agent working on a Kanban board via a REST API.
-Your Name: {agent_name}
-Your Goal: {goal}
 
-Core Workspace Mechanics:
-1. The Kanban board is composed of Columns (e.g., 'Inbox', 'In Progress', 'Done').
-2. Tasks are represented as Cards inside these columns.
-3. You MUST take action to achieve your goal. Do NOT just output text. Use the JSON tools provided.
-4. If your goal is to "create ideas in the inbox", you must use the 'create_card' tool and set the 'column' argument to 'Inbox' (or whatever column is requested).
-5. If you see a card you need to work on, use 'update_card' to move it, change its status, or claim it as the assignee.
-6. Use 'post_comment' to add notes to cards you are working on.
-7. Use 'wait' ONLY if you are truly blocked waiting for a human or another agent to do something.
-
-Available Actions (Tools):
-1. create_card: {{"title": str, "description": str, "column": str, "assignee": str}} - Create a new task in a specific column.
-2. update_card: {{"card_id": int, "column": str, "assignee": str, "status": str, "priority": "low"|"normal"|"high"}} - Move a card, assign it, or update it.
-3. delete_card: {{"card_id": int}} - Remove a card.
-4. post_comment: {{"card_id": int, "content": str}} - Add details or ask questions on a card.
-5. create_column: {{"name": str, "position": int}} - Add a new Kanban column.
-6. delete_column: {{"column_id": int}} - Remove a column.
-7. wait: {{"reason": str}} - Pause until the next pulse (use sparingly).
-
-Response Format (JSON Array ONLY):
-[
-    {{
-        "thought": "Brief reasoning for this action.",
-        "action": "action_name",
-        "args": {{...}}
-    }},
-    ... you can output multiple actions in sequence ...
-]
-"""
 
 print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
 print(f"[{agent_name}] 🎯 GOAL: {goal}")
 
 while True:
-    print(f"\\n[{agent_name}] 📡 PULSE: Fetching board state...")
-    cards, cols = fetch_board_state()
+    print(f"\\n[{agent_name}] 📡 PULSE: Fetching board state & instructions...")
+    try:
+        cards = requests.get(f"{api_url}/cards").json()
+        cols = requests.get(f"{api_url}/columns").json()
+        raw_prompt = requests.get(f"{api_url}/system_prompt").json().get("prompt", "")
+    except Exception as e:
+        print(f"[{agent_name}] ❌ API Error: {e}")
+        time.sleep(pulse_interval)
+        continue
+        
+    system_prompt = raw_prompt.replace("{agent_name}", agent_name).replace("{goal}", goal)
     
-    if not isinstance(cards, list) or not isinstance(cols, list):
+    if not isinstance(cards, list) or not isinstance(cols, list) or not system_prompt:
         print(f"[{agent_name}] ❌ API Error: Invalid state format received. Waiting...")
         time.sleep(pulse_interval)
         continue
@@ -178,17 +147,20 @@ while True:
             elif action == "update_card":
                 cid = args.pop("card_id", None)
                 if cid: 
+                    if isinstance(cid, str): cid = cid.strip("# ")
                     r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
                     check_res(r, "update_card")
             elif action == "delete_card":
                 cid = args.get("card_id")
                 if cid: 
+                    if isinstance(cid, str): cid = cid.strip("# ")
                     r = requests.delete(f"{api_url}/cards/{cid}")
                     check_res(r, "delete_card")
             elif action == "post_comment":
                 cid = args.get("card_id")
                 content = args.get("content")
                 if cid and content:
+                    if isinstance(cid, str): cid = cid.strip("# ")
                     r = requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
                     check_res(r, "post_comment")
             elif action == "create_column":

@@ -51,12 +51,37 @@ graph TD
 
 ## 🤖 Autonomous Sandbox Bots
 
-Aegis 4.0 shifts from specialized scripts to **Fully Autonomous Sandbox Bots**.
+Aegis 4.0 shifts from specialized scripts to **Fully Autonomous Sandbox Bots** powered by a "Natural API" toolset.
 
-1. **The ReAct Loop**: Agents poll the board every $N$ seconds (Pulse Interval), fetching all cards and the current custom column state.
-2. **Tool-Driven Execution**: By passing the board state and the user-defined `AEGIS_CONFIG_GOALS` to an LLM, the agent decides its next action.
-3. **Board Manipulation**: Agents can execute tools to create new cards, update existing cards across columns, or post comments.
-4. **Resiliency**: If no tools are needed or the agent is blocked, it seamlessly enters a waiting state until the next pulse.
+### The ReAct Loop
+
+Agents operate on a continuous loop governed by a configurable `pulse_interval`:
+
+```mermaid
+sequenceDiagram
+    participant B as Kanban API
+    participant W as Agent Worker
+    participant L as LLM (ReAct)
+    
+    loop Every Pulse
+        W->>B: GET /api/cards & /api/columns
+        B-->>W: Board State & Configuration
+        W->>L: Context (State + Goal)
+        L-->>W: Reasoning + Action (JSON)
+        W->>B: Execute Tool (POST/PATCH/DELETE)
+        B-->>W: Result
+        Note over W: Sleep (Pulse Interval)
+    end
+```
+
+### "Natural" API Capabilities
+
+Bots aren't just consumers; they are first-class citizens with full authority to manage the board:
+
+- **Card CRUD**: Create, Update, and **Delete** cards as needed.
+- **Workflow Management**: Create and Delete **Columns** to dynamically restructure the Kanban board.
+- **Context Richness**: Bots parse card comments, priorities, and dependency chains to make informed decisions.
+- **Proactive Communication**: Reasoning is logged as comments, providing a "paper trail" for autonomous actions.
 
 ---
 

@@ -1,6 +1,14 @@
 import json
 import os
 from pathlib import Path
+import sys
+
+# Ensure UTF-8 output for Windows console
+if sys.stdout.encoding.lower() != 'utf-8':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except AttributeError:
+        pass
 
 REGISTRY_PATH = Path("agent_registry.json")
 with open(REGISTRY_PATH, "r", encoding="utf-8") as f:
@@ -43,11 +51,11 @@ def prompt_llm(system_prompt, user_text):
         res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": "gpt-4o-mini", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
         return json.loads(res.json()["choices"][0]["message"]["content"])
     elif gemini_key:
-        res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key={gemini_key}", 
+        res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}", 
             json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json"}})
         return json.loads(res.json()["candidates"][0]["content"]["parts"][0]["text"])
     elif anthropic_key:
-        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": "claude-3-haiku-20240307", "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
+        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": "claude-3-5-sonnet-20240620", "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
         return json.loads(res.json()["content"][0]["text"])
     return None
 
@@ -55,17 +63,27 @@ system_prompt = f"""You are an autonomous AI agent working on a Kanban board via
 Your Name: {agent_name}
 Your Goal: {goal}
 
+Core Instructions:
+- You operate a Kanban board to achieve your goal.
+- Be proactive. Create cards for sub-tasks, update status, and comment on progress.
+- You can move cards between ANY columns.
+- Use 'wait' if you are waiting for a human or another agent.
+- You can also manage the board structure (Adding/Deleting Columns) if it helps organize the workflow.
+
 Available Actions:
-1. create_card: {{"title": str, "description": str, "column": str, "assignee": str}}
-2. update_card: {{"card_id": int, "column": str, "assignee": str, "status": str}} 
-3. post_comment: {{"card_id": int, "content": str}}
-4. wait: {{"reason": str}} - use this if no action is needed right now or you are blocked.
+1. create_card: {{"title": str, "description": str, "column": str, "assignee": str}} - Create a new task.
+2. update_card: {{"card_id": int, "column": str, "assignee": str, "status": str, "priority": "low"|"normal"|"high"}} - Update or move an existing task.
+3. delete_card: {{"card_id": int}} - Remove a card if it is no longer relevant.
+4. post_comment: {{"card_id": int, "content": str}} - Add details or ask questions.
+5. create_column: {{"name": str, "position": int}} - Add a new Kanban column.
+6. delete_column: {{"column_id": int}} - Remove a column (be careful!).
+7. wait: {{"reason": str}} - Pause until the next pulse.
 
 Response Format (JSON ONLY):
 {{
-    "thought": "Your reasoning for the next action based on the board state and your goal.",
+    "thought": "Brief reasoning for this action.",
     "action": "action_name",
-    "args": {{"key": "value"}}
+    "args": {{...}}
 }}
 """
 
@@ -81,9 +99,11 @@ while True:
         time.sleep(pulse_interval)
         continue
         
-    board_context = f"COLUMNS: {[c['name'] for c in cols]}\\n\\nCARDS:\\n"
+    board_context = f"COLUMNS: {[{'id': c['id'], 'name': c['name']} for c in cols]}\\n\\nCARDS:\\n"
     for c in cards:
-        board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')}\\n  Desc: {c.get('description', '')[:100]}\\n"
+        comments = c.get("comments", [])
+        last_comment = f" | Last Comment: {comments[-1]['content'][:50]}" if comments else ""
+        board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}{last_comment}\\n  Desc: {c.get('description', '')[:100]}\\n"
         
     print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
     try:
@@ -106,11 +126,19 @@ while True:
         elif action == "update_card":
             cid = args.pop("card_id", None)
             if cid: requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+        elif action == "delete_card":
+            cid = args.get("card_id")
+            if cid: requests.delete(f"{api_url}/cards/{cid}")
         elif action == "post_comment":
             cid = args.get("card_id")
             content = args.get("content")
             if cid and content:
                 requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
+        elif action == "create_column":
+            requests.post(f"{api_url}/columns", json=args)
+        elif action == "delete_column":
+            cid = args.get("column_id")
+            if cid: requests.delete(f"{api_url}/columns/{cid}")
         elif action == "wait":
             print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
             time.sleep(pulse_interval)

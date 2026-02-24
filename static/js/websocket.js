@@ -78,6 +78,27 @@ function handleWebSocketMessage(data) {
                 logEl.appendChild(entry);
                 logEl.scrollTop = logEl.scrollHeight;
             }
+
+            // Extract and update agent activity
+            const targetId = data.instance_id || data.agent_id;
+            const activityEl = document.getElementById(`activity-${targetId}`);
+            if (activityEl) {
+                const text = data.entry;
+                if (text.includes('📡 PULSE: Fetching board state')) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board state...</span>';
+                } else if (text.includes('🧠 THINKING: Consulting LLM')) {
+                    activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
+                } else if (text.includes('⚡ ACTION:')) {
+                    const actionMatch = text.match(/⚡ ACTION: ([^{\n]+)/);
+                    if (actionMatch) {
+                        activityEl.innerHTML = `<span style="color: #facc15">⚡ Action: ${actionMatch[1].trim()}</span>`;
+                    }
+                } else if (text.includes('✅ Action complete') || text.includes('💤 Waiting')) {
+                    activityEl.innerHTML = '<span style="color: var(--text-secondary)">💤 Sleeping</span>';
+                } else if (text.includes('❌ ERROR:')) {
+                    activityEl.innerHTML = '<span style="color: var(--danger)">❌ Error</span>';
+                }
+            }
             break;
         case 'log_entry':
             appendLogEntry(data.card_id, data.entry);

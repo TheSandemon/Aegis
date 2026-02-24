@@ -43,6 +43,7 @@ function renderInstancesSidebar() {
                             <div class="dot"></div>
                             <span>${inst.runtime_status ? inst.runtime_status.charAt(0).toUpperCase() + inst.runtime_status.slice(1) : 'Stopped'}</span>
                         </div>
+                        ${isRunning ? `<div class="agent-activity-indicator" id="activity-${inst.instance_id}" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">💤 Idle</div>` : ''}
                     </div>
                 </div>
                 <div class="agent-params">

@@ -127,12 +127,13 @@ while True:
 
         for action_block in res:
             res_lower = {k.lower(): v for k, v in action_block.items()}
-                
-            thought = res_lower.get("thought", "...")
             action = str(res_lower.get("action", "wait")).lower()
             args = res_lower.get("args", {})
+            thought = res_lower.get("thought", "")
             
-            print(f"[{agent_name}] 🤔 THOUGHT: {thought}")
+            if thought:
+                print(f"[{agent_name}] 💡 THOUGHT: {thought}")
+            
             print(f"[{agent_name}] ⚡ ACTION: {action} {args}")
             
             def check_res(r, act):

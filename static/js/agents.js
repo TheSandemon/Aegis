@@ -98,7 +98,7 @@ async function deleteWorkerInstance(instanceId) {
 let terminalPollInterval = null;
 
 async function viewInstanceLogs(instanceId) {
-    document.getElementById('terminalModal').style.display = 'flex';
+    document.getElementById('terminalModal').classList.add('active');
     document.getElementById('terminalTitle').textContent = `Terminal: ${instanceId}`;
     const output = document.getElementById('terminalOutput');
     output.textContent = 'Connecting to terminal...';
@@ -135,7 +135,7 @@ async function viewInstanceLogs(instanceId) {
 }
 
 function closeTerminal() {
-    document.getElementById('terminalModal').style.display = 'none';
+    document.getElementById('terminalModal').classList.remove('active');
     if (terminalPollInterval) {
         clearInterval(terminalPollInterval);
         terminalPollInterval = null;

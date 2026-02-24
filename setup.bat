@@ -72,5 +72,11 @@ echo Press Ctrl+C to stop the server
 REM Small delay to ensure ports/files are released
 timeout /t 2 >nul
 
+REM Generate agent templates
+echo Initializing agent templates...
+python setup_templates.py
+echo   ✓ Templates generated
+echo.
+
 REM Start the server
 python main.py

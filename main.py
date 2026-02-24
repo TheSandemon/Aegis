@@ -25,7 +25,7 @@ from contextlib import asynccontextmanager
 import glob
 
 # Ensure UTF-8 output for Windows console
-if sys.stdout.encoding.lower() != 'utf-8':
+if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     try:
         sys.stdout.reconfigure(encoding='utf-8')
     except AttributeError:

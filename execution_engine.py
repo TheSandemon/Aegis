@@ -612,6 +612,7 @@ class ExecutionEngine:
                         await self.broadcaster({
                             "type": "agent_log",
                             "agent_id": agent_proc.agent_id,
+                            "instance_id": agent_proc.instance_id,
                             "entry": entry
                         })
 
@@ -737,7 +738,7 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
                     return {"status": "setup_failed", "error": f"Command '{cmd}' failed.", "details": results}
 
             template_dir.mkdir(parents=True, exist_ok=True)
-            (template_dir / ".installed").write_text(datetime.now().isoformat())
+            (template_dir / ".installed").write_text(datetime.now().isoformat(), encoding="utf-8")
 
             return {"status": "installed", "path": str(template_dir), "setup_results": results}
 
@@ -757,7 +758,7 @@ def load_instances() -> list[dict]:
     """Load persisted instance state from instances.json."""
     if INSTANCES_STATE_FILE.exists():
         try:
-            return json.loads(INSTANCES_STATE_FILE.read_text())
+            return json.loads(INSTANCES_STATE_FILE.read_text(encoding="utf-8"))
         except Exception as e:
             logger.error(f"Failed to load instances.json: {e}")
     return []
@@ -765,7 +766,7 @@ def load_instances() -> list[dict]:
 
 def save_instances(instances: list[dict]):
     """Persist instance state to instances.json."""
-    INSTANCES_STATE_FILE.write_text(json.dumps(instances, indent=2))
+    INSTANCES_STATE_FILE.write_text(json.dumps(instances, indent=2), encoding="utf-8")
 
 
 def create_instance(template_id: str, instance_name: str,

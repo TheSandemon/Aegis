@@ -33,9 +33,19 @@ try:
 except ValueError:
     pulse_interval = 30
 
+service = os.environ.get("AEGIS_SERVICE", "")
+model = os.environ.get("AEGIS_MODEL", "")
+
 openai_key = os.environ.get("OPENAI_API_KEY", "")
 anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
-gemini_key = os.environ.get("GEMINI_API_KEY", "")
+google_key = os.environ.get("GOOGLE_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
+deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+
+if not service:
+    if openai_key: service = "openai"
+    elif anthropic_key: service = "anthropic"
+    elif google_key: service = "google"
+    elif deepseek_key: service = "deepseek"
 
 def fetch_board_state():
     try:
@@ -47,16 +57,25 @@ def fetch_board_state():
         return [], []
 
 def prompt_llm(system_prompt, user_text):
-    if openai_key:
-        res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": "gpt-4o-mini", "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
+    if service == "openai" and openai_key:
+        m = model or "gpt-4o-mini"
+        res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
         return json.loads(res.json()["choices"][0]["message"]["content"])
-    elif gemini_key:
-        res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={gemini_key}", 
+    elif service == "google" and google_key:
+        m = model or "gemini-2.0-flash"
+        res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={google_key}", 
             json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json"}})
         return json.loads(res.json()["candidates"][0]["content"]["parts"][0]["text"])
-    elif anthropic_key:
-        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": "claude-3-5-sonnet-20240620", "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
+    elif service == "anthropic" and anthropic_key:
+        m = model or "claude-3-5-sonnet-latest"
+        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": m, "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
         return json.loads(res.json()["content"][0]["text"])
+    elif service == "deepseek" and deepseek_key:
+        m = model or "deepseek-chat"
+        res = requests.post("https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {deepseek_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
+        return json.loads(res.json()["choices"][0]["message"]["content"])
+        
+    print(f"[{agent_name}] ❌ ERROR: Unsupported service '{service}' or missing API key.")
     return None
 
 system_prompt = f"""You are an autonomous AI agent working on a Kanban board via REST API.
@@ -107,12 +126,12 @@ while True:
         
     print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
     try:
-        if not (openai_key or anthropic_key or gemini_key):
-             raise Exception("No API key configured. Set OPENAI_API_KEY, ANTHROPIC_API_KEY, or GEMINI_API_KEY.")
+        if not service:
+             raise Exception("No active service or API key configured.")
              
         res = prompt_llm(system_prompt, board_context)
         if not res:
-            raise Exception("Empty response from LLM")
+            raise Exception("Empty or malformed response from LLM")
             
         thought = res.get("thought", "...")
         action = res.get("action", "wait")
@@ -206,6 +225,18 @@ for agent in registry:
         
     agent["config_schema"] = new_schema
 
+    if TEMPLATES_DIR.exists():
+        for t_dir in TEMPLATES_DIR.iterdir():
+            if t_dir.is_dir() and (t_dir / "worker.py").exists():
+                (t_dir / "worker.py").write_text(worker_code, encoding='utf-8')
+                print(f"Synced latest worker.py to template {t_dir.name}")
+                
+    INSTANCES_DIR = Path("aegis_data/instances")
+    if INSTANCES_DIR.exists():
+        for i_dir in INSTANCES_DIR.iterdir():
+            if i_dir.is_dir() and (i_dir / "worker.py").exists():
+                (i_dir / "worker.py").write_text(worker_code, encoding='utf-8')
+                print(f"Synced latest worker.py to instance {i_dir.name}")
     # 3. Pre-create the local template to bypass git clone
     agent_dir = TEMPLATES_DIR / agent["id"]
     agent_dir.mkdir(parents=True, exist_ok=True)

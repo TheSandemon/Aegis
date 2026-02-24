@@ -465,7 +465,9 @@ class ExecutionEngine:
         """Stop a running agent process."""
         agent_proc = self.active.get(agent_id)
         if not agent_proc or agent_proc.status != "running":
-            return {"error": f"Agent '{agent_id}' is not running", "status": "not_running"}
+            # If it's not active or running, it's effectively stopped already.
+            # Return success to let the UI clear its "running" state
+            return {"success": True, "status": "stopped", "message": f"Agent '{agent_id}' was already stopped."}
 
         adapter = self._get_adapter({"isolation": "subprocess"})  # Default
         agent_proc.status = "stopped"

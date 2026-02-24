@@ -115,12 +115,15 @@ Available Actions (Tools):
 6. delete_column: {{"column_id": int}} - Remove a column.
 7. wait: {{"reason": str}} - Pause until the next pulse (use sparingly).
 
-Response Format (JSON ONLY):
-{{
-    "thought": "Brief reasoning for this action.",
-    "action": "action_name",
-    "args": {{...}}
-}}
+Response Format (JSON Array ONLY):
+[
+    {{
+        "thought": "Brief reasoning for this action.",
+        "action": "action_name",
+        "args": {{...}}
+    }},
+    ... you can output multiple actions in sequence ...
+]
 """
 
 print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
@@ -150,54 +153,57 @@ while True:
         if not res:
             raise Exception("Empty or malformed response from LLM")
             
-        res_lower = {k.lower(): v for k, v in res.items()}
+        if not isinstance(res, list):
+            res = [res] # Normalize single dict to list
+
+        for action_block in res:
+            res_lower = {k.lower(): v for k, v in action_block.items()}
+                
+            thought = res_lower.get("thought", "...")
+            action = str(res_lower.get("action", "wait")).lower()
+            args = res_lower.get("args", {})
             
-        thought = res_lower.get("thought", "...")
-        action = str(res_lower.get("action", "wait")).lower()
-        args = res_lower.get("args", {})
-        
-        print(f"[{agent_name}] 🤔 THOUGHT: {thought}")
-        print(f"[{agent_name}] ⚡ ACTION: {action} {args}")
-        
-        def check_res(r, act):
-            if r.status_code >= 400:
-                print(f"[{agent_name}] ❌ API REJECTED {act}: {r.status_code} - {r.text}")
-                return False
-            return True
-        
-        if action == "create_card":
-            r = requests.post(f"{api_url}/cards", json=args)
-            check_res(r, "create_card")
-        elif action == "update_card":
-            cid = args.pop("card_id", None)
-            if cid: 
-                r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
-                check_res(r, "update_card")
-        elif action == "delete_card":
-            cid = args.get("card_id")
-            if cid: 
-                r = requests.delete(f"{api_url}/cards/{cid}")
-                check_res(r, "delete_card")
-        elif action == "post_comment":
-            cid = args.get("card_id")
-            content = args.get("content")
-            if cid and content:
-                r = requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
-                check_res(r, "post_comment")
-        elif action == "create_column":
-            r = requests.post(f"{api_url}/columns", json=args)
-            check_res(r, "create_column")
-        elif action == "delete_column":
-            cid = args.get("column_id")
-            if cid: 
-                r = requests.delete(f"{api_url}/columns/{cid}")
-                check_res(r, "delete_column")
-        elif action == "wait":
-            print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
-            time.sleep(pulse_interval)
-            continue
+            print(f"[{agent_name}] 🤔 THOUGHT: {thought}")
+            print(f"[{agent_name}] ⚡ ACTION: {action} {args}")
             
-        print(f"[{agent_name}] ✅ Action complete. Sleeping {pulse_interval}s...")
+            def check_res(r, act):
+                if r.status_code >= 400:
+                    print(f"[{agent_name}] ❌ API REJECTED {act}: {r.status_code} - {r.text}")
+                    return False
+                return True
+            
+            if action == "create_card":
+                r = requests.post(f"{api_url}/cards", json=args)
+                check_res(r, "create_card")
+            elif action == "update_card":
+                cid = args.pop("card_id", None)
+                if cid: 
+                    r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+                    check_res(r, "update_card")
+            elif action == "delete_card":
+                cid = args.get("card_id")
+                if cid: 
+                    r = requests.delete(f"{api_url}/cards/{cid}")
+                    check_res(r, "delete_card")
+            elif action == "post_comment":
+                cid = args.get("card_id")
+                content = args.get("content")
+                if cid and content:
+                    r = requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
+                    check_res(r, "post_comment")
+            elif action == "create_column":
+                r = requests.post(f"{api_url}/columns", json=args)
+                check_res(r, "create_column")
+            elif action == "delete_column":
+                cid = args.get("column_id")
+                if cid: 
+                    r = requests.delete(f"{api_url}/columns/{cid}")
+                    check_res(r, "delete_column")
+            elif action == "wait":
+                print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
+                break # Stop processing further actions if wait is called
+                
+        print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")
         time.sleep(pulse_interval)
         
     except Exception as e:

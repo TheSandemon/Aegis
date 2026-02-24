@@ -95,13 +95,51 @@ async function deleteWorkerInstance(instanceId) {
     } catch (e) { showToast('Delete failed'); }
 }
 
+let terminalPollInterval = null;
+
 async function viewInstanceLogs(instanceId) {
-    try {
-        const res = await fetch(`/api/instances/${instanceId}/logs?tail=50`);
-        const d = await res.json();
-        const logs = d.logs || [];
-        alert(logs.length > 0 ? logs.join('\n') : 'No output yet.');
-    } catch (e) { showToast('Failed to load logs'); }
+    document.getElementById('terminalModal').style.display = 'flex';
+    document.getElementById('terminalTitle').textContent = `Terminal: ${instanceId}`;
+    const output = document.getElementById('terminalOutput');
+    output.textContent = 'Connecting to terminal...';
+
+    // Clear any existing poll
+    if (terminalPollInterval) clearInterval(terminalPollInterval);
+
+    const fetchLogs = async () => {
+        try {
+            const res = await fetch(`/api/instances/${instanceId}/logs?tail=200`);
+            if (!res.ok) throw new Error('Failed to fetch');
+            const d = await res.json();
+            const logs = d.logs || [];
+
+            // Check if scroll is at bottom before update
+            const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
+
+            output.textContent = logs.length > 0 ? logs.join('\\n') : 'No output yet.';
+
+            // Auto-scroll if it was previously at bottom
+            if (isScrolledToBottom) {
+                output.scrollTop = output.scrollHeight;
+            }
+        } catch (e) {
+            console.error('Terminal poll error:', e);
+        }
+    };
+
+    // Initial fetch and start polling every 2s
+    await fetchLogs();
+    // Scroll to bottom immediately on open
+    output.scrollTop = output.scrollHeight;
+    terminalPollInterval = setInterval(fetchLogs, 2000);
+}
+
+function closeTerminal() {
+    document.getElementById('terminalModal').style.display = 'none';
+    if (terminalPollInterval) {
+        clearInterval(terminalPollInterval);
+        terminalPollInterval = null;
+    }
 }
 
 // ─── Service & Model Definitions ──────────────────────────────────────────

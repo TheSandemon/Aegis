@@ -440,6 +440,21 @@
         </div>
     </div>
 
+    <!-- Terminal Modal -->
+    <div class="modal-overlay" id="terminalModal">
+        <div class="modal" style="max-width:800px; width:95%; height:80vh; display:flex; flex-direction:column;">
+            <div class="modal-header" style="flex-shrink:0;">
+                <h3><span id="terminalTitle">Worker Terminal</span></h3>
+                <button class="modal-close" onclick="closeTerminal()">&times;</button>
+            </div>
+            <div class="modal-body"
+                style="flex-grow:1; display:flex; flex-direction:column; overflow:hidden; padding:0; background:#0f172a;">
+                <pre id="terminalOutput"
+                    style="flex-grow:1; margin:0; padding:1rem; overflow-y:auto; color:#10b981; font-family:monospace; font-size:0.85rem; line-height:1.4;"></pre>
+            </div>
+        </div>
+    </div>
+
     <div class="toast-container" id="toastContainer"></div>
 
     <footer

@@ -68,5 +68,11 @@ echo ""
 echo "Press Ctrl+C to stop the server"
 echo ""
 
+# Generate agent templates
+echo "Initializing agent templates..."
+python3 setup_templates.py
+echo "  ✓ Templates generated"
+echo ""
+
 # Start the server
 python3 main.py

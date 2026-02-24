@@ -57,23 +57,38 @@ def fetch_board_state():
         return [], []
 
 def prompt_llm(system_prompt, user_text):
+    def parse_json(text):
+        try:
+            return json.loads(text)
+        except json.JSONDecodeError:
+            # Try to strip markdown code blocks if the LLM hallucinated them
+            if text.startswith("```json"): text = text[7:]
+            elif text.startswith("```"): text = text[3:]
+            if text.endswith("```"): text = text[:-3]
+            try: return json.loads(text.strip())
+            except: return None
+
     if service == "openai" and openai_key:
         m = model or "gpt-4o-mini"
         res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
-        return json.loads(res.json()["choices"][0]["message"]["content"])
+        content = res.json()["choices"][0]["message"]["content"]
+        return parse_json(content)
     elif service == "google" and google_key:
         m = model or "gemini-2.0-flash"
         res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={google_key}", 
             json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json"}})
-        return json.loads(res.json()["candidates"][0]["content"]["parts"][0]["text"])
+        content = res.json()["candidates"][0]["content"]["parts"][0]["text"]
+        return parse_json(content)
     elif service == "anthropic" and anthropic_key:
         m = model or "claude-3-5-sonnet-latest"
         res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": m, "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
-        return json.loads(res.json()["content"][0]["text"])
+        content = res.json()["content"][0]["text"]
+        return parse_json(content)
     elif service == "deepseek" and deepseek_key:
         m = model or "deepseek-chat"
         res = requests.post("https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {deepseek_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
-        return json.loads(res.json()["choices"][0]["message"]["content"])
+        content = res.json()["choices"][0]["message"]["content"]
+        return parse_json(content)
         
     print(f"[{agent_name}] ❌ ERROR: Unsupported service '{service}' or missing API key.")
     return None
@@ -84,9 +99,9 @@ Your Goal: {goal}
 
 Core Instructions:
 - You operate a Kanban board to achieve your goal.
-- Be proactive. Create cards for sub-tasks, update status, and comment on progress.
+- Be proactive. IMMEDIATELY create cards for sub-tasks, update status, and comment on progress. Do NOT wait if you have ideas.
 - You can move cards between ANY columns.
-- Use 'wait' if you are waiting for a human or another agent.
+- Use 'wait' ONLY if you are blocked waiting for a human or another agent.
 - You can also manage the board structure (Adding/Deleting Columns) if it helps organize the workflow.
 
 Available Actions:
@@ -133,31 +148,48 @@ while True:
         if not res:
             raise Exception("Empty or malformed response from LLM")
             
-        thought = res.get("thought", "...")
-        action = res.get("action", "wait")
-        args = res.get("args", {})
+        res_lower = {k.lower(): v for k, v in res.items()}
+            
+        thought = res_lower.get("thought", "...")
+        action = str(res_lower.get("action", "wait")).lower()
+        args = res_lower.get("args", {})
         
         print(f"[{agent_name}] 🤔 THOUGHT: {thought}")
         print(f"[{agent_name}] ⚡ ACTION: {action} {args}")
         
+        def check_res(r, act):
+            if r.status_code >= 400:
+                print(f"[{agent_name}] ❌ API REJECTED {act}: {r.status_code} - {r.text}")
+                return False
+            return True
+        
         if action == "create_card":
-            requests.post(f"{api_url}/cards", json=args)
+            r = requests.post(f"{api_url}/cards", json=args)
+            check_res(r, "create_card")
         elif action == "update_card":
             cid = args.pop("card_id", None)
-            if cid: requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+            if cid: 
+                r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+                check_res(r, "update_card")
         elif action == "delete_card":
             cid = args.get("card_id")
-            if cid: requests.delete(f"{api_url}/cards/{cid}")
+            if cid: 
+                r = requests.delete(f"{api_url}/cards/{cid}")
+                check_res(r, "delete_card")
         elif action == "post_comment":
             cid = args.get("card_id")
             content = args.get("content")
             if cid and content:
-                requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
+                r = requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
+                check_res(r, "post_comment")
         elif action == "create_column":
-            requests.post(f"{api_url}/columns", json=args)
+            r = requests.post(f"{api_url}/columns", json=args)
+            check_res(r, "create_column")
         elif action == "delete_column":
             cid = args.get("column_id")
-            if cid: requests.delete(f"{api_url}/columns/{cid}")
+            if cid: 
+                r = requests.delete(f"{api_url}/columns/{cid}")
+                check_res(r, "delete_column")
         elif action == "wait":
             print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
             time.sleep(pulse_interval)

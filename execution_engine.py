@@ -146,6 +146,20 @@ class SubprocessAdapter(ExecutionAdapter):
 
     async def kill_process(self, agent_proc):
         try:
+            if os.name == 'nt':
+                # On Windows, create_subprocess_shell leaves orphan processes if only the shell is killed.
+                # Use taskkill /T (tree) /F (force) to ensure everything dies.
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        "taskkill", "/F", "/T", "/PID", str(agent_proc.process.pid),
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE
+                    )
+                    await proc.wait()
+                    return True
+                except Exception as e:
+                    logger.debug(f"Taskkill failed (maybe already dead): {e}")
+            
             agent_proc.process.terminate()
             try:
                 await asyncio.wait_for(agent_proc.process.wait(), timeout=5.0)

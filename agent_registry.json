@@ -559,5 +559,157 @@
                 "default": 60
             }
         }
+    },
+    {
+        "id": "openclaw-core",
+        "name": "OpenClaw",
+        "version": "1.2.0",
+        "description": "Autonomous coding agent powered by Claude. Reads repo context, writes code, creates PRs.",
+        "github_url": "https://github.com/TheSandemon/OpenClaw",
+        "support_url": "https://github.com/TheSandemon/OpenClaw",
+        "license": "MIT",
+        "icon": "\ud83e\udd9e",
+        "installation": {
+            "method": "git_clone",
+            "setup_commands": [
+                "npm install"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/openclaw-core",
+            "command": "python worker.py",
+            "env_vars_required": []
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "You are OpenClaw. Complete tasks efficiently."
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
+            }
+        }
+    },
+    {
+        "id": "gemini-cli-agent",
+        "name": "Gemini CLI",
+        "version": "2.1.0",
+        "description": "Google's Gemini-powered CLI agent. Multi-modal reasoning with code generation.",
+        "github_url": "https://github.com/google-gemini/gemini-cli",
+        "support_url": "https://github.com/google-gemini/gemini-cli",
+        "license": "Apache-2.0",
+        "icon": "\ud83d\udc8e",
+        "installation": {
+            "method": "npm_global",
+            "setup_commands": [
+                "npm install -g @google/gemini-cli"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/gemini-cli-agent",
+            "command": "python worker.py",
+            "env_vars_required": []
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "You are Gemini CLI. Complete tasks efficiently."
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
+            }
+        }
+    },
+    {
+        "id": "claude-code-agent",
+        "name": "Claude Code",
+        "version": "1.0.0",
+        "description": "Anthropic's agentic coding tool. Terminal-native with full project context.",
+        "github_url": "https://github.com/anthropics/claude-code",
+        "support_url": "https://github.com/anthropics/claude-code",
+        "license": "Apache-2.0",
+        "icon": "\ud83e\udde0",
+        "installation": {
+            "method": "npm_global",
+            "setup_commands": [
+                "npm install -g @anthropic-ai/claude-code"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/claude-code-agent",
+            "command": "python worker.py",
+            "env_vars_required": []
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "You are Claude Code. Complete tasks efficiently."
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
+            }
+        }
+    },
+    {
+        "id": "codex-agent",
+        "name": "OpenAI Codex CLI",
+        "version": "0.9.0",
+        "description": "OpenAI's lightweight coding agent. Runs in your terminal with sandboxed execution.",
+        "github_url": "https://github.com/openai/codex",
+        "support_url": "https://github.com/openai/codex",
+        "license": "Apache-2.0",
+        "icon": "\ud83e\udd16",
+        "installation": {
+            "method": "npm_global",
+            "setup_commands": [
+                "npm install -g @openai/codex"
+            ]
+        },
+        "execution": {
+            "working_dir": "./agents/codex-agent",
+            "command": "python worker.py",
+            "env_vars_required": []
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "You are OpenAI Codex CLI. Complete tasks efficiently."
+            },
+            "work_dir": {
+                "type": "text",
+                "label": "Workspace Path (Local or URL)",
+                "default": "./"
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 60
+            }
+        }
     }
 ]

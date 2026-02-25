@@ -30,7 +30,7 @@ async function loadColumns() {
 }
 
 async function loadCards() {
-    try { const res = await fetch('/api/cards'); if (!res.ok) throw 0; cards = await res.json(); updateGlowEffects(); }
+    try { const res = await fetch('/api/cards'); if (!res.ok) throw 0; cards = await res.json(); if (typeof updateGlowEffects === 'function') updateGlowEffects(); }
     catch (e) { console.error('Error loading cards:', e); showToast('Failed to load cards'); }
 }
 

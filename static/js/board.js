@@ -325,12 +325,16 @@ async function saveCardDetails() {
     await fetch(`/api/cards/${currentCardId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     closeModal('cardDetailModal');
     if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
+    await loadCards();
+    renderBoard();
 }
 
 async function deleteCurrentCard() {
     if (!confirm('Delete this card?')) return;
     await fetch(`/api/cards/${currentCardId}`, { method: 'DELETE' });
     closeModal('cardDetailModal');
+    await loadCards();
+    renderBoard();
 }
 
 async function stopCurrentAgent() {

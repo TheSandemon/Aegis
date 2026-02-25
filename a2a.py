@@ -79,7 +79,8 @@ async def receive_a2a_message(message: A2AMessage):
             title=message.payload.title,
             description=description,
             column="Inbox",
-            assignee=None
+            assignee=None,
+            priority=message.payload.priority
         )
 
         await manager.broadcast({"type": "card_created", "card": new_card})

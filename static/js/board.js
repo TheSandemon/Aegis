@@ -184,6 +184,8 @@ async function createCard() {
     closeModal('newCardModal');
     document.getElementById('cardTitle').value = '';
     document.getElementById('cardDescription').value = '';
+    await loadCards();
+    renderBoard();
 }
 
 let currentInstanceId = null;

@@ -348,6 +348,8 @@ async function stopCurrentAgent() {
         document.getElementById('pauseBtn').style.display = 'none';
         document.getElementById('resumeBtn').style.display = 'none';
         document.getElementById('injectSection').style.display = 'none';
+        await loadCards();
+        renderBoard();
     } else { showToast('Failed to stop agent'); }
 }
 

@@ -443,7 +443,7 @@ async def get_config():
 async def update_config(updates: dict):
     global CONFIG
     CONFIG.update(updates)
-    with open(CONFIG_PATH, 'v' if sys.version_info < (3,0) else 'w', encoding="utf-8") as f:
+    with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
         json.dump(CONFIG, f, indent=2)
     return {"success": True, "config": CONFIG}
 

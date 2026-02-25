@@ -346,12 +346,14 @@ class ExecutionEngine:
                 logger.warning(f"Failed to load instance env_vars: {e}")
 
         # Set Aegis specific variables overriding everything else
-        env["AEGIS_AGENT_ID"] = agent_id
-        env["AEGIS_CARD_ID"] = str(card_id)
-        env["AEGIS_CARD_TITLE"] = card.get("title", "")
-        env["AEGIS_CARD_DESCRIPTION"] = card.get("description", "")
-        env["AEGIS_AGENT_PROFILE"] = agent_config.get("profile", "")
-        env["AEGIS_API_URL"] = os.environ.get("AEGIS_API_URL", "http://localhost:8080/api")
+        env["AEGIS_AGENT_ID"] = str(agent_id or "")
+        env["AEGIS_CARD_ID"] = str(card_id or "")
+        env["AEGIS_CARD_TITLE"] = str(card.get("title") or "")
+        env["AEGIS_CARD_DESCRIPTION"] = str(card.get("description") or "")
+        env["AEGIS_AGENT_PROFILE"] = str(agent_config.get("profile") or "")
+        env["AEGIS_API_URL"] = str(os.environ.get("AEGIS_API_URL", "http://localhost:8080/api"))
+        env["PYTHONUNBUFFERED"] = "1"
+        env["PYTHONUTF8"] = "1"
         if instance_id:
             env["AEGIS_INSTANCE_ID"] = instance_id
             env["AEGIS_INSTANCE_NAME"] = instance_name or ""
@@ -361,8 +363,8 @@ class ExecutionEngine:
                 instances = load_instances()
                 inst_meta = next((i for i in instances if i["instance_id"] == instance_id), None)
                 if inst_meta:
-                    env["AEGIS_SERVICE"] = inst_meta.get("service", "")
-                    env["AEGIS_MODEL"] = inst_meta.get("model", "")
+                    env["AEGIS_SERVICE"] = str(inst_meta.get("service") or "")
+                    env["AEGIS_MODEL"] = str(inst_meta.get("model") or "")
                     # Inject config schema values as AEGIS_CONFIG_* env vars
                     inst_config = inst_meta.get("config", {})
                     for ck, cv in inst_config.items():
@@ -370,7 +372,7 @@ class ExecutionEngine:
                         if isinstance(cv, list):
                             env[env_key] = ",".join(str(v) for v in cv)
                         else:
-                            env[env_key] = str(cv)
+                            env[env_key] = str(cv or "")
             except Exception as e:
                 logger.warning(f"Failed to load instance service/model: {e}")
 
@@ -378,6 +380,10 @@ class ExecutionEngine:
 
         # Resolve instance directory
         inst_dir = INSTANCES_DIR / instance_id if instance_id else None
+
+        with open("env_dump.txt", "w", encoding="utf-8") as f:
+            for k, v in env.items():
+                f.write(f"{k}: {type(v)} = {v}\n")
 
         try:
             # Update card status
@@ -421,11 +427,15 @@ class ExecutionEngine:
             return agent_proc.to_dict()
 
         except Exception as e:
-            logger.error(f"Failed to start '{key}': {e}")
+            import traceback
+            err_msg = traceback.format_exc()
+            with open("crash.log", "w", encoding="utf-8") as _f:
+                _f.write(err_msg)
+            logger.error(f"Failed to start '{key}': {e}\n{err_msg}")
             store.update_card(card_id, status="error")
             if self.broadcaster:
                 await self.broadcaster({"type": "card_updated", "card": store.get_card(card_id)})
-            return {"error": str(e), "status": "error"}
+            return {"error": str(e) or "Unknown Error (see backend logs)", "status": "error"}
 
     async def _wait_for_completion(self, agent_proc: AgentProcess, card_id: int,
                                    store, adapter: ExecutionAdapter):

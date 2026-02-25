@@ -32,6 +32,9 @@ try:
     pulse_interval = int(os.environ.get("AEGIS_CONFIG_PULSE_INTERVAL", "30"))
 except ValueError:
     pulse_interval = 30
+    
+# Unique token used to fetch live configs
+instance_id = os.environ.get("AEGIS_INSTANCE_ID", "")
 
 service = os.environ.get("AEGIS_SERVICE", "")
 model = os.environ.get("AEGIS_MODEL", "")
@@ -89,9 +92,26 @@ def prompt_llm(system_prompt, user_text):
 print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
 print(f"[{agent_name}] 🎯 GOAL: {goal}")
 
+# Startup delay block
+try:
+    if os.environ.get("AEGIS_CONFIG_STARTUP_DELAY", "False").lower() == "true":
+        print(f"[{agent_name}] ⏳ Startup delay enabled. Waiting {pulse_interval}s...")
+        time.sleep(pulse_interval)
+except Exception as e:
+    pass
+
 while True:
-    print(f"\\n[{agent_name}] 📡 PULSE: Fetching board state & instructions...")
     try:
+        # Fetch live configuration updates
+        if instance_id:
+            try:
+                conf = requests.get(f"{api_url}/instances/{instance_id}/config").json().get("config", {})
+                if "goals" in conf: goal = conf["goals"]
+                if "pulse_interval" in conf: pulse_interval = int(conf["pulse_interval"])
+            except:
+                pass
+
+        print(f"\\n[{agent_name}] 📡 PULSE: Fetching board state & instructions...")
         cards = requests.get(f"{api_url}/cards").json()
         cols = requests.get(f"{api_url}/columns").json()
         raw_prompt = requests.get(f"{api_url}/system_prompt").json().get("prompt", "")
@@ -172,10 +192,42 @@ while True:
                 if cid: 
                     r = requests.delete(f"{api_url}/columns/{cid}")
                     check_res(r, "delete_column")
+            elif action == "list_dir":
+                p = args.get("path", ".")
+                try:
+                    res = os.listdir(p)
+                    print(f"[{agent_name}] 📁 LIST_DIR: {res}")
+                except Exception as e:
+                    print(f"[{agent_name}] ❌ LIST_DIR ERROR: {e}")
+            elif action == "read_file":
+                p = args.get("path")
+                if p:
+                    try:
+                        with open(p, "r", encoding="utf-8") as rf:
+                            res = rf.read()
+                        print(f"[{agent_name}] 📄 READ_FILE: read {len(res)} characters")
+                    except Exception as e:
+                        print(f"[{agent_name}] ❌ READ_FILE ERROR: {e}")
+            elif action == "write_file":
+                p = args.get("path")
+                c = args.get("content")
+                if p and c is not None:
+                    try:
+                        with open(p, "w", encoding="utf-8") as wf:
+                            wf.write(c)
+                        print(f"[{agent_name}] 💾 WRITE_FILE: Saved {p}")
+                    except Exception as e:
+                        print(f"[{agent_name}] ❌ WRITE_FILE ERROR: {e}")
             elif action == "wait":
                 print(f"[{agent_name}] 💤 Waiting... reason: {args.get('reason', 'None')}")
                 break # Stop processing further actions if wait is called
                 
+        # Send pulse websocket event so UI can show countdown
+        try:
+            requests.post(f"{api_url}/instances/{instance_id}/pulse", json={"interval": pulse_interval})
+        except:
+            pass
+            
         print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")
         time.sleep(pulse_interval)
         
@@ -188,7 +240,7 @@ for agent in registry:
     # 1. Update execution to use Python worker
     agent["execution"] = {
         "working_dir": f"./agents/{agent['id']}",
-        "command": "python worker.py",
+        "command": "python -u worker.py",
         "env_vars_required": []
     }
     
@@ -234,6 +286,13 @@ for agent in registry:
             "type": "number",
             "label": "Pulse Interval (Seconds)",
             "default": 30 if agent.get("is_orchestrator") else 60
+        }
+    if "startup_delay" not in new_schema:
+        new_schema["startup_delay"] = {
+            "type": "boolean",
+            "label": "Delay First Action",
+            "default": False,
+            "description": "Wait one pulse interval before taking the first action."
         }
         
     agent["config_schema"] = new_schema

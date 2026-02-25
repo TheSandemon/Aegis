@@ -16,7 +16,7 @@
         },
         "execution": {
             "working_dir": "./agents/openclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -68,6 +68,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -88,7 +94,7 @@
         },
         "execution": {
             "working_dir": "./agents/memu-bot",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -129,6 +135,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -149,7 +161,7 @@
         },
         "execution": {
             "working_dir": "./agents/picoclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -185,6 +197,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -205,7 +223,7 @@
         },
         "execution": {
             "working_dir": "./agents/nanoclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -249,6 +267,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -270,7 +294,7 @@
         },
         "execution": {
             "working_dir": "./agents/trustclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -315,6 +339,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -335,7 +365,7 @@
         },
         "execution": {
             "working_dir": "./agents/zeroclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -376,6 +406,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -396,7 +432,7 @@
         },
         "execution": {
             "working_dir": "./agents/nanobot",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -441,6 +477,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -461,7 +503,7 @@
         },
         "execution": {
             "working_dir": "./agents/ironclaw",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "permissions": [
@@ -507,6 +549,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     },
@@ -527,7 +575,7 @@
         },
         "execution": {
             "working_dir": "./agents/openclaw-core",
-            "command": "python worker.py",
+            "command": "python -u worker.py",
             "env_vars_required": []
         },
         "config_schema": {
@@ -545,6 +593,12 @@
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
                 "default": 60
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before taking the first action."
             }
         }
     }

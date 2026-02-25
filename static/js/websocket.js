@@ -109,5 +109,10 @@ function handleWebSocketMessage(data) {
         case 'agent_resumed':
             showToast(`▶ ${data.agent_id} resumed`);
             break;
+        case 'agent_pulse':
+            if (window.startPulseCountdown) {
+                window.startPulseCountdown(data.instance_id, data.interval);
+            }
+            break;
     }
 }

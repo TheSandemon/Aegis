@@ -386,7 +386,7 @@ function navigateTo(view) { window.location.hash = '#' + view; }
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
-    document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('click', e => { if (e.target === o) o.classList.remove('active'); }));
+    document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('mousedown', e => { if (e.target === o) o.classList.remove('active'); }));
     document.addEventListener('keydown', e => {
         if (e.key === 'Escape') document.querySelectorAll('.modal-overlay.active').forEach(m => m.classList.remove('active'));
         if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;

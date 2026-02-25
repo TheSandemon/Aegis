@@ -207,9 +207,9 @@ class AegisStore:
             if not row:
                 return None
             card = dict(row)
-            card["comments"] = json.loads(card.get("comments", "[]"))
-            card["logs"] = json.loads(card.get("logs", "[]"))
-            card["depends_on"] = json.loads(card.get("depends_on", "[]"))
+            card["comments"] = json.loads(card.get("comments") or "[]")
+            card["logs"] = json.loads(card.get("logs") or "[]")
+            card["depends_on"] = json.loads(card.get("depends_on") or "[]")
             return card
 
     def get_cards(self, column=None):
@@ -222,9 +222,9 @@ class AegisStore:
             cards = []
             for row in rows:
                 card = dict(row)
-                card["comments"] = json.loads(card.get("comments", "[]"))
-                card["logs"] = json.loads(card.get("logs", "[]"))
-                card["depends_on"] = json.loads(card.get("depends_on", "[]"))
+                card["comments"] = json.loads(card.get("comments") or "[]")
+                card["logs"] = json.loads(card.get("logs") or "[]")
+                card["depends_on"] = json.loads(card.get("depends_on") or "[]")
                 cards.append(card)
             return cards
 
@@ -795,6 +795,28 @@ async def update_instance_settings(instance_id: str, updates: dict):
     save_instances(instances)
     await manager.broadcast({"type": "instance_updated", "instance": inst})
     return {"success": True, "instance": inst}
+
+@app.get("/api/instances/{instance_id}/config")
+async def get_instance_config(instance_id: str):
+    """Retrieve the live configuration (goals, interval) for a worker instance."""
+    instances = load_instances()
+    inst = next((i for i in instances if i["instance_id"] == instance_id), None)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+    return {"config": inst.get("config", {})}
+
+class PulseRequest(BaseModel):
+    interval: int
+
+@app.post("/api/instances/{instance_id}/pulse")
+async def broadcast_pulse(instance_id: str, req: PulseRequest):
+    """Broadcasts to the UI that a worker finished its action loop and is sleeping."""
+    await manager.broadcast({
+        "type": "agent_pulse",
+        "instance_id": instance_id,
+        "interval": req.interval
+    })
+    return {"success": True}
 
 @app.post("/api/instances/{instance_id}/start")
 async def start_instance_endpoint(instance_id: str):

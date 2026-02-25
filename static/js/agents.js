@@ -43,7 +43,8 @@ function renderInstancesSidebar() {
                             <div class="dot"></div>
                             <span>${inst.runtime_status ? inst.runtime_status.charAt(0).toUpperCase() + inst.runtime_status.slice(1) : 'Stopped'}</span>
                         </div>
-                        ${isRunning ? `<div class="agent-activity-indicator" id="activity-${inst.instance_id}" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">💤 Idle</div>` : ''}
+                        ${isRunning ? `<div class="agent-activity-indicator" id="activity-${inst.instance_id}" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">💤 Idle</div>
+                        <div id="pulse-${inst.instance_id}" style="font-size: 0.65rem; color: var(--primary); margin-top: 2px; font-weight: bold;"></div>` : ''}
                     </div>
                 </div>
                 <div class="agent-params">
@@ -100,7 +101,7 @@ let terminalPollInterval = null;
 async function viewInstanceLogs(instanceId) {
     document.getElementById('terminalModal').classList.add('active');
     document.getElementById('terminalTitle').textContent = `Terminal: ${instanceId}`;
-    const output = document.getElementById('terminalOutput');
+    const output = document.getElementById('workerTerminalOutput');
     output.textContent = 'Connecting to terminal...';
 
     // Clear any existing poll
@@ -116,7 +117,7 @@ async function viewInstanceLogs(instanceId) {
             // Check if scroll is at bottom before update
             const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
 
-            output.textContent = logs.length > 0 ? logs.join('\\n') : 'No output yet.';
+            output.textContent = logs.length > 0 ? logs.join('\n') : 'No output yet.';
 
             // Auto-scroll if it was previously at bottom
             if (isScrolledToBottom) {
@@ -141,6 +142,29 @@ function closeTerminal() {
         terminalPollInterval = null;
     }
 }
+
+// ─── Pulse Countdown Logic ────────────────────────────────────────────────
+let pulseTimers = {};
+
+window.startPulseCountdown = function (instanceId, secondsCount) {
+    const el = document.getElementById(`pulse-${instanceId}`);
+    if (!el) return;
+
+    if (pulseTimers[instanceId]) clearInterval(pulseTimers[instanceId]);
+
+    let remaining = secondsCount;
+    el.innerHTML = `⏱️ Pulse in ${remaining}s...`;
+
+    pulseTimers[instanceId] = setInterval(() => {
+        remaining--;
+        if (remaining <= 0) {
+            clearInterval(pulseTimers[instanceId]);
+            el.innerHTML = '⚡ Pulsing...';
+        } else {
+            el.innerHTML = `⏱️ Pulse in ${remaining}s...`;
+        }
+    }, 1000);
+};
 
 // ─── Service & Model Definitions ──────────────────────────────────────────
 

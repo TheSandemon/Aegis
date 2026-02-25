@@ -125,7 +125,7 @@ def _check_permission(request: Request, required_perm: str):
     """Verifies that the calling agent has the required permission."""
     from main import AGENT_REGISTRY
     
-    agent_id = request.headers.get("x-aegis-agent")
+    agent_id = request.headers.get("X-Aegis-Agent")
     if not agent_id:
         return  # Allow if no agent header is provided (e.g. human/UI)
         

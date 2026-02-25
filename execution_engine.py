@@ -381,10 +381,6 @@ class ExecutionEngine:
         # Resolve instance directory
         inst_dir = INSTANCES_DIR / instance_id if instance_id else None
 
-        with open("env_dump.txt", "w", encoding="utf-8") as f:
-            for k, v in env.items():
-                f.write(f"{k}: {type(v)} = {v}\n")
-
         try:
             # Update card status
             store.update_card(card_id, status="running")

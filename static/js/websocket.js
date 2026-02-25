@@ -95,9 +95,11 @@ function handleWebSocketMessage(data) {
             appendLogEntry(data.card_id, data.entry);
             break;
         case 'agent_paused':
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             showToast(`⏸ ${data.agent_id} paused`);
             break;
         case 'agent_resumed':
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             showToast(`▶ ${data.agent_id} resumed`);
             break;
         case 'agent_pulse':

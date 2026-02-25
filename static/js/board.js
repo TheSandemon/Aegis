@@ -134,6 +134,8 @@ async function handleDrop(e) {
     const card = cards.find(c => c.id === draggedCardId);
     if (card && card.column !== column) {
         await fetch(`/api/cards/${card.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ column }) });
+        await loadCards();
+        renderBoard();
     }
     draggedCardId = null;
 }

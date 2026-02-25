@@ -353,7 +353,7 @@ async function stopCurrentAgent() {
 
 async function approveCurrentCard() {
     const res = await fetch(`/api/cards/${currentCardId}/approve`, { method: 'POST' });
-    if (res.ok) { showToast('✅ Card approved!'); document.getElementById('approveBtn').style.display = 'none'; closeModal('cardDetailModal'); }
+    if (res.ok) { showToast('✅ Card approved!'); document.getElementById('approveBtn').style.display = 'none'; closeModal('cardDetailModal'); await loadCards(); renderBoard(); }
     else { const err = await res.json(); showToast(`⚠️ ${err.detail || 'Approval failed'}`); }
 }
 

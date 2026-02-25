@@ -46,29 +46,18 @@ function handleWebSocketMessage(data) {
             showToast(`Card assigned to ${data.agent}`);
             break;
         case 'agent_started':
-            if (agentStatus[data.agent_id]) {
-                agentStatus[data.agent_id].status = 'running';
-                agentStatus[data.agent_id].current_card = { id: data.card_id };
-                renderAgentMenu();
-            }
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             break;
         case 'agent_stopped':
         case 'agent_status_changed':
-            if (agentStatus[data.agent_id]) {
-                agentStatus[data.agent_id].status = data.status || 'stopped';
-                if (data.status !== 'running') delete agentStatus[data.agent_id].current_card;
-                renderAgentMenu();
-            }
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             // Refresh runtimes if panel is visible
             if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
                 loadActiveRuntimes();
             }
             break;
         case 'agent_params_updated':
-            if (agentStatus[data.agent_id]) {
-                agentStatus[data.agent_id].params = data.params;
-                renderAgentMenu();
-            }
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             break;
         case 'agent_log':
             const logEl = document.getElementById(`logs-${data.agent_id}`);

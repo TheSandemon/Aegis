@@ -43,6 +43,8 @@ function handleWebSocketMessage(data) {
             renderBoard();
             break;
         case 'card_assigned':
+            // Refresh cards to show the new assignee
+            loadCards();
             showToast(`Card assigned to ${data.agent}`);
             break;
         case 'agent_started':

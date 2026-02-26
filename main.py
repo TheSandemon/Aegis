@@ -933,26 +933,8 @@ async def submit_prompt(req: PromptSubmit):
 
 @app.get("/api/registry")
 async def get_registry():
-    """Serves the agent registry catalog (templates)."""
-    registry = []
-    for agent in AGENT_REGISTRY:
-        entry = {**agent}
-        # Check both template dir and legacy agents dir
-        template_dir = TEMPLATES_DIR / agent["id"]
-        legacy_dir = AGENTS_DIR / agent["id"]
-        entry["installed"] = template_dir.exists() or legacy_dir.exists()
-        registry.append(entry)
-    return registry
-
-
-@app.post("/api/agents/install/{agent_id}")
-async def install_agent_endpoint(agent_id: str):
-    """Clones the agent repo and runs setup commands."""
-    entry = next((a for a in AGENT_REGISTRY if a["id"] == agent_id), None)
-    if not entry:
-        raise HTTPException(status_code=404, detail=f"Agent '{agent_id}' not found in registry")
-    result = await install_agent(agent_id, entry)
-    return result
+    """Serves the unified agent worker template."""
+    return AGENT_REGISTRY
 
 
 @app.post("/api/agents/start/{agent_id}")

@@ -394,18 +394,18 @@ function collectConfigValues(containerId) {
 
 async function openCreateWorkerModal() {
     document.getElementById('createWorkerModal').classList.add('active');
+
+    // Explicitly fetch the registry to get the configuration schema for the unified worker
     try {
         const res = await fetch('/api/registry');
         registryData = await res.json();
-        const select = document.getElementById('workerTemplate');
-        select.innerHTML = '<option value="">Select an agent type...</option>';
-        registryData.filter(a => a.installed).forEach(a => {
-            select.innerHTML += `<option value="${a.id}">${a.icon || '🤖'} ${escapeHtml(a.name)} (${a.id})</option>`;
-        });
-        if (registryData.filter(a => a.installed).length === 0) {
-            select.innerHTML += '<option value="" disabled>No templates installed. Visit Marketplace first.</option>';
-        }
-    } catch (e) { console.error('Failed to load registry', e); }
+    } catch (e) {
+        console.error('Failed to load registry', e);
+    }
+
+    // Default to aegis-worker
+    const templateId = 'aegis-worker';
+
     // Clear fields
     document.getElementById('workerName').value = '';
     document.getElementById('workerModelCustom').value = '';
@@ -413,20 +413,13 @@ async function openCreateWorkerModal() {
     document.getElementById('unifiedApiKey-create').value = '';
     document.getElementById('feedback-create-apikey').innerHTML = '';
     document.getElementById('modelGroup-create').style.display = 'none';
-    document.getElementById('createConfigSection').innerHTML = '';
-}
 
-function onTemplateChange() {
-    const templateId = document.getElementById('workerTemplate').value;
-    const tmpl = registryData.find(a => a.id === templateId);
-    if (!tmpl) return;
-
-    // Render config schema
+    // Render config schema for the default worker
     renderConfigSchema(templateId, 'createConfigSection');
 }
 
 async function createWorkerInstance() {
-    const templateId = document.getElementById('workerTemplate').value;
+    const templateId = 'aegis-worker';
     const instanceName = document.getElementById('workerName').value.trim();
     const service = document.getElementById('workerService').value;
 
@@ -557,65 +550,12 @@ async function saveInstanceSettings() {
     } catch (e) { showToast('Error saving settings'); }
 }
 
-// ─── Marketplace (kept for install flow) ──────────────────────────────
-
-async function openMarketplaceModal() { document.getElementById('marketplaceModal').classList.add('active'); await loadRegistry(); }
-
-function switchMarketTab(tabId, btn) {
-    document.querySelectorAll('#marketplaceModal .tab-bar button').forEach(b => b.classList.remove('active'));
-    document.querySelectorAll('#marketplaceModal .tab-content').forEach(t => t.classList.remove('active'));
-    btn.classList.add('active');
-    document.getElementById('tab-' + tabId).classList.add('active');
-    if (tabId === 'runtimes') loadActiveRuntimes();
-}
-
-async function loadRegistry() {
-    try { const res = await fetch('/api/registry'); registryData = await res.json(); renderRegistry(registryData); }
-    catch (e) { document.getElementById('registryGrid').textContent = 'Failed to load registry'; }
-}
-
-function renderRegistry(agents) {
-    document.getElementById('registryGrid').innerHTML = agents.map(a => `
-        <div class="agent-card">
-            <div class="agent-card-header">
-                <span class="agent-icon">${a.icon || '🤖'}</span>
-                <div class="agent-card-info"><h4>${escapeHtml(a.name)}</h4><small>v${a.version} · ${a.license}</small></div>
-                ${a.installed ? '<span class="badge badge-installed">Installed</span>' : ''}
-            </div>
-            <div class="agent-card-desc">${escapeHtml(a.description)}</div>
-            <div class="agent-card-actions">
-                <a href="${a.support_url}" target="_blank" style="text-decoration:none;"><button class="secondary" style="font-size:0.75rem;">⭐ GitHub</button></a>
-                ${!a.installed ? `<button onclick="installAgent('${a.id}')">📥 Install</button>` : `<span style="color:var(--text-secondary);font-size:0.75rem;">✓ Ready to instance</span>`}
-            </div>
-        </div>`).join('');
-}
-
-async function installAgent(agentId) {
-    showToast(`Installing ${agentId}...`);
-    try {
-        const res = await fetch(`/api/agents/install/${agentId}`, { method: 'POST' }); const d = await res.json();
-        showToast(d.status === 'installed' || d.status === 'already_installed' ? `✅ ${agentId} installed!` : `⚠️ ${d.status}`);
-        await loadRegistry();
-    } catch (e) { showToast('Install failed'); }
-}
-
-async function loadActiveRuntimes() {
-    try {
-        const res = await fetch('/api/agents/active'); const runtimes = await res.json();
-        const container = document.getElementById('runtimesList');
-        if (runtimes.length === 0) { container.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💤</div><div class="empty-state-text">No active runtimes.</div></div>'; return; }
-        container.innerHTML = runtimes.map(r => {
-            return `<div class="runtime-row"><span class="agent-icon">${r.instance_name ? '⚙️' : '🤖'}</span><div class="runtime-info"><h4>${r.instance_name || r.agent_id}</h4><small>PID: ${r.pid} · <span class="badge badge-${r.status}">${r.status}</span> · ${r.log_count} logs</small></div>${r.status === 'running' ? `<button class="danger" style="font-size:0.75rem;" onclick="stopInstance('${r.instance_id || r.agent_id}')">⏹</button>` : ''}</div>`;
-        }).join('');
-    } catch (e) { document.getElementById('runtimesList').textContent = 'Failed to load runtimes'; }
-}
-
 // Glow effects
 function updateGlowEffects() {
     document.querySelectorAll('.card').forEach(c => { c.classList.remove('agent-active'); c.style.removeProperty('--agent-color'); });
 }
 
-// Called on page load — renamed from loadAgents
+// Called on page load
 async function loadAgents() { await loadInstances(); }
 
 function updateAgentParam(agentId, key, value) { /* Legacy no-op */ }

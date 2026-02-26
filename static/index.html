@@ -161,6 +161,7 @@
             <div class="view-nav">
                 <button class="active" data-view="board" onclick="navigateTo('board')">📋 Board</button>
                 <button data-view="telemetry" onclick="navigateTo('telemetry')">📊 Telemetry</button>
+                <button data-view="integrations" onclick="navigateTo('integrations')">🔗 Integrations</button>
             </div>
         </div>
         <div class="header-actions">
@@ -229,6 +230,20 @@
                 </div>
             </div>
         </div>
+
+        <!-- Integrations View -->
+        <div class="telemetry-view" id="integrationsView" style="display:none;">
+            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">🔗 External Integrations</h2>
+            <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
+                Column integrations with external services. Link a column to GitHub Issues, Jira, Linear, or Firebase Firestore when creating it.
+            </p>
+            <div id="integrationsList">
+                <div class="empty-state">
+                    <div class="empty-state-icon">🔗</div>
+                    <div class="empty-state-text">Loading integrations...</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     <!-- Marketplace Modal -->
@@ -255,13 +270,55 @@
 
     <!-- New Column Modal -->
     <div class="modal-overlay" id="newColumnModal">
-        <div class="modal" style="max-width:400px;">
+        <div class="modal" style="max-width:480px;">
             <div class="modal-header">
                 <h3>Add Column</h3><button class="modal-close" onclick="closeModal('newColumnModal')">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="form-group"><label>Column Name *</label><input type="text" id="columnName"
-                        placeholder="e.g. Backlog"></div>
+                <div class="form-group">
+                    <label>Column Name *</label>
+                    <input type="text" id="columnName" placeholder="e.g. Backlog">
+                </div>
+
+                <!-- Integration toggle -->
+                <div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;">
+                    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+                        <input type="checkbox" id="enableIntegration" onchange="toggleIntegrationSection()">
+                        <span>🔗 Link to External Service</span>
+                    </label>
+                </div>
+
+                <!-- Collapsible integration fields -->
+                <div id="integrationSection" style="display:none;margin-top:1rem;">
+                    <div class="form-group">
+                        <label>Service</label>
+                        <select id="integrationType" onchange="onIntegrationTypeChange()">
+                            <option value="">Select a service...</option>
+                            <option value="github">GitHub Issues</option>
+                            <option value="jira">Jira</option>
+                            <option value="linear">Linear</option>
+                            <option value="firestore">Firebase Firestore</option>
+                        </select>
+                    </div>
+                    <div class="form-group">
+                        <label>Sync Mode</label>
+                        <select id="integrationMode">
+                            <option value="read">Read only (pull from service → Aegis)</option>
+                            <option value="write">Write only (push Aegis changes → service)</option>
+                            <option value="read_write">Read + Write (bidirectional)</option>
+                        </select>
+                    </div>
+                    <!-- Dynamic credential fields injected here by JS -->
+                    <div id="integrationCredFields"></div>
+                    <div class="form-group">
+                        <label>Poll interval (ms)</label>
+                        <input type="number" id="integrationSyncInterval" value="60000" min="5000" step="1000">
+                    </div>
+                    <div class="form-group">
+                        <label>Webhook secret <span style="font-size:0.75rem;color:var(--text-secondary)">(optional — for HMAC signature verification)</span></label>
+                        <input type="password" id="integrationWebhookSecret" placeholder="Leave blank if not using webhooks">
+                    </div>
+                </div>
             </div>
             <div class="modal-footer">
                 <button class="secondary" onclick="closeModal('newColumnModal')">Cancel</button>
@@ -486,6 +543,7 @@
     <script src="/static/js/websocket.js?v=3"></script>
     <script src="/static/js/agents.js?v=3"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
+    <script src="/static/js/integrations.js?v=1"></script>
     <script src="/static/js/board.js?v=3"></script>
 </body>
 

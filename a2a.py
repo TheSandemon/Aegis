@@ -93,8 +93,37 @@ async def receive_a2a_message(message: A2AMessage):
         }
 
     elif message.type == "task.status":
-        # Future: allow agents to report status updates
-        raise HTTPException(status_code=501, detail="task.status not yet implemented")
+        # Allow agents to report their current status (Thinking, Acting, etc)
+        from main import store, manager, engine
+        
+        # Determine the target (card or instance)
+        card_id = message.payload.metadata.get("card_id") if message.payload.metadata else None
+        instance_id = message.payload.metadata.get("instance_id") if message.payload.metadata else None
+        
+        status_text = message.payload.title # Using title as the status label
+        
+        # Broadcast the update
+        await manager.broadcast({
+            "type": "agent_activity",
+            "sender": message.sender,
+            "status": status_text,
+            "card_id": card_id,
+            "instance_id": instance_id,
+            "timestamp": datetime.now().isoformat()
+        })
+        
+        # If there's a card ID, persist the activity to the database
+        if card_id:
+            store.update_card(card_id, activity=status_text)
+        
+        # If there's a running process, update its activity state
+        key = instance_id or message.sender
+        if key in engine.active:
+            # We'll need to add this attribute to AgentProcess in main.py/execution_engine.py
+            setattr(engine.active[key], "activity", status_text)
+
+        logger.info(f"A2A: Status update from '{message.sender}': {status_text}")
+        return {"status": "accepted", "message": f"Status updated to '{status_text}'"}
 
     else:
         raise HTTPException(status_code=400, detail=f"Unknown A2A message type: {message.type}")

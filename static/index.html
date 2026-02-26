@@ -170,7 +170,6 @@
                     oninput="filterCards()">
                 <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
             </div>
-            <button class="secondary" onclick="openMarketplaceModal()">🏪 Marketplace</button>
             <button class="secondary" onclick="openNewColumnModal()">+ Add Column</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
             <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
@@ -235,7 +234,8 @@
         <div class="telemetry-view" id="integrationsView" style="display:none;">
             <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">🔗 External Integrations</h2>
             <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
-                Column integrations with external services. Link a column to GitHub Issues, Jira, Linear, or Firebase Firestore when creating it.
+                Column integrations with external services. Link a column to GitHub Issues, Jira, Linear, or Firebase
+                Firestore when creating it.
             </p>
             <div id="integrationsList">
                 <div class="empty-state">
@@ -246,27 +246,7 @@
         </div>
     </div>
 
-    <!-- Marketplace Modal -->
-    <div class="modal-overlay" id="marketplaceModal">
-        <div class="modal" style="max-width:800px;width:95%;">
-            <div class="modal-header">
-                <h3>🏪 Agent Marketplace</h3><button class="modal-close"
-                    onclick="closeModal('marketplaceModal')">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div class="tab-bar">
-                    <button class="active" onclick="switchMarketTab('registry', this)">Registry</button>
-                    <button onclick="switchMarketTab('runtimes', this)">Active Runtimes</button>
-                </div>
-                <div class="tab-content active" id="tab-registry">
-                    <div class="marketplace-grid" id="registryGrid">Loading...</div>
-                </div>
-                <div class="tab-content" id="tab-runtimes">
-                    <div id="runtimesList">No active runtimes</div>
-                </div>
-            </div>
-        </div>
-    </div>
+
 
     <!-- New Column Modal -->
     <div class="modal-overlay" id="newColumnModal">
@@ -315,8 +295,10 @@
                         <input type="number" id="integrationSyncInterval" value="60000" min="5000" step="1000">
                     </div>
                     <div class="form-group">
-                        <label>Webhook secret <span style="font-size:0.75rem;color:var(--text-secondary)">(optional — for HMAC signature verification)</span></label>
-                        <input type="password" id="integrationWebhookSecret" placeholder="Leave blank if not using webhooks">
+                        <label>Webhook secret <span style="font-size:0.75rem;color:var(--text-secondary)">(optional —
+                                for HMAC signature verification)</span></label>
+                        <input type="password" id="integrationWebhookSecret"
+                            placeholder="Leave blank if not using webhooks">
                     </div>
                 </div>
             </div>
@@ -433,12 +415,7 @@
                     onclick="closeModal('createWorkerModal')">&times;</button>
             </div>
             <div class="modal-body">
-                <div class="form-group">
-                    <label>Agent Type</label>
-                    <select id="workerTemplate" onchange="onTemplateChange()">
-                        <option value="">Select an agent type...</option>
-                    </select>
-                </div>
+
                 <div class="form-group">
                     <label>Worker Name</label>
                     <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">

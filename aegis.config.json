@@ -15,30 +15,9 @@
     "Done"
   ],
   "agents": {
-    "architect": {
-      "binary": "openclaw",
-      "profile": "sys_arch",
+    "aegis-worker": {
       "enabled": true,
       "isolation": "subprocess"
-    },
-    "coder": {
-      "binary": "gemini-cli",
-      "profile": "dev_mode",
-      "enabled": true,
-      "isolation": "subprocess"
-    },
-    "researcher": {
-      "binary": "openclaw",
-      "profile": "research",
-      "enabled": false,
-      "isolation": "subprocess"
-    },
-    "security": {
-      "binary": "openclaw",
-      "profile": "security",
-      "enabled": false,
-      "isolation": "docker",
-      "docker_image": ""
     }
   },
   "orchestration_mode": "supervisor",

@@ -107,10 +107,14 @@ function renderCard(card, doneIds) {
         return `<span class="dep-badge ${resolved ? 'resolved' : ''}" title="Depends on #${d}">#${d} ${resolved ? '✓' : '⏳'}</span>`;
     }).join('')}</div>` : '';
 
+    const activityHtml = card.activity && card.activity !== 'idle' ?
+        `<div class="card-activity"><span class="activity-dot"></span>${escapeHtml(card.activity)}</div>` : '';
+
     return `
-        <div class="card" draggable="true" data-id="${card.id}">
+        <div class="card ${card.status === 'running' ? 'agent-active' : ''}" draggable="true" data-id="${card.id}">
             <div class="card-title">${escapeHtml(card.title)}</div>
             ${depHtml}
+            ${activityHtml}
             <div class="card-meta">
                 <div class="card-meta-left">
                     ${card.assignee ? `<span class="card-assignee">${card.assignee}</span>` : ''}

@@ -68,7 +68,7 @@ Core Workspace Mechanics:
 3. You MUST take action to achieve your goal. Do NOT just output text. Use the JSON tools provided.
 4. If your goal is to "create ideas in the inbox", you must use the 'create_card' tool and set the 'column' argument to 'Inbox' (or whatever column is requested).
 5. If you see a card you need to work on, use 'update_card' to move it, change its status, or claim it as the assignee.
-6. Use 'post_comment' to add notes to cards you are working on.
+6. Use 'post_comment' to add notes to cards you are working on. To pass context to another agent, simply mention the card ID in your comment or description like this: "@123" or "See @45 for details". This will automatically bundle card #45 into that agent's context window.
 7. Use 'wait' ONLY if you are truly blocked waiting for a human or another agent to do something.
 
 Available Actions (Tools):
@@ -124,7 +124,8 @@ class AegisStore:
                     logs TEXT DEFAULT '[]',
                     comments TEXT DEFAULT '[]',
                     depends_on TEXT DEFAULT '[]',
-                    priority TEXT DEFAULT 'normal'
+                    priority TEXT DEFAULT 'normal',
+                    activity TEXT DEFAULT 'idle'
                 )
             """)
             conn.execute("""
@@ -151,6 +152,10 @@ class AegisStore:
                 pass
             try:
                 conn.execute('ALTER TABLE cards ADD COLUMN priority TEXT DEFAULT "normal"')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN activity TEXT DEFAULT "idle"')
             except sqlite3.OperationalError:
                 pass
             conn.commit()
@@ -350,6 +355,9 @@ async def lifespan(app: FastAPI):
     if CONFIG.get("orchestration_mode") == "supervisor":
         asyncio.create_task(polling_loop())
 
+    # Start broker stats polling
+    asyncio.create_task(broker_polling_loop())
+
     yield
 
     await engine.stop_health_polling()
@@ -403,6 +411,10 @@ class ColumnCreate(BaseModel):
     position: Optional[int] = 0
 
 class SystemPromptUpdate(BaseModel):
+    prompt: str
+class PromptSubmit(BaseModel):
+    card_id: int
+    agent_name: str
     prompt: str
 
 
@@ -482,6 +494,73 @@ async def get_card(card_id: int):
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")
     return card
+
+@app.get("/api/cards/{card_id}/context")
+async def get_card_context(card_id: int):
+    """
+    Retrieve an optimized context bundle for an agent working on a specific card.
+    Includes full details of the focus card and any explicitly @tagged cards,
+    while returning a skinny directory of all other cards to save LLM context.
+    """
+    focus_card = store.get_card(card_id)
+    if not focus_card:
+        raise HTTPException(status_code=404, detail="Focus card not found")
+
+    import re
+    # Extract @ tags from description and comments
+    text_to_search = focus_card.get("description", "")
+    for comment in focus_card.get("comments", []):
+        text_to_search += " " + comment.get("content", "")
+    
+    # Find all pattern instances of @<digits>
+    tagged_ids = set()
+    for match in re.finditer(r'@(\d+)', text_to_search):
+        try:
+            tagged_ids.add(int(match.group(1)))
+        except ValueError:
+            pass
+            
+    # Always include dependencies as well
+    deps = focus_card.get("depends_on", [])
+    if isinstance(deps, str):
+        try:
+            deps = json.loads(deps)
+        except json.JSONDecodeError:
+            deps = []
+            
+    for dep in deps:
+        try:
+            tagged_ids.add(int(dep))
+        except ValueError:
+            pass
+
+
+    all_cards = store.get_cards()
+    related_context = []
+    board_directory = []
+    
+    for c in all_cards:
+        if c["id"] == card_id:
+            continue # already have focus_card
+        
+        if c["id"] in tagged_ids:
+            # Full detail for tagged cards
+            related_context.append(c)
+        else:
+            # Skinny detail for other cards
+            board_directory.append({
+                "id": c["id"],
+                "title": c.get("title", ""),
+                "column": c.get("column", ""),
+                "assignee": c.get("assignee"),
+                "priority": c.get("priority", "normal")
+            })
+
+    return {
+        "focus_card": focus_card,
+        "related_context": related_context,
+        "board_directory": board_directory
+    }
 
 @app.patch("/api/cards/{card_id}")
 async def update_card(card_id: int, update: CardUpdate, request: Request):
@@ -614,6 +693,103 @@ async def approve_card(card_id: int):
 async def get_broker_stats():
     """Returns the prompt broker queue and rate-limit statistics."""
     return broker.get_stats()
+
+@app.post("/api/broker/submit")
+async def submit_prompt(req: PromptSubmit):
+    """Submit a prompt for rate-limited processing using real credentials."""
+    from prompt_broker import PromptRequest
+    
+    # 1. Resolve instance
+    instance_id = None
+    # Check active processes first
+    for key, proc in engine.active.items():
+        if proc.card_id == req.card_id:
+            instance_id = proc.instance_id
+            break
+    
+    # Fallback to store if not running
+    if not instance_id:
+        card = store.get_card(req.card_id)
+        if card and card.get("assignee"):
+            instances = load_instances()
+            inst = next((i for i in instances if i["instance_name"] == card["assignee"]), None)
+            if inst:
+                instance_id = inst["instance_id"]
+
+    if not instance_id:
+        raise HTTPException(status_code=404, detail="Could not resolve worker instance for this card")
+
+    # 2. Get credentials
+    instances = load_instances()
+    inst_meta = next((i for i in instances if i["instance_id"] == instance_id), None)
+    if not inst_meta:
+        raise HTTPException(status_code=404, detail="Worker instance metadata not found")
+
+    api_key = inst_meta.get("env_vars", {}).get("OPENROUTER_API_KEY") 
+    # Fallback to other possible keys
+    if not api_key:
+        api_key = inst_meta.get("env_vars", {}).get("ANTHROPIC_API_KEY") or inst_meta.get("env_vars", {}).get("OPENAI_API_KEY")
+    
+    model = inst_meta.get("model") or "anthropic/claude-3-haiku"
+
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API Key configured for this worker instance")
+
+    future = asyncio.get_event_loop().create_future()
+    
+    async def callback(request):
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                headers = {
+                    "Authorization": f"Bearer {api_key}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://github.com/TheSandemon/Aegis",
+                    "X-Title": "Aegis Orchestrator"
+                }
+                payload = {
+                    "model": model,
+                    "messages": [{"role": "user", "content": request.prompt}]
+                }
+                
+                # Check for Gemini if using OpenRouter
+                if "gemini" in model.lower() and "openrouter.ai" in os.environ.get("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1"):
+                     # specialized payload if needed, but usually standard OpenAI-compat works
+                     pass
+
+                response = await client.post(
+                    "https://openrouter.ai/api/v1/chat/completions",
+                    headers=headers,
+                    json=payload
+                )
+                
+                if response.status_code != 200:
+                    err = f"LLM Error {response.status_code}: {response.text}"
+                    logger.error(err)
+                    future.set_exception(Exception(err))
+                    return
+
+                data = response.json()
+                completion = data.get("choices", [{}])[0].get("message", {}).get("content", "No response content")
+                future.set_result(completion)
+                
+        except Exception as e:
+            logger.error(f"Broker callback error: {e}")
+            future.set_exception(e)
+        
+    request = PromptRequest(
+        card_id=req.card_id,
+        agent_name=req.agent_name,
+        prompt=req.prompt,
+        callback=callback
+    )
+    
+    await broker.submit(request)
+    
+    try:
+        response_text = await future
+        return {"status": "success", "response": response_text}
+    except Exception as e:
+        return {"status": "error", "message": str(e)}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -1186,6 +1362,20 @@ async def polling_loop():
 
         except Exception as e:
             logger.error(f"Polling error: {e}")
+
+async def broker_polling_loop():
+    """Periodically broadcasts broker stats to the frontend."""
+    while True:
+        try:
+            await asyncio.sleep(2) # Every 2 seconds
+            stats = broker.get_stats()
+            await manager.broadcast({
+                "type": "broker_update",
+                "stats": stats
+            })
+        except Exception as e:
+            logger.error(f"Broker polling error: {e}")
+            await asyncio.sleep(5)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

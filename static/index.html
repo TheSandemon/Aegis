@@ -36,6 +36,7 @@
         .header-left h1 span {
             background: linear-gradient(135deg, #6366f1, #818cf8);
             -webkit-background-clip: text;
+            background-clip: text;
             -webkit-text-fill-color: transparent;
         }
 
@@ -187,6 +188,25 @@
                     <div class="empty-state-icon" style="font-size:2rem;">🏗️</div>
                     <div class="empty-state-text" style="font-size:0.8rem;">No workers yet.<br>Create one from an
                         installed template.</div>
+                </div>
+            </div>
+
+            <div class="agent-menu-header" style="margin-top:2rem;">
+                <h2>🚦 Prompt Broker</h2>
+            </div>
+            <div id="brokerStats"
+                style="padding: 1rem; font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-dark); border-radius: 0.5rem; margin: 0 1rem;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                    <span>Queue Depth:</span>
+                    <span id="brokerQueueDepth" style="color:var(--text-primary); font-weight:bold;">0</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                    <span>PPM Limit:</span>
+                    <span id="brokerPPM" style="color:var(--accent); font-weight:bold;">1</span>
+                </div>
+                <div style="display:flex; justify-content:space-between;">
+                    <span>Processed:</span>
+                    <span id="brokerProcessed" style="color:var(--text-primary);">0</span>
                 </div>
             </div>
         </aside>

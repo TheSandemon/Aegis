@@ -44,9 +44,10 @@ function handleWebSocketMessage(data) {
             break;
         case 'card_assigned':
             // Refresh cards to show the new assignee
-            await loadCards();
-            renderBoard();
-            showToast(`Card assigned to ${data.agent}`);
+            loadCards().then(() => {
+                renderBoard();
+                showToast(`Card assigned to ${data.agent}`);
+            });
             break;
         case 'agent_started':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
@@ -107,6 +108,25 @@ function handleWebSocketMessage(data) {
             if (window.startPulseCountdown) {
                 window.startPulseCountdown(data.instance_id, data.interval);
             }
+            break;
+        case 'agent_activity':
+            const actId = data.instance_id || data.sender;
+            const actEl = document.getElementById(`activity-${actId}`);
+            if (actEl) {
+                let color = "var(--text-secondary)";
+                if (data.status.toLowerCase().includes("thinking")) color = "#c084fc";
+                if (data.status.toLowerCase().includes("acting")) color = "#facc15";
+                actEl.innerHTML = `<span style="color: ${color}">${data.status}...</span>`;
+            }
+            break;
+        case 'broker_update':
+            const stats = data.stats;
+            const qDepth = document.getElementById('brokerQueueDepth');
+            const ppm = document.getElementById('brokerPPM');
+            const processed = document.getElementById('brokerProcessed');
+            if (qDepth) qDepth.textContent = stats.queue_depth;
+            if (ppm) ppm.textContent = stats.prompts_per_minute || 1;
+            if (processed) processed.textContent = stats.total_processed;
             break;
     }
 }

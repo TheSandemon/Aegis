@@ -127,11 +127,49 @@ while True:
         time.sleep(pulse_interval)
         continue
         
-    board_context = f"COLUMNS: {[{'id': c['id'], 'name': c['name']} for c in cols]}\\n\\nCARDS:\\n"
-    for c in cards:
-        comments = c.get("comments", [])
-        last_comment = f" | Last Comment: {comments[-1]['content'][:50]}" if comments else ""
-        board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}{last_comment}\\n  Desc: {c.get('description', '')[:100]}\\n"
+        # Check if agent is assigned to a specific card
+        my_card_id = None
+        for c in cards:
+            if c.get("assignee") == agent_name and c.get("status") in ["assigned", "running"]:
+                my_card_id = c["id"]
+                break
+                
+        if my_card_id:
+            print(f"\\n[{agent_name}] 🎯 FOCUS: Fetching smart context for Card #{my_card_id}...")
+            ctx = requests.get(f"{api_url}/cards/{my_card_id}/context").json()
+            focus = ctx.get("focus_card", {})
+            related = ctx.get("related_context", [])
+            directory = ctx.get("board_directory", [])
+            
+            board_context = f"--- FOCUS CARD ---\\n[#{focus.get('id')}] {focus.get('title')}\\n"
+            board_context += f"Priority: {focus.get('priority', 'normal')} | Column: {focus.get('column')}\\n"
+            board_context += f"Description: {focus.get('description', '')}\\n"
+            if focus.get('comments'):
+                board_context += "Comments:\\n"
+                for cmt in focus.get('comments', []):
+                    board_context += f"  - [{cmt.get('author')}]: {cmt.get('content')}\\n"
+            
+            if related:
+                board_context += "\\n--- RELATED CONTEXT (From @ Tags & Dependencies) ---\\n"
+                for rc in related:
+                    board_context += f"[#{rc.get('id')}] {rc.get('title')} (Col: {rc.get('column')})\\n"
+                    board_context += f"Description: {rc.get('description', '')[:200]}...\\n"
+                    if rc.get('comments'):
+                        last = rc['comments'][-1]
+                        board_context += f"Last Comment: [{last.get('author')}]: {last.get('content')[:100]}...\\n"
+            
+            board_context += "\\n--- BOARD DIRECTORY (Other Cards) ---\\n"
+            for dc in directory:
+                board_context += f"- [#{dc.get('id')}] {dc.get('title')} (Col: {dc.get('column')}) | Asg: {dc.get('assignee', 'None')}\\n"
+                
+        else:
+            # Fallback to full board if no specific assignment
+            board_context = f"COLUMNS: {[{'id': c['id'], 'name': c['name']} for c in cols]}\\n\\nCARDS:\\n"
+            for c in cards:
+                comments = c.get("comments", [])
+                last_comment = f" | Last Comment: {comments[-1]['content'][:50]}" if comments else ""
+                board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}{last_comment}\\n  Desc: {c.get('description', '')[:100]}\\n"
+
         
     print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
     try:

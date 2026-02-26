@@ -59,6 +59,7 @@ class AgentProcess:
         self.started_at = datetime.now().isoformat()
         self.exit_code: Optional[int] = None
         self.logs: list[str] = []
+        self.activity: str = "idle" # Current phase (Thinking, Acting, Waiting)
 
     def to_dict(self) -> dict:
         return {
@@ -68,6 +69,7 @@ class AgentProcess:
             "pid": self.pid,
             "status": self.status,
             "paused": self.paused,
+            "activity": self.activity,
             "card_id": self.card_id,
             "color": self.color,
             "started_at": self.started_at,

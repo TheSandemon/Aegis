@@ -1,5 +1,12 @@
 /* Aegis Telemetry Dashboard Module */
 
+function getAgentEmoji(agent_id) {
+    const emojis = ['🤖','🧠','⚡','🔧','🦾','🛠️','💡','🔬'];
+    let h = 0;
+    for (const c of String(agent_id)) h = (h * 31 + c.charCodeAt(0)) & 0xFFFF;
+    return emojis[h % emojis.length];
+}
+
 let telemetryData = null;
 
 async function loadTelemetry() {

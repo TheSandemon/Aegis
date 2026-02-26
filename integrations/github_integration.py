@@ -1,0 +1,197 @@
+"""
+integrations/github_integration.py
+GitHub Issues adapter for Aegis.
+
+Credentials:
+  token          — Personal Access Token (ghp_... or fine-grained)
+  repo           — "owner/repo"
+  webhook_secret — (optional) secret for HMAC-SHA256 webhook verification
+
+Filters:
+  state          — "open" (default) | "closed" | "all"
+  labels         — comma-separated label names, e.g. "bug,feature"
+  assignee       — GitHub username to filter by, or "" for all
+"""
+import hashlib
+import hmac
+from typing import Optional
+
+import httpx
+
+from .base import BaseIntegration
+
+_BASE = "https://api.github.com"
+
+
+class GitHubIntegration(BaseIntegration):
+    SOURCE = "github"
+
+    def _headers(self) -> dict:
+        return {
+            "Authorization": f"Bearer {self.credentials['token']}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+
+    def _repo(self) -> str:
+        return self.credentials.get("repo", "")
+
+    # ── sync_in ──────────────────────────────────────────────────────────────
+
+    async def sync_in(self) -> list:
+        state = self.filters.get("state", "open")
+        raw_labels = self.filters.get("labels", "")
+        label_str = ",".join(raw_labels) if isinstance(raw_labels, list) else raw_labels
+        params: dict = {"state": state, "per_page": 100}
+        if label_str:
+            params["labels"] = label_str
+        if self.filters.get("assignee"):
+            params["assignee"] = self.filters["assignee"]
+
+        results = []
+        page = 1
+        async with httpx.AsyncClient(timeout=20) as client:
+            while True:
+                params["page"] = page
+                resp = await client.get(
+                    f"{_BASE}/repos/{self._repo()}/issues",
+                    headers=self._headers(),
+                    params=params,
+                )
+                resp.raise_for_status()
+                issues = resp.json()
+                if not issues:
+                    break
+                for issue in issues:
+                    if issue.get("pull_request"):
+                        continue  # skip PRs
+                    card = await self._upsert_card(
+                        external_id=str(issue["number"]),
+                        external_source=self.SOURCE,
+                        external_url=issue["html_url"],
+                        title=f"[GH #{issue['number']}] {issue['title']}",
+                        description=self._build_description(issue),
+                        priority=self._priority_from_labels(issue.get("labels", [])),
+                    )
+                    results.append(card)
+                page += 1
+        return results
+
+    # ── sync_out ─────────────────────────────────────────────────────────────
+
+    async def sync_out(self, card: dict, event_type: str) -> bool:
+        if card.get("external_source") != self.SOURCE:
+            return False
+        issue_number = card.get("external_id")
+        if not issue_number:
+            return False
+
+        async with httpx.AsyncClient(timeout=20) as client:
+            if event_type == "card_moved" and card.get("column") == "Done":
+                resp = await client.patch(
+                    f"{_BASE}/repos/{self._repo()}/issues/{issue_number}",
+                    headers=self._headers(),
+                    json={"state": "closed"},
+                )
+                return resp.status_code == 200
+
+            if event_type == "comment_added":
+                comments = card.get("comments", [])
+                if not comments:
+                    return False
+                latest = comments[-1]
+                body = f"[Aegis — {latest.get('author', 'unknown')}]: {latest.get('content', '')}"
+                resp = await client.post(
+                    f"{_BASE}/repos/{self._repo()}/issues/{issue_number}/comments",
+                    headers=self._headers(),
+                    json={"body": body},
+                )
+                return resp.status_code == 201
+
+        return False
+
+    # ── handle_webhook ───────────────────────────────────────────────────────
+
+    async def handle_webhook(self, payload: dict, headers: dict) -> Optional[dict]:
+        # Verify HMAC signature if secret is configured
+        secret = self.credentials.get("webhook_secret", "")
+        sig_header = headers.get("x-hub-signature-256", "")
+        if secret and sig_header:
+            raw_body = headers.get("_raw_body", b"")
+            expected = "sha256=" + hmac.new(
+                secret.encode(), raw_body, hashlib.sha256
+            ).hexdigest()
+            if not hmac.compare_digest(expected, sig_header):
+                self.logger.warning("GitHub webhook signature mismatch — ignoring")
+                return None
+
+        event = headers.get("x-github-event", "")
+        action = payload.get("action", "")
+        issue = payload.get("issue")
+
+        if not issue or event != "issues":
+            return None
+
+        if action in ("opened", "edited", "reopened", "labeled"):
+            return await self._upsert_card(
+                external_id=str(issue["number"]),
+                external_source=self.SOURCE,
+                external_url=issue["html_url"],
+                title=f"[GH #{issue['number']}] {issue['title']}",
+                description=self._build_description(issue),
+                priority=self._priority_from_labels(issue.get("labels", [])),
+            )
+
+        if action == "closed":
+            existing = self.store.find_card_by_external_id(str(issue["number"]), self.SOURCE)
+            if existing:
+                updated = self.store.update_card(existing["id"], column="Done", status="completed")
+                await self.broadcaster({"type": "card_updated", "card": updated})
+                return updated
+
+        return None
+
+    # ── register_webhook ─────────────────────────────────────────────────────
+
+    async def register_webhook(self, webhook_url: str) -> bool:
+        secret = self.credentials.get("webhook_secret", "")
+        async with httpx.AsyncClient(timeout=20) as client:
+            resp = await client.post(
+                f"{_BASE}/repos/{self._repo()}/hooks",
+                headers=self._headers(),
+                json={
+                    "name": "web",
+                    "active": True,
+                    "events": ["issues"],
+                    "config": {
+                        "url": webhook_url,
+                        "content_type": "json",
+                        "secret": secret,
+                        "insecure_ssl": "0",
+                    },
+                },
+            )
+            return resp.status_code == 201
+
+    # ── Private helpers ───────────────────────────────────────────────────────
+
+    def _build_description(self, issue: dict) -> str:
+        body = issue.get("body") or ""
+        url = issue.get("html_url", "")
+        labels = ", ".join(l["name"] for l in issue.get("labels", []))
+        parts = [body]
+        if labels:
+            parts.append(f"\n**Labels:** {labels}")
+        parts.append(f"\n\nGitHub Issue: {url}")
+        return "\n".join(parts).strip()
+
+    def _priority_from_labels(self, labels: list) -> str:
+        for label in labels:
+            name = label.get("name", "").lower()
+            if name.startswith("priority:"):
+                return self._map_priority(name.split(":", 1)[1].strip())
+            if name in ("high", "urgent", "critical", "p0", "p1"):
+                return "high"
+            if name in ("low", "minor", "trivial", "p3", "p4"):
+                return "low"
+        return "normal"

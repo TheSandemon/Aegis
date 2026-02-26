@@ -158,6 +158,52 @@ class AegisStore:
                 conn.execute('ALTER TABLE cards ADD COLUMN activity TEXT DEFAULT "idle"')
             except sqlite3.OperationalError:
                 pass
+            # External integration fields on cards
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN external_id TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN external_source TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN external_url TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            # Integration config fields on columns
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_type TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_mode TEXT DEFAULT "read"')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_credentials TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_filters TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN sync_interval_ms INTEGER DEFAULT 60000')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN webhook_secret TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN last_synced_at TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_status TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def get_columns(self):
@@ -181,15 +227,48 @@ class AegisStore:
             conn.commit()
             return cursor.rowcount > 0
 
+    def get_column_by_id(self, col_id: int):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute('SELECT * FROM columns WHERE id = ?', (col_id,)).fetchone()
+            return dict(row) if row else None
+
+    def update_column_integration(self, col_id: int, **kwargs):
+        if not kwargs:
+            return
+        fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
+        values = list(kwargs.values()) + [col_id]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(f'UPDATE columns SET {fields} WHERE id = ?', values)
+            conn.commit()
+
+    def find_card_by_external_id(self, external_id: str, external_source: str):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                'SELECT * FROM cards WHERE external_id = ? AND external_source = ?',
+                (external_id, external_source)
+            ).fetchone()
+            if not row:
+                return None
+            card = dict(row)
+            card["comments"] = json.loads(card.get("comments") or "[]")
+            card["logs"] = json.loads(card.get("logs") or "[]")
+            card["depends_on"] = json.loads(card.get("depends_on") or "[]")
+            return card
+
     def create_card(self, title, description="", column="Inbox", assignee=None, **kwargs):
         now = datetime.now().isoformat()
         depends_on = kwargs.get("depends_on", "[]")
         priority = kwargs.get("priority", "normal")
+        external_id = kwargs.get("external_id")
+        external_source = kwargs.get("external_source")
+        external_url = kwargs.get("external_url")
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at, depends_on, priority) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
-                (title, description, column, assignee, now, now, depends_on, priority)
+                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at, depends_on, priority, external_id, external_source, external_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (title, description, column, assignee, now, now, depends_on, priority, external_id, external_source, external_url)
             )
             conn.commit()
             return self.get_card(cursor.lastrowid)
@@ -272,13 +351,19 @@ class ConnectionManager:
         self.active_connections.remove(websocket)
 
     async def broadcast(self, message: dict):
+        dead = []
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
-                pass
+            except Exception:
+                dead.append(connection)
+        for connection in dead:
+            self.disconnect(connection)
 
 manager = ConnectionManager()
+
+from integrations.manager import IntegrationManager
+integration_manager = IntegrationManager(store=store, broadcaster=manager.broadcast)
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -348,6 +433,9 @@ async def lifespan(app: FastAPI):
     # Start prompt broker
     await broker.start()
 
+    # Start external service integrations (polling loops for linked columns)
+    await integration_manager.start()
+
     # Start unified execution engine health polling
     await engine.start_health_polling()
 
@@ -406,9 +494,18 @@ class CommentCreate(BaseModel):
     author: str
     content: str
 
+class IntegrationConfig(BaseModel):
+    type: str                             # "github" | "jira" | "linear" | "firestore"
+    mode: str = "read"                    # "read" | "write" | "read_write"
+    credentials: dict = {}
+    filters: dict = {}
+    sync_interval_ms: int = 60000
+    webhook_secret: Optional[str] = None
+
 class ColumnCreate(BaseModel):
     name: str
     position: Optional[int] = 0
+    integration: Optional[IntegrationConfig] = None
 
 class SystemPromptUpdate(BaseModel):
     prompt: str
@@ -431,13 +528,42 @@ async def create_column(col: ColumnCreate):
     new_col = store.create_column(col.name, col.position)
     if not new_col:
         raise HTTPException(status_code=400, detail="Column already exists")
+
+    if col.integration:
+        col_data = {
+            "name": col.name,
+            "integration_type": col.integration.type,
+            "integration_mode": col.integration.mode,
+            "integration_credentials": json.dumps(col.integration.credentials),
+            "integration_filters": json.dumps(col.integration.filters),
+            "sync_interval_ms": col.integration.sync_interval_ms,
+            "webhook_secret": col.integration.webhook_secret,
+        }
+        await integration_manager.setup_integration(new_col["id"], col_data)
+
     await manager.broadcast({"type": "column_created", "column": new_col})
     return new_col
 
 @app.delete("/api/columns/{col_id}")
-async def delete_column(col_id: int):
-    # Depending on how UI handles it, might need to reassign cards or just block delete if not empty.
-    # For now, just delete.
+async def delete_column(col_id: int, cascade: str = "block"):
+    col = next((c for c in store.get_columns() if c["id"] == col_id), None)
+    if not col:
+        raise HTTPException(status_code=404, detail="Column not found")
+
+    cards_in_col = store.get_cards(column=col["name"])
+    if cards_in_col:
+        if cascade == "move":
+            for card in cards_in_col:
+                store.update_card(card["id"], column="Inbox")
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Column '{col['name']}' has {len(cards_in_col)} card(s). "
+                       "Use ?cascade=move to move them to Inbox first."
+            )
+
+    await integration_manager.teardown_integration(col_id)
+
     if store.delete_column(col_id):
         await manager.broadcast({"type": "column_deleted", "column_id": col_id})
         return {"success": True}
@@ -593,6 +719,10 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
     card = store.update_card(card_id, **updates)
     await manager.broadcast({"type": "card_updated", "card": card})
 
+    # Push change to external integration (write/read_write columns)
+    event_type = "card_moved" if new_column else "card_updated"
+    asyncio.create_task(integration_manager.notify_card_change(card, event_type))
+
     # Discord webhook on Review entry
     if new_column == "Review":
         asyncio.create_task(send_discord_webhook(card))
@@ -646,6 +776,11 @@ async def add_comment(card_id: int, comment: CommentCreate):
     store.update_card(card_id, comments=json.dumps(comments))
 
     await manager.broadcast({"type": "comment_added", "card_id": card_id, "comment": comment_obj})
+
+    # Push comment to external integration (write/read_write columns)
+    updated_card = store.get_card(card_id)
+    asyncio.create_task(integration_manager.notify_card_change(updated_card, "comment_added"))
+
     return comment_obj
 
 
@@ -1240,6 +1375,29 @@ async def update_agent_params(agent_id: str, updates: dict):
 # ═══════════════════════════════════════════════════════════════════════════════════
 # TELEMETRY
 # ═══════════════════════════════════════════════════════════════════════════════════
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# INTEGRATION ROUTES
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+@app.get("/api/integrations")
+async def list_integrations():
+    """List all active column integrations with current status."""
+    return integration_manager.get_status()
+
+@app.post("/api/integrations/{column_id}/sync")
+async def force_integration_sync(column_id: int):
+    """Manually trigger a sync for a specific column's integration."""
+    results = await integration_manager.force_sync(column_id)
+    return {"status": "ok", "synced": len(results)}
+
+@app.post("/api/webhooks/{column_id}")
+async def receive_webhook(column_id: int, request: Request):
+    """Entry point for all external service webhooks (GitHub, Jira, Linear, etc.)."""
+    result = await integration_manager.handle_webhook(column_id, request)
+    # Always return 200 to prevent webhook retry storms
+    return {"status": "processed" if result else "ignored"}
+
 
 @app.get("/api/telemetry")
 async def get_telemetry():

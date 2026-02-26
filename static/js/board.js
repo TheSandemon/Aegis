@@ -149,18 +149,118 @@ function openNewCardModal() { document.getElementById('newCardModal').classList.
 
 function openNewColumnModal() { document.getElementById('newColumnModal').classList.add('active'); document.getElementById('columnName').focus(); }
 
+// ── Integration field definitions ────────────────────────────────────────────
+const INTEGRATION_CRED_FIELDS = {
+    github: [
+        { id: 'gh_token',  label: 'GitHub Token (ghp_...)',       type: 'password', key: 'token' },
+        { id: 'gh_repo',   label: 'Repository (owner/repo)',       type: 'text',     key: 'repo' },
+        { id: 'gh_labels', label: 'Label filter (comma-separated, optional)', type: 'text', key: 'labels', isFilter: true },
+        { id: 'gh_state',  label: 'Issue state',                   type: 'select',   key: 'state',  isFilter: true, options: ['open', 'closed', 'all'] },
+    ],
+    jira: [
+        { id: 'jira_email',    label: 'Jira Email',                          type: 'text',     key: 'email' },
+        { id: 'jira_token',    label: 'Jira API Token',                      type: 'password', key: 'token' },
+        { id: 'jira_base_url', label: 'Base URL (https://company.atlassian.net)', type: 'text', key: 'base_url' },
+        { id: 'jira_project',  label: 'Project Key (e.g. PROJ)',              type: 'text',     key: 'project_key', isFilter: true },
+    ],
+    linear: [
+        { id: 'lin_api_key', label: 'Linear API Key (lin_api_...)', type: 'password', key: 'api_key' },
+        { id: 'lin_team_id', label: 'Team ID',                      type: 'text',     key: 'team_id', isFilter: true },
+    ],
+    firestore: [
+        { id: 'fs_api_key',    label: 'Firebase Web API Key',    type: 'password', key: 'api_key' },
+        { id: 'fs_project_id', label: 'Firebase Project ID',     type: 'text',     key: 'project_id' },
+        { id: 'fs_collection', label: 'Collection name (e.g. tasks)', type: 'text', key: 'collection' },
+    ],
+};
+
+function toggleIntegrationSection() {
+    const enabled = document.getElementById('enableIntegration').checked;
+    document.getElementById('integrationSection').style.display = enabled ? 'block' : 'none';
+}
+
+function onIntegrationTypeChange() {
+    const type = document.getElementById('integrationType').value;
+    const container = document.getElementById('integrationCredFields');
+    container.innerHTML = '';
+    if (!type || !INTEGRATION_CRED_FIELDS[type]) return;
+    INTEGRATION_CRED_FIELDS[type].forEach(field => {
+        const div = document.createElement('div');
+        div.className = 'form-group';
+        let inputHtml;
+        if (field.type === 'select') {
+            inputHtml = `<select id="${field.id}">${field.options.map(o => `<option value="${o}">${o}</option>`).join('')}</select>`;
+        } else {
+            inputHtml = `<input type="${field.type}" id="${field.id}" placeholder="${field.label}">`;
+        }
+        div.innerHTML = `<label>${field.label}</label>${inputHtml}`;
+        container.appendChild(div);
+    });
+}
+
+function _collectIntegrationPayload() {
+    const type = document.getElementById('integrationType').value;
+    if (!type) return null;
+    const fieldDefs = INTEGRATION_CRED_FIELDS[type] || [];
+    const credentials = {};
+    const filters = {};
+    fieldDefs.forEach(f => {
+        const el = document.getElementById(f.id);
+        if (!el) return;
+        const val = el.value.trim();
+        if (f.isFilter) {
+            filters[f.key] = val;
+        } else {
+            credentials[f.key] = val;
+        }
+    });
+    return {
+        type,
+        mode: document.getElementById('integrationMode').value,
+        credentials,
+        filters,
+        sync_interval_ms: parseInt(document.getElementById('integrationSyncInterval').value) || 60000,
+        webhook_secret: document.getElementById('integrationWebhookSecret').value || null,
+    };
+}
+
+function _resetColumnModal() {
+    document.getElementById('columnName').value = '';
+    document.getElementById('enableIntegration').checked = false;
+    document.getElementById('integrationSection').style.display = 'none';
+    document.getElementById('integrationType').value = '';
+    document.getElementById('integrationCredFields').innerHTML = '';
+    document.getElementById('integrationMode').value = 'read';
+    document.getElementById('integrationSyncInterval').value = '60000';
+    document.getElementById('integrationWebhookSecret').value = '';
+}
+
 async function createColumn() {
     const name = document.getElementById('columnName').value.trim();
     if (!name) { showToast('Name is required'); return; }
     const position = columns.length;
-    const res = await fetch('/api/columns', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, position }) });
+
+    const body = { name, position };
+
+    const integrationEnabled = document.getElementById('enableIntegration')?.checked;
+    if (integrationEnabled) {
+        const integration = _collectIntegrationPayload();
+        if (!integration) { showToast('Please select an integration service'); return; }
+        body.integration = integration;
+    }
+
+    const res = await fetch('/api/columns', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
     if (res.ok) {
         closeModal('newColumnModal');
-        document.getElementById('columnName').value = '';
+        _resetColumnModal();
         await loadColumns();
         populateColumnSelects();
         renderBoard();
-        showToast('Column added');
+        showToast(integrationEnabled ? 'Column added with integration' : 'Column added');
     } else {
         const err = await res.json();
         showToast(`⚠️ ${err.detail || 'Failed to add column'}`);
@@ -395,6 +495,8 @@ function switchView(view) {
     document.getElementById('boardView').style.display = view === 'board' ? 'flex' : 'none';
     const tv = document.getElementById('telemetryView');
     if (tv) { tv.classList.toggle('active', view === 'telemetry'); if (view === 'telemetry') loadTelemetry(); }
+    const iv = document.getElementById('integrationsView');
+    if (iv) { iv.style.display = view === 'integrations' ? 'block' : 'none'; if (view === 'integrations') loadIntegrations(); }
 }
 function navigateTo(view) { window.location.hash = '#' + view; }
 

@@ -426,8 +426,12 @@ class ExecutionEngine:
 
         except Exception as e:
             import traceback
+            from datetime import datetime as _dt
             err_msg = traceback.format_exc()
-            with open("crash.log", "w", encoding="utf-8") as _f:
+            logs_dir = AEGIS_DATA / "logs"
+            logs_dir.mkdir(exist_ok=True)
+            crash_path = logs_dir / f"crash_{key}_{_dt.now().strftime('%Y%m%d_%H%M%S')}.log"
+            with open(crash_path, "w", encoding="utf-8") as _f:
                 _f.write(err_msg)
             logger.error(f"Failed to start '{key}': {e}\n{err_msg}")
             store.update_card(card_id, status="error")

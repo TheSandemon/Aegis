@@ -1,4 +1,4 @@
-"""
+﻿"""
 Aegis A2A (Agent-to-Agent) Protocol Layer
 Implements the AgentCard discovery endpoint and A2A message ingestion.
 """
@@ -16,7 +16,7 @@ logger = logging.getLogger("aegis.a2a")
 router = APIRouter()
 
 
-# ─── AgentCard Schema ───────────────────────────────────────────────────────────
+# ========== AgentCard Schema ==========
 
 class AgentCapability(BaseModel):
     name: str
@@ -37,7 +37,7 @@ class AgentCard(BaseModel):
     supported_content_types: List[str] = ["application/json"]
 
 
-# ─── A2A Message Schema ─────────────────────────────────────────────────────────
+# ========== A2A Message Schema ==========
 
 class A2ATaskPayload(BaseModel):
     title: str
@@ -142,3 +142,4 @@ async def list_registered_agents():
         }
         for name, cfg in agents.items()
     }
+

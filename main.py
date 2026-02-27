@@ -738,6 +738,7 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
 
 @app.delete("/api/cards/{card_id}")
 async def delete_card(card_id: int):
+    """Delete a card from the board."""
     if store.delete_card(card_id):
         await manager.broadcast({"type": "card_deleted", "card_id": card_id})
         return {"success": True}

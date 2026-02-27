@@ -521,10 +521,12 @@ class PromptSubmit(BaseModel):
 
 @app.get("/api/columns")
 async def get_columns():
+    """Get all columns from the board."""
     return store.get_columns()
 
 @app.post("/api/columns")
 async def create_column(col: ColumnCreate):
+    """Create a new column on the board."""
     new_col = store.create_column(col.name, col.position)
     if not new_col:
         raise HTTPException(status_code=400, detail="Column already exists")
@@ -546,6 +548,7 @@ async def create_column(col: ColumnCreate):
 
 @app.delete("/api/columns/{col_id}")
 async def delete_column(col_id: int, cascade: str = "block"):
+    """Delete a column from the board."""
     col = next((c for c in store.get_columns() if c["id"] == col_id), None)
     if not col:
         raise HTTPException(status_code=404, detail="Column not found")
@@ -571,6 +574,7 @@ async def delete_column(col_id: int, cascade: str = "block"):
 
 @app.get("/")
 async def root():
+    """Root endpoint - serve the dashboard."""
     return FileResponse("static/index.html")
 
 @app.get("/api/config")

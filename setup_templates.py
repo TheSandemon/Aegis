@@ -51,6 +51,11 @@ if not service:
     elif deepseek_key: service = "deepseek"
 
 def prompt_llm(system_prompt, user_text):
+    """Call the LLM with a system prompt and user text.
+    
+    Returns:
+        str: The LLM response text.
+    """
     def parse_json(text):
         try:
             return json.loads(text)

@@ -60,7 +60,8 @@ def prompt_llm(system_prompt, user_text):
             elif text.startswith("```"): text = text[3:]
             if text.endswith("```"): text = text[:-3]
             try: return json.loads(text.strip())
-            except: return None
+            except Exception:
+                return None
 
     if service == "openai" and openai_key:
         m = model or "gpt-4o-mini"
@@ -108,7 +109,7 @@ while True:
                 conf = requests.get(f"{api_url}/instances/{instance_id}/config").json().get("config", {})
                 if "goals" in conf: goal = conf["goals"]
                 if "pulse_interval" in conf: pulse_interval = int(conf["pulse_interval"])
-            except:
+            except Exception:
                 pass
 
         print(f"\\n[{agent_name}] 📡 PULSE: Fetching board state & instructions...")
@@ -263,7 +264,7 @@ while True:
         # Send pulse websocket event so UI can show countdown
         try:
             requests.post(f"{api_url}/instances/{instance_id}/pulse", json={"interval": pulse_interval})
-        except:
+        except Exception:
             pass
             
         print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")

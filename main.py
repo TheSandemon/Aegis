@@ -90,6 +90,11 @@ Response Format (JSON Array ONLY):
 ]"""
 
 def load_system_prompt():
+    """Load the system prompt from SYSTEM_PROMPT_PATH or create default.
+    
+    Returns:
+        str: The system prompt content for agent instructions.
+    """
     if SYSTEM_PROMPT_PATH.exists():
         return SYSTEM_PROMPT_PATH.read_text(encoding="utf-8")
     SYSTEM_PROMPT_PATH.parent.mkdir(exist_ok=True)
@@ -270,7 +275,7 @@ class ConnectionManager:
         for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except:
+            except Exception:
                 pass
 
 manager = ConnectionManager()

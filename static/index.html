@@ -197,17 +197,33 @@
             <div id="brokerStats"
                 style="padding: 1rem; font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-dark); border-radius: 0.5rem; margin: 0 1rem;">
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                    <span>Status:</span>
+                    <span id="brokerStatus" style="color:#22c55e; font-weight:bold;">ACTIVE</span>
+                </div>
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                     <span>Queue Depth:</span>
                     <span id="brokerQueueDepth" style="color:var(--text-primary); font-weight:bold;">0</span>
                 </div>
                 <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span>PPM Limit:</span>
-                    <span id="brokerPPM" style="color:var(--accent); font-weight:bold;">1</span>
+                    <span>In Progress:</span>
+                    <span id="brokerInProgress" style="color:var(--text-primary); font-size:0.75rem;">—</span>
                 </div>
-                <div style="display:flex; justify-content:space-between;">
+                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                     <span>Processed:</span>
                     <span id="brokerProcessed" style="color:var(--text-primary);">0</span>
                 </div>
+                <div
+                    style="display:flex; align-items:center; gap:0.25rem; margin-bottom:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+                    <span style="flex:1;">PPM:</span>
+                    <input type="number" id="brokerRateInput" value="1" min="1" max="60"
+                        style="width:50px; font-size:0.75rem; padding:0.2rem; background:var(--bg-column); border:1px solid var(--border); border-radius:4px; color:var(--text-primary);">
+                    <button onclick="setBrokerRate()" style="font-size:0.65rem; padding:0.15rem 0.35rem;">Set</button>
+                </div>
+                <div style="font-size:0.7rem; color:var(--text-secondary); margin-bottom:0.5rem;">
+                    Min safe pulse: <span id="brokerMinPulse">60</span>s
+                </div>
+                <button id="brokerPauseBtn" onclick="toggleBrokerPause()"
+                    style="width:100%; font-size:0.75rem; padding:0.3rem 0.5rem; margin-top:0.25rem;">⏸ Pause</button>
             </div>
         </aside>
 
@@ -505,6 +521,39 @@
                 style="flex-grow:1; display:flex; flex-direction:column; overflow:hidden; padding:0; background:#0f172a;">
                 <pre id="workerTerminalOutput"
                     style="flex-grow:1; margin:0; padding:1rem; overflow-y:auto; color:#10b981; font-family:monospace; font-size:0.85rem; line-height:1.4; white-space:pre-wrap; word-break:break-all;"></pre>
+            </div>
+        </div>
+    </div>
+
+    </div>
+
+    <!-- Column Settings Modal -->
+    <div class="modal-overlay" id="editColumnModal">
+        <div class="modal" style="max-width:420px;">
+            <div class="modal-header">
+                <h3>⚙️ Column Settings</h3><button class="modal-close"
+                    onclick="closeModal('editColumnModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <input type="hidden" id="editColId">
+                <div class="form-group"><label>Column Name</label><input type="text" id="editColName"></div>
+                <div class="form-group"><label>Position</label><input type="number" id="editColPosition" min="0"></div>
+                <div class="form-group"><label>Color</label><input type="color" id="editColColor"
+                        style="height:40px; padding:0.2rem; cursor:pointer;" value="#6366f1"></div>
+                <div class="form-group">
+                    <label>Integration</label>
+                    <div id="editColIntegrationStatus" style="font-size:0.85rem; margin-bottom:0.5rem;"></div>
+                    <div id="editColRemoveIntegration" style="display:none;">
+                        <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
+                            <input type="checkbox" id="editColRemoveInt">
+                            <span>Remove Integration</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="secondary" onclick="closeModal('editColumnModal')">Cancel</button>
+                <button onclick="saveColumnSettings()">Save</button>
             </div>
         </div>
     </div>

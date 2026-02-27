@@ -52,6 +52,23 @@ function filterCards() {
 }
 function clearSearch() { document.getElementById('searchInput').value = ''; filterCards(); }
 
+function getColumnColor(colObj) {
+    if (typeof colObj === 'string') {
+        // Fallback for string names
+        const colors = {
+            'Inbox': '#3b82f6', 'Planned': '#8b5cf6', 'In Progress': '#f59e0b',
+            'Blocked': '#ef4444', 'Review': '#06b6d4', 'Done': '#22c55e'
+        };
+        return colors[colObj] || '#6366f1';
+    }
+    if (colObj.color) return colObj.color;
+    const colors = {
+        'Inbox': '#3b82f6', 'Planned': '#8b5cf6', 'In Progress': '#f59e0b',
+        'Blocked': '#ef4444', 'Review': '#06b6d4', 'Done': '#22c55e'
+    };
+    return colors[colObj.name] || '#6366f1';
+}
+
 function renderBoard() {
     const board = document.getElementById('board');
     board.innerHTML = '';
@@ -65,12 +82,24 @@ function renderBoard() {
             columnCards = columnCards.filter(c => c.title.toLowerCase().includes(f) || (c.description && c.description.toLowerCase().includes(f)));
         }
         const colDiv = document.createElement('div');
-        colDiv.className = 'column' + (collapsedColumns[column] ? ' collapsed' : '');
+        const isCollapsed = collapsedColumns[column];
+        colDiv.className = 'column' + (isCollapsed ? ' collapsed' : '');
         colDiv.dataset.column = column;
+        const colColor = getColumnColor(colObj);
+        const isIntegrated = colObj.integration_type;
         colDiv.innerHTML = `
+            <div class="col-color-stripe" style="background:${colColor}" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')"></div>
+            <div class="col-vertical-name" style="color:${colColor}" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')">${column}</div>
+            <div class="col-collapsed-count">${columnCards.length}</div>
             <div class="column-header">
-                <h2 onclick="toggleColumn('${column}')" style="cursor:pointer; flex:1;">${column} <span class="count">${columnCards.length}</span></h2>
-                <button class="secondary" onclick="deleteColumn(${colObj.id}, '${column}')" style="padding:0.1rem 0.3rem; font-size:0.7rem; margin-right:0.25rem; border:none; background:transparent;" title="Delete Column">🗑</button>
+                <h2 class="col-name-text" onclick="toggleColumn('${column}')" style="cursor:pointer; flex:1;">
+                    ${column} <span class="count">${columnCards.length}</span>
+                    ${isIntegrated ? '<span style="font-size:0.65rem; opacity:0.6;"> 🔗</span>' : ''}
+                </h2>
+                <button class="col-settings-btn" onclick="event.stopPropagation(); openColumnSettings(${colObj.id}, '${column.replace(/'/g, "\\'")}')"
+                    style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="Column Settings">⚙</button>
+                <button class="col-delete-btn secondary" onclick="event.stopPropagation(); deleteColumn(${colObj.id}, '${column.replace(/'/g, "\\'")}')" 
+                    style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; opacity:0.4;" title="Delete Column">🗑</button>
                 <span class="collapse-icon" onclick="toggleColumn('${column}')" style="cursor:pointer;">▼</span>
             </div>
             <div class="column-body" data-column="${column}">
@@ -152,24 +181,24 @@ function openNewColumnModal() { document.getElementById('newColumnModal').classL
 // ── Integration field definitions ────────────────────────────────────────────
 const INTEGRATION_CRED_FIELDS = {
     github: [
-        { id: 'gh_token',  label: 'GitHub Token (ghp_...)',       type: 'password', key: 'token' },
-        { id: 'gh_repo',   label: 'Repository (owner/repo)',       type: 'text',     key: 'repo' },
+        { id: 'gh_token', label: 'GitHub Token (ghp_...)', type: 'password', key: 'token' },
+        { id: 'gh_repo', label: 'Repository (owner/repo)', type: 'text', key: 'repo' },
         { id: 'gh_labels', label: 'Label filter (comma-separated, optional)', type: 'text', key: 'labels', isFilter: true },
-        { id: 'gh_state',  label: 'Issue state',                   type: 'select',   key: 'state',  isFilter: true, options: ['open', 'closed', 'all'] },
+        { id: 'gh_state', label: 'Issue state', type: 'select', key: 'state', isFilter: true, options: ['open', 'closed', 'all'] },
     ],
     jira: [
-        { id: 'jira_email',    label: 'Jira Email',                          type: 'text',     key: 'email' },
-        { id: 'jira_token',    label: 'Jira API Token',                      type: 'password', key: 'token' },
+        { id: 'jira_email', label: 'Jira Email', type: 'text', key: 'email' },
+        { id: 'jira_token', label: 'Jira API Token', type: 'password', key: 'token' },
         { id: 'jira_base_url', label: 'Base URL (https://company.atlassian.net)', type: 'text', key: 'base_url' },
-        { id: 'jira_project',  label: 'Project Key (e.g. PROJ)',              type: 'text',     key: 'project_key', isFilter: true },
+        { id: 'jira_project', label: 'Project Key (e.g. PROJ)', type: 'text', key: 'project_key', isFilter: true },
     ],
     linear: [
         { id: 'lin_api_key', label: 'Linear API Key (lin_api_...)', type: 'password', key: 'api_key' },
-        { id: 'lin_team_id', label: 'Team ID',                      type: 'text',     key: 'team_id', isFilter: true },
+        { id: 'lin_team_id', label: 'Team ID', type: 'text', key: 'team_id', isFilter: true },
     ],
     firestore: [
-        { id: 'fs_api_key',    label: 'Firebase Web API Key',    type: 'password', key: 'api_key' },
-        { id: 'fs_project_id', label: 'Firebase Project ID',     type: 'text',     key: 'project_id' },
+        { id: 'fs_api_key', label: 'Firebase Web API Key', type: 'password', key: 'api_key' },
+        { id: 'fs_project_id', label: 'Firebase Project ID', type: 'text', key: 'project_id' },
         { id: 'fs_collection', label: 'Collection name (e.g. tasks)', type: 'text', key: 'collection' },
     ],
 };
@@ -268,15 +297,25 @@ async function createColumn() {
 }
 
 async function deleteColumn(id, name) {
-    if (!confirm(`Delete column '${name}'?`)) return;
-    const res = await fetch(`/api/columns/${id}`, { method: 'DELETE' });
+    const colObj = columns.find(c => c.id === id);
+    const isIntegrated = colObj && colObj.integration_type;
+
+    let msg = `Delete column '${name}'?`;
+    if (isIntegrated) {
+        msg = `Delete integrated column '${name}'?\n\nCards synced from ${colObj.integration_type} will remain in the external service. Use Column Settings to remove just the integration.`;
+    }
+    if (!confirm(msg)) return;
+
+    const param = isIntegrated ? '?force=true' : '?cascade=move';
+    const res = await fetch(`/api/columns/${id}${param}`, { method: 'DELETE' });
     if (res.ok) {
         await loadColumns();
         populateColumnSelects();
         renderBoard();
         showToast('Column deleted');
     } else {
-        showToast('Failed to delete column (make sure it has no cards)');
+        const err = await res.json().catch(() => null);
+        showToast(err?.detail || 'Failed to delete column');
     }
 }
 
@@ -499,6 +538,87 @@ function switchView(view) {
     if (iv) { iv.style.display = view === 'integrations' ? 'block' : 'none'; if (view === 'integrations') loadIntegrations(); }
 }
 function navigateTo(view) { window.location.hash = '#' + view; }
+
+
+// ─── Broker Controls ─────────────────────────────────────────────────────────
+
+async function toggleBrokerPause() {
+    const endpoint = window._brokerPaused ? '/api/broker/resume' : '/api/broker/pause';
+    try {
+        const res = await fetch(endpoint, { method: 'POST' });
+        if (res.ok) {
+            window._brokerPaused = !window._brokerPaused;
+            showToast(window._brokerPaused ? '⏸ Broker paused' : '▶ Broker resumed');
+        }
+    } catch (e) { showToast('Failed to toggle broker'); }
+}
+
+async function setBrokerRate() {
+    const input = document.getElementById('brokerRateInput');
+    const ppm = parseInt(input.value);
+    if (!ppm || ppm < 1) { showToast('PPM must be ≥ 1'); return; }
+    try {
+        const res = await fetch('/api/broker/rate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ prompts_per_minute: ppm })
+        });
+        if (res.ok) { showToast(`Rate set to ${ppm} PPM`); }
+    } catch (e) { showToast('Failed to set rate'); }
+}
+
+
+// ─── Column Settings ─────────────────────────────────────────────────────────
+
+function openColumnSettings(colId, colName) {
+    const col = columns.find(c => c.id === colId);
+    if (!col) return;
+    document.getElementById('editColId').value = colId;
+    document.getElementById('editColName').value = col.name;
+    document.getElementById('editColPosition').value = col.position ?? '';
+    document.getElementById('editColColor').value = getColumnColor(col);
+    const intStatus = document.getElementById('editColIntegrationStatus');
+    if (col.integration_type) {
+        intStatus.innerHTML = `🔗 <strong>${col.integration_type}</strong> (${col.integration_mode || 'read'})`;
+        document.getElementById('editColRemoveIntegration').style.display = 'block';
+    } else {
+        intStatus.innerHTML = '<span style="color:var(--text-secondary)">None</span>';
+        document.getElementById('editColRemoveIntegration').style.display = 'none';
+    }
+    document.getElementById('editColumnModal').classList.add('active');
+}
+
+async function saveColumnSettings() {
+    const colId = document.getElementById('editColId').value;
+    const name = document.getElementById('editColName').value.trim();
+    const position = document.getElementById('editColPosition').value;
+    const color = document.getElementById('editColColor').value;
+    const removeIntegration = document.getElementById('editColRemoveInt')?.checked || false;
+
+    const body = {};
+    if (name) body.name = name;
+    if (position !== '') body.position = parseInt(position);
+    if (color) body.color = color;
+    if (removeIntegration) body.remove_integration = true;
+
+    try {
+        const res = await fetch(`/api/columns/${colId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body)
+        });
+        if (res.ok) {
+            closeModal('editColumnModal');
+            await loadColumns();
+            populateColumnSelects();
+            renderBoard();
+            showToast('Column updated');
+        } else {
+            const err = await res.json().catch(() => null);
+            showToast(err?.detail || 'Failed to update column');
+        }
+    } catch (e) { showToast('Failed to update column'); }
+}
 
 // Event Listeners
 document.addEventListener('DOMContentLoaded', () => {

@@ -11,6 +11,7 @@ from typing import Optional, List
 
 from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel
+from skill_manager import skill_manager
 
 logger = logging.getLogger("aegis.mcp")
 
@@ -117,6 +118,39 @@ async def list_directory(call: MCPToolCall, request: Request):
         raise HTTPException(status_code=403, detail="Permission denied")
 
     return {"path": str(resolved), "entries": entries}
+
+
+@router.get("/tools")
+async def list_tools():
+    """Lists all available tools as MCP-compatible definitions."""
+    tools = skill_manager.get_all_tools()
+    mcp_tools = []
+    for t in tools:
+        mcp_tools.append({
+            "name": t["name"],
+            "description": t["description"],
+            "inputSchema": t.get("parameters", {"type": "object", "properties": {}})
+        })
+    return {"tools": mcp_tools}
+
+
+@router.post("/tools/call")
+async def call_tool(name: str, arguments: dict, request: Request):
+    """Executes a tool via MCP."""
+    _check_permission(request, f"tool:{name}")
+    try:
+        result = await skill_manager.execute_tool(name, arguments, {"source": "mcp"})
+        return {
+            "content": [
+                {
+                    "type": "text",
+                    "text": str(result)
+                }
+            ]
+        }
+    except Exception as e:
+        logger.error(f"MCP Tool Error ({name}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 # ─── Path Validation & RBAC ──────────────────────────────────────────────────────

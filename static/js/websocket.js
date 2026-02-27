@@ -43,11 +43,16 @@ function handleWebSocketMessage(data) {
             renderBoard();
             break;
         case 'card_assigned':
-            // Refresh cards to show the new assignee
             loadCards().then(() => {
                 renderBoard();
                 showToast(`Card assigned to ${data.agent}`);
             });
+            break;
+        case 'column_updated':
+            const colIdx = columns.findIndex(c => c.id === data.column.id);
+            if (colIdx !== -1) { columns[colIdx] = data.column; }
+            populateColumnSelects();
+            renderBoard();
             break;
         case 'agent_started':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
@@ -55,7 +60,6 @@ function handleWebSocketMessage(data) {
         case 'agent_stopped':
         case 'agent_status_changed':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
-            // Refresh runtimes if panel is visible
             if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
                 loadActiveRuntimes();
             }
@@ -92,6 +96,14 @@ function handleWebSocketMessage(data) {
                     activityEl.innerHTML = '<span style="color: var(--danger)">❌ Error</span>';
                 }
             }
+
+            // Speech Bubbles: Show thought on THOUGHT log
+            if (data.entry) {
+                const thoughtMatch = data.entry.match(/💡 THOUGHT: (.+)/);
+                if (thoughtMatch && typeof showAgentBubble === 'function') {
+                    showAgentBubble(data.instance_id || data.agent_id, thoughtMatch[1]);
+                }
+            }
             break;
         case 'log_entry':
             appendLogEntry(data.card_id, data.entry);
@@ -108,6 +120,10 @@ function handleWebSocketMessage(data) {
             if (window.startPulseCountdown) {
                 window.startPulseCountdown(data.instance_id, data.interval);
             }
+            // Dismiss speech bubble on pulse (agent is sleeping)
+            if (typeof dismissBubble === 'function') {
+                dismissBubble(data.instance_id);
+            }
             break;
         case 'agent_activity':
             const actId = data.instance_id || data.sender;
@@ -118,15 +134,44 @@ function handleWebSocketMessage(data) {
                 if (data.status.toLowerCase().includes("acting")) color = "#facc15";
                 actEl.innerHTML = `<span style="color: ${color}">${data.status}...</span>`;
             }
+            // Speech Bubbles: Show thought on activity
+            if (data.thought && typeof showAgentBubble === 'function') {
+                showAgentBubble(actId, data.thought);
+            }
             break;
         case 'broker_update':
             const stats = data.stats;
             const qDepth = document.getElementById('brokerQueueDepth');
-            const ppm = document.getElementById('brokerPPM');
             const processed = document.getElementById('brokerProcessed');
+            const brokerStatus = document.getElementById('brokerStatus');
+            const brokerInProgress = document.getElementById('brokerInProgress');
+            const brokerRateInput = document.getElementById('brokerRateInput');
+            const brokerMinPulse = document.getElementById('brokerMinPulse');
+            const brokerPauseBtn = document.getElementById('brokerPauseBtn');
+
             if (qDepth) qDepth.textContent = stats.queue_depth;
-            if (ppm) ppm.textContent = stats.prompts_per_minute || 1;
             if (processed) processed.textContent = stats.total_processed;
+
+            if (brokerStatus) {
+                window._brokerPaused = stats.paused;
+                brokerStatus.textContent = stats.paused ? 'PAUSED' : 'ACTIVE';
+                brokerStatus.style.color = stats.paused ? '#f59e0b' : '#22c55e';
+            }
+            if (brokerInProgress) {
+                brokerInProgress.textContent = stats.in_progress
+                    ? `${stats.in_progress.agent_name} (card #${stats.in_progress.card_id})`
+                    : '—';
+            }
+            if (brokerRateInput && document.activeElement !== brokerRateInput) {
+                brokerRateInput.value = stats.prompts_per_minute || 1;
+            }
+            if (brokerMinPulse) {
+                brokerMinPulse.textContent = Math.round(stats.broker_interval_seconds || 60);
+            }
+            if (brokerPauseBtn) {
+                brokerPauseBtn.textContent = stats.paused ? '▶ Resume' : '⏸ Pause';
+                brokerPauseBtn.style.background = stats.paused ? '#22c55e' : 'var(--accent)';
+            }
             break;
     }
 }

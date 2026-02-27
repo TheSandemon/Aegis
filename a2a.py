@@ -52,7 +52,7 @@ class A2AMessage(BaseModel):
     timestamp: Optional[str] = None
 
 
-# ─── Endpoints ───────────────────────────────────────────────────────────────────
+# ========== Endpoints ==========
 
 @router.get("/.well-known/agent.json")
 async def get_agent_card(request: Request):
@@ -142,4 +142,5 @@ async def list_registered_agents():
         }
         for name, cfg in agents.items()
     }
+
 

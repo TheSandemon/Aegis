@@ -579,10 +579,12 @@ async def root():
 
 @app.get("/api/config")
 async def get_config():
+    """Get the current Aegis configuration."""
     return CONFIG
 
 @app.post("/api/config")
 async def update_config(updates: dict):
+    """Update Aegis configuration."""
     global CONFIG
     CONFIG.update(updates)
     with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
@@ -591,6 +593,7 @@ async def update_config(updates: dict):
 
 @app.get("/api/system_prompt")
 async def get_system_prompt():
+    """Get the current system prompt for agents."""
     return {"prompt": SYSTEM_PROMPT}
 
 @app.put("/api/system_prompt")

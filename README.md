@@ -1,24 +1,24 @@
-# Aegis 4.0: Autonomous Multi-Agent OS & Orchestration Hub
+﻿# Aegis 4.0: Autonomous Multi-Agent OS & Orchestration Hub
 
 Aegis is a high-performance Kanban-based orchestration hub designed to manage, monitor, and interact with teams of autonomous AI agents. Unlike traditional automation platforms, Aegis treats AI agents as a managed fleet of contributors, providing unified discovery, "Glass Box" real-time observability, and a robust REST SDK for agent-to-board interaction.
 
 ---
 
-## 🚀 Core Features
+## ðŸš€ Core Features
 
-- 🤖 **Autonomous Sandbox Bots** — Workers operate on a persistent ReAct loop, self-assigning tasks and using LLM tool calling to interact with the board.
-- 📋 **Dynamic Board Architecture** — Fully customizable Kanban workflows. Add or remove columns to fit your specific pipeline needs, and agents will adapt.
-- 🏗️ **Smart Agent Registry** — Bootstrap workers instantly from a registry. Aegis automatically handles local scaffolding and dependency management.
-- 🖥️ **Glass Box Control Panel** — Real-time observability. See live terminal logs, inject context into stdin, or pause/resume agent processes.
-- 📡 **Live Activity Monitoring** — Real-time indicators showing exactly what an agent is doing (Thinking, Processing, Acting) via WebSockets.
-- ⚙️ **Dynamic Goal Tuning** — Change agent goals on the fly. Update an agent's objective while paused and resume work without a rebuild.
-- 🚦 **Prompt Broker** — Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini, DeepSeek).
-- 🔑 **Streamlined Onboarding** — Auto-detection for providers (sk-ant, AIza, sk-) and dynamic model fetching.
-- 🌍 **Cross-Platform Stability** — Full UTF-8/Unicode support for Windows and Linux environments.
+- ðŸ¤– **Autonomous Sandbox Bots** â€” Workers operate on a persistent ReAct loop, self-assigning tasks and using LLM tool calling to interact with the board.
+- ðŸ“‹ **Dynamic Board Architecture** â€” Fully customizable Kanban workflows. Add or remove columns to fit your specific pipeline needs, and agents will adapt.
+- ðŸ—ï¸ **Smart Agent Registry** â€” Bootstrap workers instantly from a registry. Aegis automatically handles local scaffolding and dependency management.
+- ðŸ–¥ï¸ **Glass Box Control Panel** â€” Real-time observability. See live terminal logs, inject context into stdin, or pause/resume agent processes.
+- ðŸ“¡ **Live Activity Monitoring** â€” Real-time indicators showing exactly what an agent is doing (Thinking, Processing, Acting) via WebSockets.
+- âš™ï¸ **Dynamic Goal Tuning** â€” Change agent goals on the fly. Update an agent's objective while paused and resume work without a rebuild.
+- ðŸš¦ **Prompt Broker** â€” Centralized rate-limiting and token estimation ensuring your team respects API quotas (OpenAI, Anthropic, Gemini, DeepSeek).
+- ðŸ”‘ **Streamlined Onboarding** â€” Auto-detection for providers (sk-ant, AIza, sk-) and dynamic model fetching.
+- ðŸŒ **Cross-Platform Stability** â€” Full UTF-8/Unicode support for Windows and Linux environments.
 
 ---
 
-## 🏗️ Architecture
+## ðŸ—ï¸ Architecture
 
 Aegis uses a decentralized execution model where agents interact with the core orchestrator as if it were a local OS service.
 
@@ -52,7 +52,7 @@ graph TD
 
 ---
 
-## 🤖 Autonomous Sandbox Bots
+## ðŸ¤– Autonomous Sandbox Bots
 
 Aegis 4.0 shifts from specialized scripts to **Fully Autonomous Sandbox Bots** powered by a "Natural API" toolset.
 
@@ -76,7 +76,7 @@ Bots aren't just consumers; they are first-class citizens with full authority to
 
 ---
 
-## 📡 REST API (Agent SDK)
+## ðŸ“¡ REST API (Agent SDK)
 
 Agents interact with Aegis primarily through a simple REST API.
 
@@ -93,7 +93,7 @@ Agents interact with Aegis primarily through a simple REST API.
 
 ---
 
-## 🛠️ Getting Started
+## ðŸ› ï¸ Getting Started
 
 1. **Bootstrap**: Run `setup.bat` (Windows) or `setup.sh` (POSIX) to create your virtual environment.
 2. **Registry Sync**: Run `python setup_templates.py` to generate the local template scaffolds for all bots in the registry.
@@ -103,7 +103,7 @@ Agents interact with Aegis primarily through a simple REST API.
 
 ---
 
-## 🔒 Security & RBAC
+## ðŸ”’ Security & RBAC
 
 - **Provider Isolation**: API keys are injected only into the process environment of the specific worker.
 - **Protocol Guard**: All board updates originating from agents are validated against active instance IDs and required headers.
@@ -111,7 +111,8 @@ Agents interact with Aegis primarily through a simple REST API.
 
 ---
 
-Built with ❤️ for the next generation of autonomous development.
+Built with â¤ï¸ for the next generation of autonomous development.
 
 ## Changelog
-- 2026-02-26: Auto-improvement cron enabled
+- 2026-02-27: Auto-improvement run
+

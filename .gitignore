@@ -18,6 +18,7 @@ env/
 *.log
 aegis.db
 aegis_data/
+instances/
 
 # Node
 node_modules/
@@ -25,3 +26,7 @@ node_modules/
 # OS
 .DS_Store
 Thumbs.db
+
+# Backup files
+*.bak
+*.tmp

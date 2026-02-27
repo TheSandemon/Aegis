@@ -1,4 +1,4 @@
-"""
+﻿"""
 Aegis AgentProcessManager — Full lifecycle management for installed agent bots.
 Handles start, stop, status, health polling, non-blocking log streaming, and rate limiting.
 """
@@ -82,7 +82,7 @@ class AgentProcessManager:
             except asyncio.CancelledError:
                 pass
 
-    # ─── Lifecycle Methods ───────────────────────────────────────────────────
+    # ========== Lifecycle Methods ==========
 
     async def start_agent(self, agent_id: str, registry_entry: dict) -> dict:
         """Start an agent process from its registry definition."""
@@ -95,7 +95,7 @@ class AgentProcessManager:
         if not command:
             return {"error": "No command configured", "status": "error"}
 
-        # Enforce rate limiting
+        # ========== Rate Limiting ==========
         await self._enforce_rate_limit()
 
         env = os.environ.copy()
@@ -116,7 +116,7 @@ class AgentProcessManager:
             agent_proc = AgentProcess(agent_id, process.pid, process)
             self.active[agent_proc.instance_id] = agent_proc
 
-            # Start non-blocking log streaming
+            # ========== Non-Blocking Log Streaming ==========
             asyncio.create_task(self._stream_logs(agent_proc, process.stdout, "STDOUT"))
             asyncio.create_task(self._stream_logs(agent_proc, process.stderr, "STDERR"))
 
@@ -186,7 +186,7 @@ class AgentProcessManager:
             return []
         return agent_proc.logs[-tail:]
 
-    # ─── Non-Blocking Log Streaming ──────────────────────────────────────────
+    # ========== Non-Blocking Log Streaming ==========
 
     async def _stream_logs(self, agent_proc: AgentProcess, stream, log_type: str):
         """Streams stdout/stderr to the log buffer and broadcasts via WebSocket."""
@@ -211,7 +211,7 @@ class AgentProcessManager:
         except Exception as e:
             logger.error(f"Log streaming error for {agent_proc.instance_id}: {e}")
 
-    # ─── Health Polling ──────────────────────────────────────────────────────
+    # ========== Health Polling ==========
 
     async def _health_loop(self):
         """Polls all running processes every 5 seconds for crashes."""
@@ -245,7 +245,7 @@ class AgentProcessManager:
             except Exception as e:
                 logger.error(f"Health polling error: {e}")
 
-    # ─── Rate Limiting ───────────────────────────────────────────────────────
+    # ========== Rate Limiting ==========
 
     async def _enforce_rate_limit(self):
         """Enforces 1 prompt/minute global throttle."""
@@ -258,7 +258,7 @@ class AgentProcessManager:
         self._rate_limiter_last = time.time()
 
 
-# ─── Installation Helper ─────────────────────────────────────────────────────
+# ========== Installation Helper ==========
 
 async def install_agent(agent_id: str, registry_entry: dict) -> dict:
     """Clones an agent repo and runs setup commands."""
@@ -370,3 +370,4 @@ except KeyboardInterrupt:
     except Exception as e:
         logger.error(f"Installation error for '{agent_id}': {e}")
         return {"status": "error", "error": str(e)}
+

@@ -98,7 +98,7 @@ class AgentProcessManager:
         if not command:
             return {"error": "No command configured", "status": "error"}
 
-        # Enforce rate limiting
+        # ========== Rate Limiting ==========
         await self._enforce_rate_limit()
 
         env = os.environ.copy()
@@ -216,7 +216,7 @@ class AgentProcessManager:
         except Exception as e:
             logger.error(f"Log streaming error for {agent_proc.agent_id}: {e}")
 
-    # ─── Health Polling ──────────────────────────────────────────────────────
+    # ========== Health Polling ==========
 
     async def _health_loop(self):
         """Polls all running processes every 5 seconds for crashes."""
@@ -249,7 +249,7 @@ class AgentProcessManager:
             except Exception as e:
                 logger.error(f"Health polling error: {e}")
 
-    # ─── Rate Limiting ───────────────────────────────────────────────────────
+    # ========== Rate Limiting ==========
 
     async def _enforce_rate_limit(self):
         """Enforces 1 prompt/minute global throttle."""
@@ -262,7 +262,7 @@ class AgentProcessManager:
         self._rate_limiter_last = time.time()
 
 
-# ─── Installation Helper ─────────────────────────────────────────────────────
+# ========== Installation Helper ==========
 
 async def install_agent(agent_id: str, registry_entry: dict) -> dict:
     """Clones an agent repo and runs setup commands."""
@@ -345,4 +345,5 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
     except Exception as e:
         logger.error(f"Installation error for '{agent_id}': {e}")
         return {"status": "error", "error": str(e)}
+
 

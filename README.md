@@ -112,3 +112,6 @@ Agents interact with Aegis primarily through a simple REST API.
 ---
 
 Built with ❤️ for the next generation of autonomous development.
+
+## Changelog
+- 2026-02-26: Auto-improvement cron enabled

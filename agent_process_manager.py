@@ -1,4 +1,4 @@
-"""
+﻿"""
 Aegis AgentProcessManager — Full lifecycle management for installed agent bots.
 Handles start, stop, status, health polling, non-blocking log streaming, and rate limiting.
 """
@@ -83,7 +83,7 @@ class AgentProcessManager:
             except Exception as e:
                 logger.error(f"Error stopping health polling: {e}")
 
-    # ─── Lifecycle Methods ───────────────────────────────────────────────────
+    # ========== Lifecycle Methods ==========
 
     async def start_agent(self, agent_id: str, registry_entry: dict, card_id: Optional[int] = None) -> dict:
         """Start an agent process from its registry definition."""
@@ -122,7 +122,7 @@ class AgentProcessManager:
             agent_proc = AgentProcess(agent_id, process.pid, process, card_id, color)
             self.active[agent_id] = agent_proc
 
-            # Start non-blocking log streaming
+            # ========== Non-Blocking Log Streaming ==========
             asyncio.create_task(self._stream_logs(agent_proc, process.stdout, "STDOUT"))
             asyncio.create_task(self._stream_logs(agent_proc, process.stderr, "STDERR"))
 
@@ -192,7 +192,7 @@ class AgentProcessManager:
             return []
         return agent_proc.logs[-tail:]
 
-    # ─── Non-Blocking Log Streaming ──────────────────────────────────────────
+    # ========== Non-Blocking Log Streaming ==========
 
     async def _stream_logs(self, agent_proc: AgentProcess, stream, log_type: str):
         """Streams stdout/stderr to the log buffer and broadcasts via WebSocket."""
@@ -345,3 +345,4 @@ async def install_agent(agent_id: str, registry_entry: dict) -> dict:
     except Exception as e:
         logger.error(f"Installation error for '{agent_id}': {e}")
         return {"status": "error", "error": str(e)}
+

@@ -2,6 +2,11 @@ import json
 import os
 from pathlib import Path
 import sys
+import logging
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(message)s')
+logger = logging.getLogger(__name__)
 
 # Ensure UTF-8 output for Windows console
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -377,3 +382,4 @@ with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
     json.dump(registry, f, indent=4)
 
 print("Registry updated and local templates generated successfully.")
+

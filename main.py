@@ -605,10 +605,12 @@ async def update_system_prompt(update: SystemPromptUpdate):
 
 @app.get("/api/cards")
 async def get_cards(column: Optional[str] = None):
+    """Get all cards, optionally filtered by column."""
     return store.get_cards(column)
 
 @app.post("/api/cards")
 async def create_card(card: CardCreate):
+    """Create a new card on the board."""
     create_kwargs = {}
     if card.depends_on is not None:
         create_kwargs["depends_on"] = json.dumps(card.depends_on)
@@ -620,6 +622,7 @@ async def create_card(card: CardCreate):
 
 @app.get("/api/cards/{card_id}")
 async def get_card(card_id: int):
+    """Get a specific card by ID."""
     card = store.get_card(card_id)
     if not card:
         raise HTTPException(status_code=404, detail="Card not found")

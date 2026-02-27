@@ -1,7 +1,7 @@
 /* Aegis Telemetry Dashboard Module */
 
 function getAgentEmoji(agent_id) {
-    const emojis = ['🤖','🧠','⚡','🔧','🦾','🛠️','💡','🔬'];
+    const emojis = ['🤖', '🧠', '⚡', '🔧', '🦾', '🛠️', '💡', '🔬'];
     let h = 0;
     for (const c of String(agent_id)) h = (h * 31 + c.charCodeAt(0)) & 0xFFFF;
     return emojis[h % emojis.length];
@@ -23,20 +23,42 @@ async function loadTelemetry() {
 function renderTelemetry(data) {
     const broker = data.broker || {};
     const agents = data.agents || [];
+    const instances = data.instances || [];
     const view = document.getElementById('telemetryContent');
     if (!view) return;
 
     const totalTokens = broker.estimated_tokens || 0;
     const costEst = (totalTokens / 1000 * 0.003).toFixed(4);
+    const pausedBadge = broker.paused
+        ? '<span style="color:#f59e0b;font-weight:bold;font-size:0.75rem;"> ⏸ PAUSED</span>'
+        : '<span style="color:#22c55e;font-weight:bold;font-size:0.75rem;"> ● ACTIVE</span>';
+    const inProgressText = broker.in_progress
+        ? `${broker.in_progress.agent_name} (card #${broker.in_progress.card_id})`
+        : '—';
 
     view.innerHTML = `
         <div class="telemetry-stats">
+            <div class="stat-card"><div class="stat-label">Broker Status${pausedBadge}</div><div class="stat-value">${broker.prompts_per_minute || 1} PPM</div><div class="stat-sublabel">Interval: ${Math.round(broker.broker_interval_seconds || 60)}s</div></div>
+            <div class="stat-card"><div class="stat-label">In Progress</div><div class="stat-value" style="font-size:1rem;">${inProgressText}</div><div class="stat-sublabel">Currently processing</div></div>
             <div class="stat-card"><div class="stat-label">Prompts Submitted</div><div class="stat-value">${broker.submitted || 0}</div><div class="stat-sublabel">Total requests to LLM</div></div>
             <div class="stat-card"><div class="stat-label">Prompts Processed</div><div class="stat-value">${broker.processed || 0}</div><div class="stat-sublabel">Successfully completed</div></div>
             <div class="stat-card"><div class="stat-label">Failed / Retried</div><div class="stat-value">${broker.failed || 0} / ${broker.retried || 0}</div><div class="stat-sublabel">Errors and retries</div></div>
             <div class="stat-card"><div class="stat-label">Est. Tokens Used</div><div class="stat-value">${formatNumber(totalTokens)}</div><div class="stat-sublabel">≈ $${costEst} estimated cost</div></div>
             <div class="stat-card"><div class="stat-label">Queue Depth</div><div class="stat-value">${broker.queue_depth || 0}</div><div class="stat-sublabel">Pending in queue</div></div>
             <div class="stat-card"><div class="stat-label">Dead Letters</div><div class="stat-value">${broker.dead_letters || 0}</div><div class="stat-sublabel">Max-retries exceeded</div></div>
+        </div>
+
+        <div class="telemetry-section">
+            <h3>🤖 Per-Instance Details</h3>
+            ${instances.length > 0 ? `<div class="agent-stats-grid">${instances.map(inst => `
+                <div class="agent-stat-card">
+                    <div class="agent-stat-header">${inst.icon || '🤖'} ${inst.instance_name}</div>
+                    <div class="agent-stat-row"><span>Status</span><span class="badge badge-${inst.runtime_status || 'stopped'}">${inst.runtime_status || 'stopped'}</span></div>
+                    <div class="agent-stat-row"><span>Service</span><span>${inst.service || '—'}</span></div>
+                    <div class="agent-stat-row"><span>Model</span><span>${inst.model || '—'}</span></div>
+                    <div class="agent-stat-row"><span>Template</span><span>${inst.template_id || '—'}</span></div>
+                </div>
+            `).join('')}</div>` : '<div class="empty-state"><div class="empty-state-icon">💤</div><div class="empty-state-text">No instances configured</div></div>'}
         </div>
 
         <div class="telemetry-section">

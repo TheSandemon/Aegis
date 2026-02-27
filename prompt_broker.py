@@ -6,7 +6,7 @@ Enforces strict 1-prompt-per-minute pacing across all agents.
 import asyncio
 import time
 import logging
-from typing import Any, Callable, Coroutine
+from typing import Any, Callable, Coroutine, Optional
 from dataclasses import dataclass, field
 
 logger = logging.getLogger("aegis.broker")
@@ -39,6 +39,10 @@ class PromptBroker:
         self.last_prompt_time: float = 0.0
         self._running = False
         self._task: asyncio.Task = None
+        self._paused = False
+        self._pause_event = asyncio.Event()
+        self._pause_event.set()  # Start unpaused
+        self._in_progress: Optional[PromptRequest] = None
         self._stats = {
             "total_submitted": 0,
             "total_processed": 0,
@@ -67,6 +71,24 @@ class PromptBroker:
                 pass
         logger.info("PromptBroker stopped")
 
+    async def pause(self):
+        """Pause broker processing."""
+        self._paused = True
+        self._pause_event.clear()
+        logger.info("PromptBroker paused")
+
+    async def resume(self):
+        """Resume broker processing."""
+        self._paused = False
+        self._pause_event.set()
+        logger.info("PromptBroker resumed")
+
+    def set_rate(self, ppm: int):
+        """Update the prompts-per-minute rate."""
+        self.prompts_per_minute = max(1, ppm)
+        self.interval = 60.0 / self.prompts_per_minute
+        logger.info(f"PromptBroker rate updated: {self.prompts_per_minute} PPM (interval={self.interval:.1f}s)")
+
     async def submit(self, request: PromptRequest):
         """Submit a prompt request to the queue."""
         self._stats["total_submitted"] += 1
@@ -79,21 +101,37 @@ class PromptBroker:
 
     def get_stats(self) -> dict:
         """Returns broker statistics."""
+        in_progress = None
+        if self._in_progress:
+            in_progress = {
+                "card_id": self._in_progress.card_id,
+                "agent_name": self._in_progress.agent_name
+            }
         return {
             **self._stats,
             "queue_depth": self.queue.qsize(),
             "dead_letter_count": len(self.dead_letter),
+            "paused": self._paused,
+            "prompts_per_minute": self.prompts_per_minute,
+            "broker_interval_seconds": self.interval,
+            "in_progress": in_progress,
         }
 
     async def _process_loop(self):
         """Main processing loop — enforces rate limiting."""
         while self._running:
+            # Wait if paused
+            await self._pause_event.wait()
+
             try:
                 request = await asyncio.wait_for(self.queue.get(), timeout=5.0)
             except asyncio.TimeoutError:
                 continue
             except asyncio.CancelledError:
                 break
+
+            # Check pause again after dequeue (could have been paused while waiting)
+            await self._pause_event.wait()
 
             # Enforce rate limit cooldown
             now = time.time()
@@ -106,11 +144,14 @@ class PromptBroker:
             # Execute the prompt
             try:
                 self.last_prompt_time = time.time()
+                self._in_progress = request
                 await request.callback(request)
+                self._in_progress = None
                 self._stats["total_processed"] += 1
                 logger.info(f"Broker: Processed prompt for card {request.card_id}")
 
             except Exception as e:
+                self._in_progress = None
                 logger.error(f"Broker: Prompt failed for card {request.card_id}: {e}")
                 request.retries += 1
 

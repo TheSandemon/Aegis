@@ -237,7 +237,6 @@ class IntegrationManager:
         interval_s = max(integration.sync_interval_ms, 5000) / 1000.0
         while True:
             try:
-                await asyncio.sleep(interval_s)
                 results = await integration.sync_in()
                 self.store.update_column_integration(
                     column_id,
@@ -246,6 +245,7 @@ class IntegrationManager:
                 )
                 if results:
                     logger.debug(f"Synced {len(results)} item(s) for column {column_id}")
+                await asyncio.sleep(interval_s)
             except asyncio.CancelledError:
                 logger.info(f"Polling loop cancelled for column {column_id}")
                 break

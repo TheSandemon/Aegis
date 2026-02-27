@@ -24,6 +24,7 @@ import sys
 from typing import Optional, List, Dict
 from contextlib import asynccontextmanager
 import glob
+from skill_manager import skill_manager
 
 # Ensure UTF-8 output for Windows console
 if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
@@ -132,7 +133,8 @@ class AegisStore:
                 CREATE TABLE IF NOT EXISTS columns (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     name TEXT NOT NULL UNIQUE,
-                    position INTEGER NOT NULL
+                    position INTEGER NOT NULL,
+                    color TEXT DEFAULT NULL
                 )
             """)
             conn.commit()
@@ -156,6 +158,11 @@ class AegisStore:
                 pass
             try:
                 conn.execute('ALTER TABLE cards ADD COLUMN activity TEXT DEFAULT "idle"')
+            except sqlite3.OperationalError:
+                pass
+            # Colored columns
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN color TEXT DEFAULT NULL')
             except sqlite3.OperationalError:
                 pass
             # External integration fields on cards
@@ -212,12 +219,12 @@ class AegisStore:
             rows = conn.execute('SELECT * FROM columns ORDER BY position ASC').fetchall()
             return [dict(r) for r in rows]
 
-    def create_column(self, name: str, position: int):
+    def create_column(self, name: str, position: int, color: Optional[str] = None):
         with sqlite3.connect(self.db_path) as conn:
             try:
-                cursor = conn.execute('INSERT INTO columns (name, position) VALUES (?, ?)', (name, position))
+                cursor = conn.execute('INSERT INTO columns (name, position, color) VALUES (?, ?, ?)', (name, position, color))
                 conn.commit()
-                return {"id": cursor.lastrowid, "name": name, "position": position}
+                return {"id": cursor.lastrowid, "name": name, "position": position, "color": color}
             except sqlite3.IntegrityError:
                 return None  # Already exists
 
@@ -439,6 +446,9 @@ async def lifespan(app: FastAPI):
     # Start unified execution engine health polling
     await engine.start_health_polling()
 
+    # Initialize skill registry
+    skill_manager.refresh_skills()
+
     # Start supervisor polling
     if CONFIG.get("orchestration_mode") == "supervisor":
         asyncio.create_task(polling_loop())
@@ -505,6 +515,7 @@ class IntegrationConfig(BaseModel):
 class ColumnCreate(BaseModel):
     name: str
     position: Optional[int] = 0
+    color: Optional[str] = None
     integration: Optional[IntegrationConfig] = None
 
 class SystemPromptUpdate(BaseModel):
@@ -513,6 +524,16 @@ class PromptSubmit(BaseModel):
     card_id: int
     agent_name: str
     prompt: str
+
+class BrokerRateUpdate(BaseModel):
+    prompts_per_minute: int
+
+class ColumnUpdate(BaseModel):
+    name: Optional[str] = None
+    position: Optional[int] = None
+    color: Optional[str] = None
+    integration: Optional[IntegrationConfig] = None
+    remove_integration: bool = False
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -527,7 +548,7 @@ async def get_columns():
 @app.post("/api/columns")
 async def create_column(col: ColumnCreate):
     """Create a new column on the board."""
-    new_col = store.create_column(col.name, col.position)
+    new_col = store.create_column(col.name, col.position, col.color)
     if not new_col:
         raise HTTPException(status_code=400, detail="Column already exists")
 
@@ -547,7 +568,7 @@ async def create_column(col: ColumnCreate):
     return new_col
 
 @app.delete("/api/columns/{col_id}")
-async def delete_column(col_id: int, cascade: str = "block"):
+async def delete_column(col_id: int, cascade: str = "block", force: bool = False):
     """Delete a column from the board."""
     col = next((c for c in store.get_columns() if c["id"] == col_id), None)
     if not col:
@@ -555,14 +576,18 @@ async def delete_column(col_id: int, cascade: str = "block"):
 
     cards_in_col = store.get_cards(column=col["name"])
     if cards_in_col:
-        if cascade == "move":
+        if force:
+            # Force: delete all cards in the column
+            for card in cards_in_col:
+                store.delete_card(card["id"])
+        elif cascade == "move":
             for card in cards_in_col:
                 store.update_card(card["id"], column="Inbox")
         else:
             raise HTTPException(
                 status_code=400,
                 detail=f"Column '{col['name']}' has {len(cards_in_col)} card(s). "
-                       "Use ?cascade=move to move them to Inbox first."
+                       "Use ?cascade=move to move them to Inbox first, or ?force=true to delete all."
             )
 
     await integration_manager.teardown_integration(col_id)
@@ -571,6 +596,76 @@ async def delete_column(col_id: int, cascade: str = "block"):
         await manager.broadcast({"type": "column_deleted", "column_id": col_id})
         return {"success": True}
     raise HTTPException(status_code=404, detail="Column not found")
+
+@app.patch("/api/columns/{col_id}")
+async def update_column_endpoint(col_id: int, update: ColumnUpdate):
+    """Update a column's name, position, or integration settings."""
+    col = next((c for c in store.get_columns() if c["id"] == col_id), None)
+    if not col:
+        raise HTTPException(status_code=404, detail="Column not found")
+
+    if update.name and update.name != col["name"]:
+        # Rename column and update all cards in it
+        old_name = col["name"]
+        store.update_column_integration(col_id, name=update.name)
+        for card in store.get_cards(column=old_name):
+            store.update_card(card["id"], column=update.name)
+
+    if update.position is not None:
+        store.update_column_integration(col_id, position=update.position)
+
+    if update.color is not None:
+        store.update_column_integration(col_id, color=update.color)
+
+    if update.remove_integration:
+        await integration_manager.teardown_integration(col_id)
+        store.update_column_integration(col_id,
+            integration_type=None, integration_mode="read",
+            integration_credentials=None, integration_filters=None,
+            integration_status=None)
+
+    if update.integration:
+        col_data = {
+            "name": update.name or col["name"],
+            "integration_type": update.integration.type,
+            "integration_mode": update.integration.mode,
+            "integration_credentials": json.dumps(update.integration.credentials),
+            "integration_filters": json.dumps(update.integration.filters),
+            "sync_interval_ms": update.integration.sync_interval_ms,
+            "webhook_secret": update.integration.webhook_secret,
+        }
+        await integration_manager.setup_integration(col_id, col_data)
+
+    updated_col = store.get_column_by_id(col_id)
+    await manager.broadcast({"type": "column_updated", "column": updated_col})
+    return updated_col
+
+
+# ─── Broker Control ──────────────────────────────────────────────────────────────
+
+@app.post("/api/broker/pause")
+async def pause_broker():
+    """Pause the prompt broker."""
+    await broker.pause()
+    return {"status": "paused"}
+
+@app.post("/api/broker/resume")
+async def resume_broker():
+    """Resume the prompt broker."""
+    await broker.resume()
+    return {"status": "resumed"}
+
+@app.post("/api/broker/rate")
+async def set_broker_rate(update: BrokerRateUpdate):
+    """Update the broker's prompts-per-minute rate."""
+    broker.set_rate(update.prompts_per_minute)
+    return {"status": "updated", "prompts_per_minute": broker.prompts_per_minute, "interval": broker.interval}
+
+@app.get("/api/broker/min_pulse")
+async def get_min_pulse():
+    """Returns the minimum safe pulse interval based on broker rate."""
+    return {"min_pulse_seconds": int(broker.interval)}
+
 
 @app.get("/")
 async def root():
@@ -692,10 +787,20 @@ async def get_card_context(card_id: int):
                 "priority": c.get("priority", "normal")
             })
 
+    # Build column metadata for agent context
+    focus_col_name = focus_card.get("column", "")
+    focus_col_obj = next((c for c in store.get_columns() if c["name"] == focus_col_name), {})
+    column_meta = {
+        "name": focus_col_name,
+        "is_read_only": bool(focus_col_obj.get("integration_type") and focus_col_obj.get("integration_mode") == "read"),
+        "integration_type": focus_col_obj.get("integration_type")
+    }
+
     return {
         "focus_card": focus_card,
         "related_context": related_context,
-        "board_directory": board_directory
+        "board_directory": board_directory,
+        "column_meta": column_meta
     }
 
 @app.patch("/api/cards/{card_id}")
@@ -723,6 +828,15 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
                 detail="Only humans can move cards from Review to Done"
             )
 
+        # Block agents from modifying cards in read-only integrated columns
+        if is_agent:
+            col_obj = next((c for c in store.get_columns() if c["name"] == old_col), {})
+            if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Cannot modify cards in read-only integrated column '{old_col}'"
+                )
+
         # Lifecycle hook: auto-kill running agent on Review/Done
         await engine.lifecycle_hook(card_id, new_column, store, manager.broadcast)
 
@@ -740,8 +854,28 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
     return card
 
 @app.delete("/api/cards/{card_id}")
-async def delete_card(card_id: int):
+async def delete_card(card_id: int, request: Request, close_external: bool = False):
     """Delete a card from the board."""
+    card = store.get_card(card_id)
+    if not card:
+        raise HTTPException(status_code=404, detail="Card not found")
+
+    # Block agents from deleting cards in read-only integrated columns
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    if is_agent:
+        col_obj = next((c for c in store.get_columns() if c["name"] == card.get("column")), {})
+        if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+            raise HTTPException(
+                status_code=403,
+                detail=f"Cannot delete cards in read-only integrated column '{card.get('column')}'"
+            )
+
+    # Optionally close the external issue before deleting locally
+    if close_external and card.get("external_source"):
+        asyncio.create_task(integration_manager.notify_card_change(
+            {**card, "column": "Done"}, "card_moved"
+        ))
+
     if store.delete_card(card_id):
         await manager.broadcast({"type": "card_deleted", "card_id": card_id})
         return {"success": True}
@@ -793,6 +927,35 @@ async def add_comment(card_id: int, comment: CommentCreate):
     asyncio.create_task(integration_manager.notify_card_change(updated_card, "comment_added"))
 
     return comment_obj
+
+
+# ─── Tools & Skills ──────────────────────────────────────────────────────────────
+
+@app.get("/api/tools")
+async def get_available_tools():
+    """Lists all available tools (Core + Modular Skills)."""
+    return skill_manager.get_all_tools()
+
+@app.post("/api/tools/execute")
+async def execute_tool(name: str, args: dict, request: Request):
+    """Executes a specific tool."""
+    agent_id = request.headers.get("X-Aegis-Agent", "unknown")
+    context = {
+        "agent_id": agent_id,
+        "request_time": datetime.now().isoformat()
+    }
+    try:
+        result = await skill_manager.execute_tool(name, args, context)
+        return {"status": "success", "result": result}
+    except Exception as e:
+        logger.error(f"Tool execution failed ({name}): {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/tools/refresh")
+async def refresh_skills():
+    """Manually triggers a scan of the skills directory."""
+    skill_manager.refresh_skills()
+    return {"status": "refreshed", "count": len(skill_manager.skills)}
 
 
 # ─── Agent Control ───────────────────────────────────────────────────────────────
@@ -1404,9 +1567,20 @@ async def get_telemetry():
         "queue_depth": raw.get("queue_depth", 0),
         "dead_letters": raw.get("dead_letter_count", 0),
         "estimated_tokens": raw.get("estimated_tokens", 0),
+        "paused": raw.get("paused", False),
+        "prompts_per_minute": raw.get("prompts_per_minute", 1),
+        "broker_interval_seconds": raw.get("broker_interval_seconds", 60),
+        "in_progress": raw.get("in_progress"),
     }
     agent_data = engine.get_all_active()
-    return {"broker": broker_stats, "agents": agent_data}
+
+    # Gather per-instance data for telemetry
+    try:
+        instances_data = engine.list_instances()
+    except Exception:
+        instances_data = []
+
+    return {"broker": broker_stats, "agents": agent_data, "instances": instances_data}
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════

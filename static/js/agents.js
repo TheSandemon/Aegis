@@ -166,6 +166,42 @@ window.startPulseCountdown = function (instanceId, secondsCount) {
     }, 1000);
 };
 
+// ─── Agent Speech Bubbles ─────────────────────────────────────────────────
+const bubbleTimers = {};
+
+function showAgentBubble(instanceId, text) {
+    const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
+    if (!card) return;
+
+    // Remove existing bubble
+    const existing = card.querySelector('.agent-speech-bubble');
+    if (existing) existing.remove();
+    if (bubbleTimers[instanceId]) clearTimeout(bubbleTimers[instanceId]);
+
+    // Truncate to 120 chars
+    const truncated = text.length > 120 ? text.substring(0, 117) + '...' : text;
+
+    const bubble = document.createElement('div');
+    bubble.className = 'agent-speech-bubble';
+    bubble.innerHTML = `${escapeHtml(truncated)}<button class="bubble-dismiss" onclick="event.stopPropagation(); dismissBubble('${instanceId}')">×</button>`;
+    card.appendChild(bubble);
+
+    // Auto-dismiss after 8s
+    bubbleTimers[instanceId] = setTimeout(() => dismissBubble(instanceId), 8000);
+}
+
+function dismissBubble(instanceId) {
+    if (bubbleTimers[instanceId]) {
+        clearTimeout(bubbleTimers[instanceId]);
+        delete bubbleTimers[instanceId];
+    }
+    const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
+    if (card) {
+        const bubble = card.querySelector('.agent-speech-bubble');
+        if (bubble) bubble.remove();
+    }
+}
+
 // ─── Service & Model Definitions ──────────────────────────────────────────
 
 const SERVICE_MODELS = {

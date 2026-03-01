@@ -401,6 +401,7 @@ while True:
                             obs = f"❌ WRITE_FILE ERROR: {e}"
                             print(f"[{agent_name}] {obs}")
 
+                # --- GitHub API Tools (via Aegis proxy) ---
                 # ─── Git CLI Tools ────────────────────────────────────────────
                 elif action == "git_clone":
                     repo_url = args.get("repo_url", "")
@@ -490,6 +491,7 @@ while True:
                     body = args.get("body", "")
                     head = args.get("head", "")
                     base = args.get("base", "main")
+                    gh_column = args.get("column", my_card_column)
                     gh_column = args.get("column", my_card_column)  # Use agent's card column if not specified
                     try:
                         r = requests.post(f"{api_url}/github/pulls",

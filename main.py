@@ -1337,7 +1337,8 @@ async def submit_prompt(req: PromptSubmit):
 def _resolve_github_integration(agent_column: str = None):
     """Find the first active GitHub integration adapter.
 
-    If agent_column is provided,优先 use the integration for that column.
+    If agent_column is provided, use the integration for that column.
+    If agent_column is provided, use the integration for that column.
     Otherwise, finds the first write-capable integration.
     """
     # If agent specifies a column, try to use that column's integration first
@@ -1403,6 +1404,7 @@ class PRMerge(BaseModel):
     merge_method: str = "squash"
     commit_message: str = ""
 
+
 @app.get("/api/github/branches")
 async def list_github_branches(column: Optional[str] = None):
     """List branches for the connected GitHub repo."""
@@ -1410,6 +1412,7 @@ async def list_github_branches(column: Optional[str] = None):
     if not gh:
         raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
     return await gh.list_branches()
+
 
 @app.post("/api/github/branches")
 async def create_github_branch(request: Request, req: BranchCreate):
@@ -1426,6 +1429,7 @@ async def create_github_branch(request: Request, req: BranchCreate):
         raise HTTPException(status_code=400, detail=result["error"])
     return result
 
+
 @app.get("/api/github/pulls")
 async def list_github_prs(state: str = "open", column: Optional[str] = None):
     """List pull requests for the connected GitHub repo."""
@@ -1433,6 +1437,7 @@ async def list_github_prs(state: str = "open", column: Optional[str] = None):
     if not gh:
         raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
     return await gh.list_pull_requests(state)
+
 
 @app.post("/api/github/pulls")
 async def create_github_pr(request: Request, req: PRCreate):
@@ -1448,6 +1453,7 @@ async def create_github_pr(request: Request, req: PRCreate):
     if "error" in result:
         raise HTTPException(status_code=400, detail=result["error"])
     return result
+
 
 @app.post("/api/github/pulls/merge")
 async def merge_github_pr(request: Request, req: PRMerge):

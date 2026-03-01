@@ -156,9 +156,12 @@ while True:
 
     # Build read-only column set — agents must not write to these
     read_only_columns = set()
+    github_columns = {}  # column_name -> mode (write, read_write, read)
     for col in cols:
         if col.get("integration_type") and col.get("integration_mode") == "read":
             read_only_columns.add(col["name"])
+        if col.get("integration_type") == "github":
+            github_columns[col["name"]] = col.get("integration_mode", "read")
     if read_only_columns:
         ro_note = (
             f"\n\n⚠️ READ-ONLY COLUMNS: {', '.join(sorted(read_only_columns))} "
@@ -168,11 +171,38 @@ while True:
         )
         system_prompt += ro_note
 
+    # Warn if no GitHub integration exists
+    if not github_columns:
+        gh_note = (
+            "\n\n⚠️ GITHUB NOT AVAILABLE: No GitHub integration is configured on any column. "
+            "Do not attempt GitHub operations (create_pr, merge_pr, create_branch, etc.) "
+            "as they will fail."
+        )
+        system_prompt += gh_note
+    else:
+        writeable_gh = [c for c, m in github_columns.items() if m in ("write", "read_write")]
+        if writeable_gh:
+            gh_note = (
+                f"\n\n📥 GITHUB INTEGRATIONS: The following columns have GitHub integration: "
+                f"{', '.join(sorted(github_columns.keys()))}. "
+                f"Write-enabled columns: {', '.join(sorted(writeable_gh))}. "
+                f"When using GitHub tools, specify the column via the 'column' parameter to use the correct integration."
+            )
+        else:
+            gh_note = (
+                f"\n\n⚠️ GITHUB READ-ONLY: GitHub integrations exist but are read-only: "
+                f"{', '.join(sorted(github_columns.keys()))}. "
+                f"GitHub write operations (create_pr, merge_pr, create_branch) will be blocked."
+            )
+        system_prompt += gh_note
+
     # Check if agent is assigned to a specific card
     my_card_id = None
+    my_card_column = None
     for c in cards:
         if c.get("assignee") == agent_name and c.get("status") in ["assigned", "running"]:
             my_card_id = c["id"]
+            my_card_column = c.get("column")
             break
             
     if my_card_id:
@@ -369,6 +399,88 @@ while True:
                         except Exception as e:
                             obs = f"❌ WRITE_FILE ERROR: {e}"
                             print(f"[{agent_name}] {obs}")
+
+                # --- GitHub API Tools (via Aegis proxy) ---
+                elif action == "create_pr":
+                    title = args.get("title", "")
+                    body = args.get("body", "")
+                    head = args.get("head", "")
+                    base = args.get("base", "main")
+                    gh_column = args.get("column", my_card_column)
+                    try:
+                        r = requests.post(f"{api_url}/github/pulls",
+                            headers={"X-Aegis-Agent": "true"},
+                            json={"title": title, "body": body, "head": head, "base": base, "column": gh_column})
+                        if r.status_code < 400:
+                            data = r.json()
+                            obs = f"✅ PR CREATED: #{data.get('pr_number')} — {data.get('url', '')}"
+                            print(f"[{agent_name}] 🔀 CREATE_PR: {obs}")
+                        else:
+                            obs = f"❌ CREATE_PR ERROR: {r.text[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ CREATE_PR ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "merge_pr":
+                    pr_number = args.get("pr_number")
+                    merge_method = args.get("merge_method", "squash")
+                    commit_message = args.get("commit_message", "")
+                    try:
+                        r = requests.post(f"{api_url}/github/pulls/merge",
+                            headers={"X-Aegis-Agent": "true"},
+                            json={"pr_number": pr_number, "merge_method": merge_method, "commit_message": commit_message})
+                        if r.status_code < 400:
+                            obs = f"✅ PR #{pr_number} MERGED ({merge_method})"
+                            print(f"[{agent_name}] ✅ MERGE_PR: {obs}")
+                        else:
+                            obs = f"❌ MERGE_PR ERROR: {r.text[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ MERGE_PR ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "list_prs":
+                    state = args.get("state", "open")
+                    gh_column = args.get("column", my_card_column)
+                    try:
+                        r = requests.get(f"{api_url}/github/pulls", params={"state": state, "column": gh_column})
+                        prs = r.json() if r.status_code < 400 else []
+                        obs = f"PULL REQUESTS ({state}): " + json.dumps(prs[:10], indent=2)
+                        print(f"[{agent_name}] 📋 LIST_PRS: {len(prs)} PRs found")
+                    except Exception as e:
+                        obs = f"❌ LIST_PRS ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "list_branches":
+                    gh_column = args.get("column", my_card_column)
+                    try:
+                        r = requests.get(f"{api_url}/github/branches", params={"column": gh_column})
+                        branches = r.json() if r.status_code < 400 else []
+                        obs = f"BRANCHES: " + json.dumps(branches[:20], indent=2)
+                        print(f"[{agent_name}] 🌿 LIST_BRANCHES: {len(branches)} branches found")
+                    except Exception as e:
+                        obs = f"❌ LIST_BRANCHES ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "create_branch_remote":
+                    branch_name = args.get("branch_name", "")
+                    base = args.get("base", "main")
+                    gh_column = args.get("column", my_card_column)
+                    try:
+                        r = requests.post(f"{api_url}/github/branches",
+                            headers={"X-Aegis-Agent": "true"},
+                            json={"branch_name": branch_name, "base": base, "column": gh_column})
+                        if r.status_code < 400:
+                            obs = f"✅ REMOTE BRANCH CREATED: {branch_name} (from {base})"
+                            print(f"[{agent_name}] 🌿 CREATE_BRANCH_REMOTE: {obs}")
+                        else:
+                            obs = f"❌ CREATE_BRANCH_REMOTE ERROR: {r.text[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ CREATE_BRANCH_REMOTE ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
                 elif action == "done":
                     reason = args.get('reason', 'Task complete')
                     print(f"[{agent_name}] ✅ DONE: {reason}")

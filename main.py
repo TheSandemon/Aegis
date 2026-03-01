@@ -1314,6 +1314,146 @@ async def submit_prompt(req: PromptSubmit):
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
+# GITHUB DEVOPS — Branch / PR / Merge Proxy (used by worker agents)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+def _resolve_github_integration(agent_column: str = None):
+    """Find the first active GitHub integration adapter.
+
+    If agent_column is provided, use the integration for that column.
+    Otherwise, finds the first write-capable integration.
+    """
+    # If agent specifies a column, try to use that column's integration first
+    if agent_column:
+        for col_id, integration in integration_manager._integrations.items():
+            if getattr(integration, 'SOURCE', '') == 'github':
+                col = store.get_columns()
+                col_obj = next((c for c in col if c["id"] == col_id), None)
+                if col_obj and col_obj.get("name") == agent_column:
+                    return integration
+
+    # Fall back to first write-capable integration
+    for col_id, integration in integration_manager._integrations.items():
+        if getattr(integration, 'SOURCE', '') == 'github':
+            col = store.get_columns()
+            col_obj = next((c for c in col if c["id"] == col_id), None)
+            if col_obj and col_obj.get("integration_mode") in ("write", "read_write"):
+                return integration
+
+    # Last resort: any GitHub integration (for read operations)
+    for col_id, integration in integration_manager._integrations.items():
+        if getattr(integration, 'SOURCE', '') == 'github':
+            return integration
+    return None
+
+
+def _check_github_write_access(gh_integration, agent_column: str = None) -> bool:
+    """Check if an agent can write to the GitHub integration."""
+    if not gh_integration:
+        return False
+
+    # If we have a column context, check that column's integration mode
+    if agent_column:
+        col = store.get_columns()
+        col_obj = next((c for c in col if c.get("name") == agent_column), None)
+        if col_obj and col_obj.get("integration_mode") in ("write", "read_write"):
+            return True
+        return False
+
+    # Otherwise, check if ANY column has write access
+    for col_id, integration in integration_manager._integrations.items():
+        if integration is gh_integration:
+            col = store.get_columns()
+            col_obj = next((c for c in col if c["id"] == col_id), None)
+            if col_obj and col_obj.get("integration_mode") in ("write", "read_write"):
+                return True
+    return False
+
+
+class BranchCreate(BaseModel):
+    branch_name: str
+    base: str = "main"
+    column: Optional[str] = None
+
+
+class PRCreate(BaseModel):
+    title: str
+    body: str = ""
+    head: str
+    base: str = "main"
+    column: Optional[str] = None
+
+
+class PRMerge(BaseModel):
+    pr_number: int
+    merge_method: str = "squash"
+    commit_message: str = ""
+
+
+@app.get("/api/github/branches")
+async def list_github_branches(column: Optional[str] = None):
+    """List branches for the connected GitHub repo."""
+    gh = _resolve_github_integration(column)
+    if not gh:
+        raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    return await gh.list_branches()
+
+
+@app.post("/api/github/branches")
+async def create_github_branch(request: Request, req: BranchCreate):
+    """Create a new branch on the connected GitHub repo."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    gh = _resolve_github_integration(req.column)
+    if not gh:
+        raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    if is_agent and not _check_github_write_access(gh, req.column):
+        raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
+    result = await gh.create_branch(req.branch_name, req.base)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.get("/api/github/pulls")
+async def list_github_prs(state: str = "open", column: Optional[str] = None):
+    """List pull requests for the connected GitHub repo."""
+    gh = _resolve_github_integration(column)
+    if not gh:
+        raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    return await gh.list_pull_requests(state)
+
+
+@app.post("/api/github/pulls")
+async def create_github_pr(request: Request, req: PRCreate):
+    """Open a pull request on the connected GitHub repo."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    gh = _resolve_github_integration(req.column)
+    if not gh:
+        raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    if is_agent and not _check_github_write_access(gh, req.column):
+        raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
+    result = await gh.create_pull_request(req.title, req.body, req.head, req.base)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+@app.post("/api/github/pulls/merge")
+async def merge_github_pr(request: Request, req: PRMerge):
+    """Merge a pull request on the connected GitHub repo."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    gh = _resolve_github_integration()
+    if not gh:
+        raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    if is_agent and not _check_github_write_access(gh):
+        raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
+    result = await gh.merge_pull_request(req.pr_number, req.merge_method, req.commit_message)
+    if "error" in result:
+        raise HTTPException(status_code=400, detail=result["error"])
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════════════════
 # AGENT REGISTRY & MANAGEMENT
 # ═══════════════════════════════════════════════════════════════════════════════════
 

@@ -7,8 +7,24 @@ let terminalRefreshInterval = null;
 let searchFilter = '';
 const collapsedColumns = {};
 
+/**
+ * Highlight a card with the agent's color while the agent is actively working on it.
+ * Called from websocket.js on agent_log / agent_pulse / agent_stopped events.
+ */
+function setCardAgentHighlight(cardId, color, active) {
+    const el = document.querySelector(`.card[data-id="${cardId}"]`);
+    if (!el) return;
+    if (active && color) {
+        el.style.setProperty('--agent-highlight', color);
+        el.classList.add('agent-working');
+    } else {
+        el.classList.remove('agent-working');
+    }
+}
+
 async function init() {
     await loadConfig();
+    if (typeof loadServiceModels === 'function') await loadServiceModels();
     await loadColumns();
     populateColumnSelects();
     await loadAgents();
@@ -94,7 +110,8 @@ function renderBoard() {
             <div class="column-header">
                 <h2 class="col-name-text" onclick="toggleColumn('${column}')" style="cursor:pointer; flex:1;">
                     ${column} <span class="count">${columnCards.length}</span>
-                    ${isIntegrated ? '<span style="font-size:0.65rem; opacity:0.6;"> 🔗</span>' : ''}
+                    ${isIntegrated ? `<span title="Integration: ${colObj.integration_type} (${colObj.integration_status || 'active'})" style="font-size:0.65rem; cursor:default;">
+                        <span style="color:${colObj.integration_status === 'error' ? '#ef4444' : '#22c55e'}">●</span>🔗</span>` : ''}
                 </h2>
                 <button class="col-settings-btn" onclick="event.stopPropagation(); openColumnSettings(${colObj.id}, '${column.replace(/'/g, "\\'")}')"
                     style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="Column Settings">⚙</button>
@@ -103,8 +120,7 @@ function renderBoard() {
                 <span class="collapse-icon" onclick="toggleColumn('${column}')" style="cursor:pointer;">▼</span>
             </div>
             <div class="column-body" data-column="${column}">
-                ${columnCards.length ? columnCards.map(card => renderCard(card, doneIds)).join('') :
-                `<div class="empty-state"><div class="empty-state-icon">${searchFilter ? '🔍' : '📭'}</div><div class="empty-state-text">${searchFilter ? 'No matching cards' : 'No cards'}</div></div>`}
+                ${renderColumnCards(columnCards, doneIds)}
             </div>`;
         const colBody = colDiv.querySelector('.column-body');
         colBody.addEventListener('dragover', handleDragOver);
@@ -121,6 +137,41 @@ function renderBoard() {
 }
 
 function toggleColumn(column) { collapsedColumns[column] = !collapsedColumns[column]; renderBoard(); }
+
+/**
+ * Render column cards with optional group section headers.
+ * Cards with no card_group are rendered first, then each named group.
+ */
+function renderColumnCards(columnCards, doneIds) {
+    if (!columnCards.length) {
+        return `<div class="empty-state"><div class="empty-state-icon">${searchFilter ? '🔍' : '📭'}</div><div class="empty-state-text">${searchFilter ? 'No matching cards' : 'No cards'}</div></div>`;
+    }
+    const ungrouped = columnCards.filter(c => !c.card_group);
+    const groupMap = {};
+    columnCards.filter(c => c.card_group).forEach(c => {
+        (groupMap[c.card_group] = groupMap[c.card_group] || []).push(c);
+    });
+
+    let html = ungrouped.map(c => renderCard(c, doneIds)).join('');
+    Object.entries(groupMap).forEach(([groupName, groupCards]) => {
+        html += `<div class="card-group-header" data-group="${escapeHtml(groupName)}">
+            <span class="group-name">${escapeHtml(groupName)}</span>
+            <span class="group-count">(${groupCards.length})</span>
+            <button class="group-toggle" onclick="toggleCardGroup(this)" title="Collapse group">▾</button>
+        </div>
+        <div class="card-group-body">
+            ${groupCards.map(c => renderCard(c, doneIds)).join('')}
+        </div>`;
+    });
+    return html;
+}
+
+function toggleCardGroup(btn) {
+    const body = btn.closest('.card-group-header').nextElementSibling;
+    if (!body) return;
+    const collapsed = body.classList.toggle('group-collapsed');
+    btn.textContent = collapsed ? '▸' : '▾';
+}
 
 function renderCard(card, doneIds) {
     const age = formatRelativeTime(card.updated_at);
@@ -139,10 +190,14 @@ function renderCard(card, doneIds) {
     const activityHtml = card.activity && card.activity !== 'idle' ?
         `<div class="card-activity"><span class="activity-dot"></span>${escapeHtml(card.activity)}</div>` : '';
 
+    const tags = card.card_tags || [];
+    const tagsHtml = tags.length ? `<div class="card-tags">${tags.map(t => `<span class="card-tag">#${escapeHtml(t)}</span>`).join('')}</div>` : '';
+
     return `
         <div class="card ${card.status === 'running' ? 'agent-active' : ''}" draggable="true" data-id="${card.id}">
             <div class="card-title">${escapeHtml(card.title)}</div>
             ${depHtml}
+            ${tagsHtml}
             ${activityHtml}
             <div class="card-meta">
                 <div class="card-meta-left">
@@ -345,6 +400,10 @@ async function openCardDetail(cardId) {
     document.getElementById('detailColumn').value = card.column;
     const dp = document.getElementById('detailPriority');
     if (dp) dp.value = card.priority || 'normal';
+    const dgEl = document.getElementById('detailGroup');
+    if (dgEl) dgEl.value = card.card_group || '';
+    const dtEl = document.getElementById('detailTags');
+    if (dtEl) dtEl.value = (card.card_tags || []).join(', ');
 
     const isRunning = card.status === 'running';
     const hasLogs = card.logs && card.logs.length > 0;
@@ -467,6 +526,10 @@ async function saveCardDetails() {
     const updates = { title: document.getElementById('detailTitleInput').value, description: document.getElementById('detailDescription').value, assignee: document.getElementById('detailAssignee').value || null, column: document.getElementById('detailColumn').value };
     const dp = document.getElementById('detailPriority');
     if (dp) updates.priority = dp.value;
+    const dgEl = document.getElementById('detailGroup');
+    if (dgEl) updates.card_group = dgEl.value.trim() || null;
+    const dtEl = document.getElementById('detailTags');
+    if (dtEl) updates.card_tags = dtEl.value.split(',').map(t => t.trim()).filter(Boolean);
     await fetch(`/api/cards/${currentCardId}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(updates) });
     closeModal('cardDetailModal');
     if (terminalRefreshInterval) clearInterval(terminalRefreshInterval);
@@ -536,9 +599,129 @@ function switchView(view) {
     if (tv) { tv.classList.toggle('active', view === 'telemetry'); if (view === 'telemetry') loadTelemetry(); }
     const iv = document.getElementById('integrationsView');
     if (iv) { iv.style.display = view === 'integrations' ? 'block' : 'none'; if (view === 'integrations') loadIntegrations(); }
+    const wv = document.getElementById('workspacesView');
+    if (wv) { wv.style.display = view === 'workspaces' ? 'block' : 'none'; if (view === 'workspaces') loadWorkspaces(); }
 }
 function navigateTo(view) { window.location.hash = '#' + view; }
 
+
+// ─── Workflowspaces ──────────────────────────────────────────────────────────
+
+async function loadWorkspaces() {
+    const el = document.getElementById('workspacesList');
+    if (!el) return;
+    el.innerHTML = '<div style="color:var(--text-secondary);font-size:0.85rem;">Loading...</div>';
+    try {
+        const res = await fetch('/api/workspaces');
+        const workspaces = await res.json();
+        if (!workspaces.length) {
+            el.innerHTML = '<div class="empty-state"><div class="empty-state-icon">💾</div><div class="empty-state-text">No saved workflowspaces yet.<br>Save your current board and agents to get started.</div></div>';
+            return;
+        }
+        el.innerHTML = workspaces.map(w => {
+            const agentBadge = w.agents > 0
+                ? `<span style="color:var(--accent);margin-left:0.3rem;">· ${w.agents} agent${w.agents !== 1 ? 's' : ''}</span>`
+                : '';
+            return `
+        <div style="background:var(--bg-card);border:1px solid var(--border);border-radius:0.5rem;padding:1rem;margin-bottom:0.75rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;">
+            <div>
+                <div style="font-weight:600;">${escapeHtml(w.name)}</div>
+                <div style="font-size:0.75rem;color:var(--text-secondary);margin-top:0.2rem;">
+                    ${w.columns} columns · ${w.cards} cards${agentBadge}
+                    ${w.exported_at ? ' · Saved ' + _formatWorkspaceTime(w.exported_at) : ''}
+                </div>
+            </div>
+            <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                <button onclick="loadWorkspace('${escapeHtml(w.name)}', false)"
+                    style="font-size:0.78rem;padding:0.25rem 0.7rem;background:var(--accent);">⬇ Load</button>
+                <button onclick="loadWorkspace('${escapeHtml(w.name)}', true)"
+                    style="font-size:0.78rem;padding:0.25rem 0.7rem;background:var(--bg-dark);" title="Merge into current board">⊕ Merge</button>
+                <a href="/api/workspaces/export?name=${encodeURIComponent(w.name)}" download="${escapeHtml(w.name)}.json"
+                    style="font-size:0.78rem;padding:0.25rem 0.7rem;background:var(--bg-dark);border:1px solid var(--border);border-radius:4px;text-decoration:none;color:var(--text-primary);cursor:pointer;">⬆ Export</a>
+                <button onclick="deleteWorkspace('${escapeHtml(w.name)}')"
+                    style="font-size:0.78rem;padding:0.25rem 0.7rem;background:transparent;border:1px solid #ef4444;color:#ef4444;">🗑</button>
+            </div>
+        </div>`;
+        }).join('');
+    } catch (e) { el.innerHTML = '<div class="empty-state" style="color:#ef4444;">Failed to load workflowspaces</div>'; }
+}
+
+async function saveWorkspace() {
+    const nameEl = document.getElementById('workspaceSaveName');
+    const name = (nameEl?.value || '').trim();
+    if (!name) { showToast('Enter a workflowspace name'); return; }
+    try {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(name)}/save`, { method: 'POST' });
+        if (res.ok) {
+            const data = await res.json();
+            const agentNote = data.agents > 0 ? `, ${data.agents} agent${data.agents !== 1 ? 's' : ''}` : '';
+            showToast(`Saved "${data.name}" — ${data.columns} columns, ${data.cards} cards${agentNote}`);
+            if (nameEl) nameEl.value = '';
+            loadWorkspaces();
+        } else {
+            const err = await res.json().catch(() => null);
+            showToast(err?.detail || 'Save failed');
+        }
+    } catch (e) { showToast('Save failed'); }
+}
+
+async function loadWorkspace(name, merge = false) {
+    const action = merge ? 'Merge' : 'Load';
+    const warn = merge ? '' : ' This will replace your current board and restore saved agents.';
+    if (!confirm(`${action} workflowspace "${name}"?${warn}`)) return;
+    try {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(name)}/load?merge=${merge}`, { method: 'POST' });
+        if (res.ok) {
+            const data = await res.json();
+            const agentNote = data.agents > 0 ? `, ${data.agents} agent${data.agents !== 1 ? 's' : ''} restored` : '';
+            showToast(`Workflowspace "${name}" loaded${agentNote}`);
+            await loadColumns();
+            await loadCards();
+            populateColumnSelects();
+            renderBoard();
+            if (typeof loadInstances === 'function') await loadInstances();
+            navigateTo('board');
+        } else {
+            const err = await res.json().catch(() => null);
+            showToast(err?.detail || 'Load failed');
+        }
+    } catch (e) { showToast('Load failed'); }
+}
+
+async function deleteWorkspace(name) {
+    if (!confirm(`Delete workflowspace "${name}"?`)) return;
+    try {
+        const res = await fetch(`/api/workspaces/${encodeURIComponent(name)}`, { method: 'DELETE' });
+        if (res.ok) { showToast(`Deleted "${name}"`); loadWorkspaces(); }
+        else showToast('Delete failed');
+    } catch (e) { showToast('Delete failed'); }
+}
+
+async function exportCurrentBoard() {
+    try {
+        const res = await fetch('/api/workspaces/export');
+        const data = await res.json();
+        const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `aegis-board-${new Date().toISOString().slice(0, 10)}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+    } catch (e) { showToast('Export failed'); }
+}
+
+function _formatWorkspaceTime(iso) {
+    try {
+        const diff = Date.now() - new Date(iso).getTime();
+        const mins = Math.floor(diff / 60000);
+        if (mins < 1) return 'just now';
+        if (mins < 60) return `${mins}m ago`;
+        const hrs = Math.floor(mins / 60);
+        if (hrs < 24) return `${hrs}h ago`;
+        return new Date(iso).toLocaleDateString();
+    } catch { return ''; }
+}
 
 // ─── Broker Controls ─────────────────────────────────────────────────────────
 
@@ -570,21 +753,102 @@ async function setBrokerRate() {
 
 // ─── Column Settings ─────────────────────────────────────────────────────────
 
-function openColumnSettings(colId, colName) {
+function onEditIntegrationTypeChange() {
+    const type = document.getElementById('editIntegrationType').value;
+    const container = document.getElementById('editIntegrationCredFields');
+    container.innerHTML = '';
+    if (!type || !INTEGRATION_CRED_FIELDS[type]) return;
+    INTEGRATION_CRED_FIELDS[type].forEach(field => {
+        const div = document.createElement('div');
+        div.className = 'form-group';
+        let inputHtml;
+        if (field.type === 'select') {
+            inputHtml = `<select id="edit_${field.id}">${field.options.map(o => `<option value="${o}">${o}</option>`).join('')}</select>`;
+        } else {
+            inputHtml = `<input type="${field.type}" id="edit_${field.id}" placeholder="${field.label}">`;
+        }
+        div.innerHTML = `<label>${field.label}</label>${inputHtml}`;
+        container.appendChild(div);
+    });
+}
+
+function toggleEditIntegrationSection() {
+    const enabled = document.getElementById('editColEnableIntegration').checked;
+    document.getElementById('editIntegrationSection').style.display = enabled ? 'block' : 'none';
+}
+
+function onEditRemoveIntChange() {
+    if (document.getElementById('editColRemoveInt').checked) {
+        document.getElementById('editColReplaceInt').checked = false;
+        document.getElementById('editIntegrationSection').style.display = 'none';
+    }
+}
+
+function onEditReplaceIntChange() {
+    const replacing = document.getElementById('editColReplaceInt').checked;
+    if (replacing) {
+        document.getElementById('editColRemoveInt').checked = false;
+        document.getElementById('editIntegrationSection').style.display = 'block';
+    } else {
+        document.getElementById('editIntegrationSection').style.display = 'none';
+    }
+}
+
+function _collectEditIntegrationPayload() {
+    const type = document.getElementById('editIntegrationType').value;
+    if (!type) return null;
+    const fieldDefs = INTEGRATION_CRED_FIELDS[type] || [];
+    const credentials = {};
+    const filters = {};
+    fieldDefs.forEach(f => {
+        const el = document.getElementById(`edit_${f.id}`);
+        if (!el) return;
+        const val = el.value.trim();
+        if (f.isFilter) filters[f.key] = val;
+        else credentials[f.key] = val;
+    });
+    return {
+        type,
+        mode: document.getElementById('editIntegrationMode').value,
+        credentials,
+        filters,
+        sync_interval_ms: parseInt(document.getElementById('editIntegrationSyncInterval').value) || 60000,
+        webhook_secret: document.getElementById('editIntegrationWebhookSecret').value || null,
+    };
+}
+
+function openColumnSettings(colId) {
     const col = columns.find(c => c.id === colId);
     if (!col) return;
+
     document.getElementById('editColId').value = colId;
     document.getElementById('editColName').value = col.name;
     document.getElementById('editColPosition').value = col.position ?? '';
-    document.getElementById('editColColor').value = getColumnColor(col);
+    document.getElementById('editColColor').value = col.color || getColumnColor(col);
+
+    // Reset all integration UI
+    document.getElementById('editColEnableIntegration').checked = false;
+    document.getElementById('editColRemoveInt').checked = false;
+    document.getElementById('editColReplaceInt').checked = false;
+    document.getElementById('editIntegrationSection').style.display = 'none';
+    document.getElementById('editIntegrationType').value = '';
+    document.getElementById('editIntegrationCredFields').innerHTML = '';
+    document.getElementById('editIntegrationMode').value = 'read';
+    document.getElementById('editIntegrationSyncInterval').value = '60000';
+    document.getElementById('editIntegrationWebhookSecret').value = '';
+
     const intStatus = document.getElementById('editColIntegrationStatus');
     if (col.integration_type) {
-        intStatus.innerHTML = `🔗 <strong>${col.integration_type}</strong> (${col.integration_mode || 'read'})`;
+        const dotColor = col.integration_status === 'error' ? '#ef4444' : '#22c55e';
+        intStatus.innerHTML = `<span style="color:${dotColor}">●</span> <strong>${col.integration_type}</strong> · ${col.integration_mode || 'read'}`;
+        document.getElementById('editColAddIntegrationRow').style.display = 'none';
         document.getElementById('editColRemoveIntegration').style.display = 'block';
     } else {
         intStatus.innerHTML = '<span style="color:var(--text-secondary)">None</span>';
+        document.getElementById('editColAddIntegrationRow').style.display = 'block';
         document.getElementById('editColRemoveIntegration').style.display = 'none';
     }
+
     document.getElementById('editColumnModal').classList.add('active');
 }
 
@@ -593,13 +857,22 @@ async function saveColumnSettings() {
     const name = document.getElementById('editColName').value.trim();
     const position = document.getElementById('editColPosition').value;
     const color = document.getElementById('editColColor').value;
-    const removeIntegration = document.getElementById('editColRemoveInt')?.checked || false;
+    const removeInt = document.getElementById('editColRemoveInt')?.checked || false;
+    const addInt = document.getElementById('editColEnableIntegration')?.checked || false;
+    const replaceInt = document.getElementById('editColReplaceInt')?.checked || false;
 
     const body = {};
     if (name) body.name = name;
     if (position !== '') body.position = parseInt(position);
     if (color) body.color = color;
-    if (removeIntegration) body.remove_integration = true;
+
+    if (removeInt) {
+        body.remove_integration = true;
+    } else if (addInt || replaceInt) {
+        const integration = _collectEditIntegrationPayload();
+        if (!integration || !integration.type) { showToast('Please select an integration service'); return; }
+        body.integration = integration;
+    }
 
     try {
         const res = await fetch(`/api/columns/${colId}`, {

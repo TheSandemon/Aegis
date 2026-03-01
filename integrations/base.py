@@ -7,6 +7,7 @@ Each integration is bound to a single Kanban column and has a mode:
   "write"      — push Aegis card changes → external service
   "read_write" — bidirectional
 """
+import hashlib
 import logging
 from abc import ABC, abstractmethod
 from typing import Optional
@@ -104,21 +105,30 @@ class BaseIntegration(ABC):
         title: str,
         description: str,
         priority: str = "normal",
+        metadata: Optional[str] = None,
     ) -> dict:
         """
         Deduplication-aware card upsert.
         Finds existing card with same (external_id, external_source).
-        Creates if not found; updates title/description if they changed.
+        Creates if not found; updates title/description/metadata if they changed.
+        Skips update if incoming description hash matches last_synced_hash (loop guard).
         Broadcasts card_created or card_updated via self.broadcaster.
         """
         existing = self.store.find_card_by_external_id(external_id, external_source)
 
         if existing:
+            # Loop guard: skip if this content is an echo of our last sync_out
+            incoming_hash = hashlib.sha256((description or "").encode()).hexdigest()
+            if existing.get("last_synced_hash") and existing["last_synced_hash"] == incoming_hash:
+                return existing
+
             updates = {}
             if existing.get("title") != title:
                 updates["title"] = title
             if existing.get("description") != description:
                 updates["description"] = description
+            if metadata is not None:
+                updates["metadata"] = metadata
             if updates:
                 card = self.store.update_card(existing["id"], **updates)
                 await self.broadcaster({"type": "card_updated", "card": card})
@@ -134,6 +144,7 @@ class BaseIntegration(ABC):
                 external_id=external_id,
                 external_source=external_source,
                 external_url=external_url,
+                metadata=metadata,
             )
             await self.broadcaster({"type": "card_created", "card": card})
             return card

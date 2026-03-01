@@ -18,6 +18,8 @@ import asyncio
 import logging
 import sqlite3
 import httpx
+import shutil
+import secrets
 from pathlib import Path
 from datetime import datetime
 import sys
@@ -33,7 +35,7 @@ if sys.stdout.encoding and sys.stdout.encoding.lower() != 'utf-8':
     except AttributeError:
         pass
 
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, Request, File, UploadFile
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
@@ -57,38 +59,59 @@ AGENT_COLORS = [
     "#6366f1", "#f59e0b", "#10b981", "#ef4444", "#8b5cf6", "#ec4899", "#06b6d4"
 ]
 
+# ─── Data Directories ────────────────────────────────────────────────────────
+PROFILES_DIR = Path(__file__).parent / "aegis_data" / "profiles"
+ASSETS_DIR = Path(__file__).parent / "aegis_data" / "assets"
+
+for d in [PROFILES_DIR, ASSETS_DIR]:
+    d.mkdir(parents=True, exist_ok=True)
+
 # ─── System Prompt ───────────────────────────────────────────────────────────────
 SYSTEM_PROMPT_PATH = Path(__file__).parent / "aegis_data" / "system_prompt.txt"
-DEFAULT_SYSTEM_PROMPT = """You are an autonomous AI agent working on a Kanban board via a REST API.
-Your Name: {agent_name}
+DEFAULT_SYSTEM_PROMPT = """You are {agent_name}, an autonomous AI agent operating a Kanban board.
 Your Goal: {goal}
 
-Core Workspace Mechanics:
-1. The Kanban board is composed of Columns (e.g., 'Inbox', 'In Progress', 'Done').
-2. Tasks are represented as Cards inside these columns.
-3. You MUST take action to achieve your goal. Do NOT just output text. Use the JSON tools provided.
-4. If your goal is to "create ideas in the inbox", you must use the 'create_card' tool and set the 'column' argument to 'Inbox' (or whatever column is requested).
-5. If you see a card you need to work on, use 'update_card' to move it, change its status, or claim it as the assignee.
-6. Use 'post_comment' to add notes to cards you are working on. To pass context to another agent, simply mention the card ID in your comment or description like this: "@123" or "See @45 for details". This will automatically bundle card #45 into that agent's context window.
-7. Use 'wait' ONLY if you are truly blocked waiting for a human or another agent to do something.
+━━━ BOARD STRUCTURE ━━━
+• Columns are ordered stages (e.g. Inbox → Planned → In Progress → Review → Done).
+• Cards are tasks. Each card has: id (int), title, description, column, assignee, priority, status, comments.
+• You can only use column names that already exist on the board. Check the COLUMNS list before acting.
 
-Available Actions (Tools):
-1. create_card: {"title": str, "description": str, "column": str, "assignee": str} - Create a new task in a specific column.
-2. update_card: {"card_id": int, "column": str, "assignee": str, "status": str, "priority": "low"|"normal"|"high"} - Move a card, assign it, or update it.
-3. delete_card: {"card_id": int} - Remove a card.
-4. post_comment: {"card_id": int, "content": str} - Add details or ask questions on a card.
-5. create_column: {"name": str, "position": int} - Add a new Kanban column.
-6. delete_column: {"column_id": int} - Remove a column.
-7. wait: {"reason": str} - Pause until the next pulse (use sparingly).
+━━━ CORE RULES ━━━
+1. ALWAYS act. Never respond with plain text — only use the JSON action format below.
+2. Work on cards assigned to you OR unclaimed cards that match your goal.
+3. When you finish a task, move the card to "Review" (not "Done" — a human approves final completion).
+4. Use post_comment to leave notes, report progress, or ask questions on a card.
+5. Reference other cards in comments/descriptions as @<id> (e.g. "@42") to link context.
+6. NEVER duplicate work. Check existing cards before creating new ones.
+7. If you see a 403 error, the action is not permitted — do not retry it.
 
-Response Format (JSON Array ONLY):
+━━━ AVAILABLE ACTIONS ━━━
+create_card    — {{"title": str, "description": str, "column": str, "assignee": str|null}}
+update_card    — {{"card_id": int, "title": str|null, "description": str|null, "column": str|null, "assignee": str|null, "status": str|null, "priority": "low"|"normal"|"high"|null}}
+delete_card    — {{"card_id": int}}
+post_comment   — {{"card_id": int, "content": str}}
+create_column  — {{"name": str, "position": int}}
+delete_column  — {{"column_id": int}}
+wait           — {{"reason": str}}  ← Use ONLY when genuinely blocked; ends the pulse.
+
+━━━━━━━━ PERSONALITY ━━━━━━━━
+• You are an autonomous entity with a distinct name ({agent_name}) and goal ({goal}).
+• Express your personality in your "thought" field — be professional, quirky, cautious, or bold as appropriate for your name and goal.
+• Use the thought field to reflect on your progress and plan your steps.
+
+━━━ RESPONSE FORMAT (strict JSON array) ━━━
 [
-    {
-        "thought": "Brief reasoning for this action.",
-        "action": "action_name",
-        "args": {...}
-    }
-]"""
+  {{
+    "thought": "What I observed and why I'm taking this action.",
+    "action": "action_name",
+    "args": {{ ... }}
+  }}
+]
+
+You may return multiple action objects in the array to batch several steps.
+After each step you will receive an observation. Use observations to guide your next step.
+If an action returns an error, adapt — do not repeat the same failing call.
+End the pulse with "wait" once your current task sequence is complete."""
 
 def load_system_prompt():
     if SYSTEM_PROMPT_PATH.exists():
@@ -178,6 +201,15 @@ class AegisStore:
                 conn.execute('ALTER TABLE cards ADD COLUMN external_url TEXT DEFAULT NULL')
             except sqlite3.OperationalError:
                 pass
+            # Structured external metadata + loop-prevention hash
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN metadata TEXT DEFAULT "{}"')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN last_synced_hash TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
             # Integration config fields on columns
             try:
                 conn.execute('ALTER TABLE columns ADD COLUMN integration_type TEXT DEFAULT NULL')
@@ -211,6 +243,15 @@ class AegisStore:
                 conn.execute('ALTER TABLE columns ADD COLUMN integration_status TEXT DEFAULT NULL')
             except sqlite3.OperationalError:
                 pass
+            # Card groups (column-scoped swimlane labels) + global card tags
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN card_group TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE cards ADD COLUMN card_tags TEXT DEFAULT "[]"')
+            except sqlite3.OperationalError:
+                pass
             conn.commit()
 
     def get_columns(self):
@@ -240,6 +281,17 @@ class AegisStore:
             row = conn.execute('SELECT * FROM columns WHERE id = ?', (col_id,)).fetchone()
             return dict(row) if row else None
 
+    def update_column(self, col_id: int, **kwargs):
+        """Update non-integration column fields (name, position, color)."""
+        if not kwargs:
+            return self.get_column_by_id(col_id)
+        fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
+        values = list(kwargs.values()) + [col_id]
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(f'UPDATE columns SET {fields} WHERE id = ?', values)
+            conn.commit()
+        return self.get_column_by_id(col_id)
+
     def update_column_integration(self, col_id: int, **kwargs):
         if not kwargs:
             return
@@ -262,6 +314,8 @@ class AegisStore:
             card["comments"] = json.loads(card.get("comments") or "[]")
             card["logs"] = json.loads(card.get("logs") or "[]")
             card["depends_on"] = json.loads(card.get("depends_on") or "[]")
+            card["metadata"] = json.loads(card.get("metadata") or "{}")
+            card["card_tags"] = json.loads(card.get("card_tags") or "[]")
             return card
 
     def create_card(self, title, description="", column="Inbox", assignee=None, **kwargs):
@@ -301,6 +355,8 @@ class AegisStore:
             card["comments"] = json.loads(card.get("comments") or "[]")
             card["logs"] = json.loads(card.get("logs") or "[]")
             card["depends_on"] = json.loads(card.get("depends_on") or "[]")
+            card["metadata"] = json.loads(card.get("metadata") or "{}")
+            card["card_tags"] = json.loads(card.get("card_tags") or "[]")
             return card
 
     def get_cards(self, column=None):
@@ -316,6 +372,8 @@ class AegisStore:
                 card["comments"] = json.loads(card.get("comments") or "[]")
                 card["logs"] = json.loads(card.get("logs") or "[]")
                 card["depends_on"] = json.loads(card.get("depends_on") or "[]")
+                card["metadata"] = json.loads(card.get("metadata") or "{}")
+                card["card_tags"] = json.loads(card.get("card_tags") or "[]")
                 cards.append(card)
             return cards
 
@@ -477,6 +535,7 @@ engine.broadcaster = manager.broadcast
 
 # Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
+app.mount("/assets", StaticFiles(directory=str(ASSETS_DIR)), name="assets")
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -490,6 +549,8 @@ class CardCreate(BaseModel):
     assignee: Optional[str] = None
     depends_on: Optional[list[int]] = None
     priority: str = "normal"
+    card_group: Optional[str] = None
+    card_tags: Optional[list[str]] = None
 
 class CardUpdate(BaseModel):
     title: Optional[str] = None
@@ -498,6 +559,29 @@ class CardUpdate(BaseModel):
     assignee: Optional[str] = None
     status: Optional[str] = None
     depends_on: Optional[list[int]] = None
+    priority: Optional[str] = None
+    card_group: Optional[str] = None
+    card_tags: Optional[list[str]] = None
+
+class InstanceCreate(BaseModel):
+    template_id: str
+    instance_name: str
+    service: Optional[str] = ""
+    model: Optional[str] = ""
+    env_vars: Optional[dict] = {}
+    config: Optional[dict] = {}
+    icon: Optional[str] = None
+    color: Optional[str] = None
+
+class InstanceUpdate(BaseModel):
+    instance_name: Optional[str] = None
+    enabled: Optional[bool] = None
+    service: Optional[str] = None
+    model: Optional[str] = None
+    env_vars: Optional[dict] = None
+    config: Optional[dict] = None
+    icon: Optional[str] = None
+    color: Optional[str] = None
     priority: Optional[str] = None
 
 class CommentCreate(BaseModel):
@@ -563,6 +647,8 @@ async def create_column(col: ColumnCreate):
             "webhook_secret": col.integration.webhook_secret,
         }
         await integration_manager.setup_integration(new_col["id"], col_data)
+        # Immediately pull initial data so cards appear without waiting for first poll
+        asyncio.create_task(integration_manager.initial_sync(new_col["id"]))
 
     await manager.broadcast({"type": "column_created", "column": new_col})
     return new_col
@@ -597,49 +683,98 @@ async def delete_column(col_id: int, cascade: str = "block", force: bool = False
         return {"success": True}
     raise HTTPException(status_code=404, detail="Column not found")
 
-@app.patch("/api/columns/{col_id}")
-async def update_column_endpoint(col_id: int, update: ColumnUpdate):
-    """Update a column's name, position, or integration settings."""
-    col = next((c for c in store.get_columns() if c["id"] == col_id), None)
-    if not col:
-        raise HTTPException(status_code=404, detail="Column not found")
 
-    if update.name and update.name != col["name"]:
-        # Rename column and update all cards in it
-        old_name = col["name"]
-        store.update_column_integration(col_id, name=update.name)
-        for card in store.get_cards(column=old_name):
-            store.update_card(card["id"], column=update.name)
+@app.post("/api/assets/upload")
+async def upload_asset(file: UploadFile = File(...)):
+    """Upload a custom icon or asset."""
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"):
+        raise HTTPException(status_code=400, detail="Invalid file type")
 
-    if update.position is not None:
-        store.update_column_integration(col_id, position=update.position)
+    fname = f"icon_{secrets.token_hex(4)}{ext}"
+    fpath = ASSETS_DIR / fname
+    
+    try:
+        with open(fpath, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        return {"url": f"/assets/{fname}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
 
-    if update.color is not None:
-        store.update_column_integration(col_id, color=update.color)
+# ─── Model Registry ──────────────────────────────────────────────────────────────
 
-    if update.remove_integration:
-        await integration_manager.teardown_integration(col_id)
-        store.update_column_integration(col_id,
-            integration_type=None, integration_mode="read",
-            integration_credentials=None, integration_filters=None,
-            integration_status=None)
+# Single source-of-truth for supported services + models.
+# The frontend reads this at startup so both stay in sync.
+SERVICE_MODELS: dict = {
+    "anthropic": {
+        "name": "Anthropic",
+        "key_env": "ANTHROPIC_API_KEY",
+        "models": [
+            {"id": "claude-opus-4-6", "name": "Claude Opus 4.6"},
+            {"id": "claude-sonnet-4-6", "name": "Claude Sonnet 4.6"},
+            {"id": "claude-haiku-4-5-20251001", "name": "Claude Haiku 4.5"},
+            {"id": "claude-3-7-sonnet-latest", "name": "Claude 3.7 Sonnet"},
+            {"id": "claude-3-5-sonnet-latest", "name": "Claude 3.5 Sonnet"},
+            {"id": "claude-3-5-haiku-latest", "name": "Claude 3.5 Haiku"},
+            {"id": "claude-3-opus-latest", "name": "Claude 3 Opus"},
+        ],
+    },
+    "google": {
+        "name": "Google",
+        "key_env": "GOOGLE_API_KEY",
+        "models": [
+            {"id": "gemini-2.5-pro", "name": "Gemini 2.5 Pro"},
+            {"id": "gemini-2.5-flash", "name": "Gemini 2.5 Flash"},
+            {"id": "gemini-2.0-flash", "name": "Gemini 2.0 Flash"},
+            {"id": "gemini-2.0-pro-exp-02-05", "name": "Gemini 2.0 Pro Experimental"},
+        ],
+    },
+    "openai": {
+        "name": "OpenAI",
+        "key_env": "OPENAI_API_KEY",
+        "models": [
+            {"id": "gpt-4o", "name": "GPT-4o"},
+            {"id": "gpt-4o-mini", "name": "GPT-4o Mini"},
+            {"id": "o3-mini", "name": "o3-mini"},
+            {"id": "o1", "name": "o1"},
+        ],
+    },
+    "deepseek": {
+        "name": "DeepSeek",
+        "key_env": "DEEPSEEK_API_KEY",
+        "models": [
+            {"id": "deepseek-reasoner", "name": "DeepSeek Reasoner (R1)"},
+            {"id": "deepseek-chat", "name": "DeepSeek Chat (V3)"},
+        ],
+    },
+    "minimax": {
+        "name": "MiniMax",
+        "key_env": "MINIMAX_API_KEY",
+        "models": [
+            {"id": "MiniMax-M2.5", "name": "MiniMax M2.5"},
+            {"id": "MiniMax-Text-01", "name": "MiniMax Text-01"},
+            {"id": "MiniMax-01", "name": "MiniMax-01"},
+        ],
+    },
+    "custom": {
+        "name": "Custom",
+        "key_env": "",
+        "models": [],
+    },
+}
 
-    if update.integration:
-        col_data = {
-            "name": update.name or col["name"],
-            "integration_type": update.integration.type,
-            "integration_mode": update.integration.mode,
-            "integration_credentials": json.dumps(update.integration.credentials),
-            "integration_filters": json.dumps(update.integration.filters),
-            "sync_interval_ms": update.integration.sync_interval_ms,
-            "webhook_secret": update.integration.webhook_secret,
-        }
-        await integration_manager.setup_integration(col_id, col_data)
+@app.get("/api/models")
+async def get_models():
+    """Return the authoritative service/model registry used by all agents."""
+    return SERVICE_MODELS
 
-    updated_col = store.get_column_by_id(col_id)
-    await manager.broadcast({"type": "column_updated", "column": updated_col})
-    return updated_col
-
+@app.get("/api/models/{service_id}")
+async def get_service_models(service_id: str):
+    """Return models for a specific service."""
+    svc = SERVICE_MODELS.get(service_id)
+    if not svc:
+        raise HTTPException(status_code=404, detail=f"Unknown service '{service_id}'")
+    return svc
 
 # ─── Broker Control ──────────────────────────────────────────────────────────────
 
@@ -666,6 +801,52 @@ async def get_min_pulse():
     """Returns the minimum safe pulse interval based on broker rate."""
     return {"min_pulse_seconds": int(broker.interval)}
 
+
+@app.patch("/api/columns/{col_id}")
+async def update_column(col_id: int, update: ColumnUpdate):
+    """Update column name, position, color, or integration settings."""
+    col = store.get_column_by_id(col_id)
+    if not col:
+        raise HTTPException(status_code=404, detail="Column not found")
+
+    db_updates = {}
+    old_name = col["name"]
+
+    if update.name is not None and update.name.strip() and update.name.strip() != old_name:
+        new_name = update.name.strip()
+        db_updates["name"] = new_name
+        # Rename all cards in this column
+        for card in store.get_cards(column=old_name):
+            store.update_card(card["id"], column=new_name)
+
+    if update.position is not None:
+        db_updates["position"] = update.position
+
+    if update.color is not None:
+        db_updates["color"] = update.color
+
+    if db_updates:
+        store.update_column(col_id, **db_updates)
+
+    if update.remove_integration:
+        await integration_manager.teardown_integration(col_id)
+    elif update.integration:
+        col_name = db_updates.get("name", old_name)
+        col_data = {
+            "name": col_name,
+            "integration_type": update.integration.type,
+            "integration_mode": update.integration.mode,
+            "integration_credentials": json.dumps(update.integration.credentials),
+            "integration_filters": json.dumps(update.integration.filters),
+            "sync_interval_ms": update.integration.sync_interval_ms,
+            "webhook_secret": update.integration.webhook_secret,
+        }
+        await integration_manager.setup_integration(col_id, col_data)
+        asyncio.create_task(integration_manager.initial_sync(col_id))
+
+    updated = store.get_column_by_id(col_id)
+    await manager.broadcast({"type": "column_updated", "column": updated})
+    return updated
 
 @app.get("/")
 async def root():
@@ -714,8 +895,16 @@ async def create_card(card: CardCreate):
         create_kwargs["depends_on"] = json.dumps(card.depends_on)
     if card.priority:
         create_kwargs["priority"] = card.priority
+    if card.card_group is not None:
+        create_kwargs["card_group"] = card.card_group
+    if card.card_tags is not None:
+        create_kwargs["card_tags"] = json.dumps(card.card_tags)
     new_card = store.create_card(card.title, card.description, card.column, card.assignee, **create_kwargs)
     await manager.broadcast({"type": "card_created", "card": new_card})
+    
+    # Push change to external integration
+    asyncio.create_task(integration_manager.notify_card_change(new_card, "card_created"))
+    
     return new_card
 
 @app.get("/api/cards/{card_id}")
@@ -787,9 +976,28 @@ async def get_card_context(card_id: int):
                 "priority": c.get("priority", "normal")
             })
 
+    # Resolve @ColumnName and @AgentName mentions from description/comments
+    all_columns = store.get_columns()
+    all_instances = load_instances()
+    col_names = {c["name"] for c in all_columns}
+    agent_names = {inst.get("instance_name") or inst.get("agent_id") for inst in all_instances}
+
+    mentioned_columns = []
+    mentioned_agents = []
+    for match in re.finditer(r'@([A-Za-z][^\s@]{0,49})', text_to_search):
+        token = match.group(1)
+        if token in col_names:
+            col_obj = next((c for c in all_columns if c["name"] == token), None)
+            if col_obj and col_obj not in mentioned_columns:
+                mentioned_columns.append(col_obj)
+        elif token in agent_names:
+            inst = next((i for i in all_instances if (i.get("instance_name") or i.get("agent_id")) == token), None)
+            if inst and inst not in mentioned_agents:
+                mentioned_agents.append(inst)
+
     # Build column metadata for agent context
     focus_col_name = focus_card.get("column", "")
-    focus_col_obj = next((c for c in store.get_columns() if c["name"] == focus_col_name), {})
+    focus_col_obj = next((c for c in all_columns if c["name"] == focus_col_name), {})
     column_meta = {
         "name": focus_col_name,
         "is_read_only": bool(focus_col_obj.get("integration_type") and focus_col_obj.get("integration_mode") == "read"),
@@ -800,7 +1008,9 @@ async def get_card_context(card_id: int):
         "focus_card": focus_card,
         "related_context": related_context,
         "board_directory": board_directory,
-        "column_meta": column_meta
+        "column_meta": column_meta,
+        "mentioned_columns": mentioned_columns,
+        "mentioned_agents": [{"instance_name": i.get("instance_name"), "agent_id": i.get("agent_id"), "goal": i.get("goal")} for i in mentioned_agents],
     }
 
 @app.patch("/api/cards/{card_id}")
@@ -812,9 +1022,11 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
 
     updates = update.model_dump(exclude_none=True)
 
-    # Serialize depends_on as JSON string for SQLite
+    # Serialize JSON fields for SQLite
     if "depends_on" in updates:
         updates["depends_on"] = json.dumps(updates["depends_on"])
+    if "card_tags" in updates:
+        updates["card_tags"] = json.dumps(updates["card_tags"])
 
     new_column = updates.get("column")
     if new_column and new_column != existing["column"]:
@@ -870,11 +1082,8 @@ async def delete_card(card_id: int, request: Request, close_external: bool = Fal
                 detail=f"Cannot delete cards in read-only integrated column '{card.get('column')}'"
             )
 
-    # Optionally close the external issue before deleting locally
-    if close_external and card.get("external_source"):
-        asyncio.create_task(integration_manager.notify_card_change(
-            {**card, "column": "Done"}, "card_moved"
-        ))
+    # Push change to external integration before deleting from DB
+    asyncio.create_task(integration_manager.notify_card_change(card, "card_deleted"))
 
     if store.delete_card(card_id):
         await manager.broadcast({"type": "card_deleted", "card_id": card_id})
@@ -991,6 +1200,9 @@ async def approve_card(card_id: int):
 
     updated = store.update_card(card_id, column="Done", status="approved")
     await manager.broadcast({"type": "card_updated", "card": updated})
+    
+    # Push change to external integration
+    asyncio.create_task(integration_manager.notify_card_change(updated, "card_moved"))
 
     logger.info(f"Card {card_id} approved and moved to Done")
     return {"success": True, "card": updated}
@@ -1204,27 +1416,24 @@ async def get_agent_params():
 # INSTANCE CRUD (Factory Pattern)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-class InstanceCreateRequest(BaseModel):
-    template_id: str
-    instance_name: str
-    service: str = ""
-    model: str = ""
-    env_vars: Optional[dict] = None
-    config: Optional[dict] = None
-
 @app.post("/api/instances/create")
-async def create_instance_endpoint(req: InstanceCreateRequest):
-    """Create a new worker instance from an installed template."""
+async def create_instance_api(req: InstanceCreate):
+    """Create a new agent instance."""
     registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == req.template_id), None)
-    result = create_instance(
-        req.template_id, req.instance_name, registry_entry,
-        env_vars=req.env_vars or {}, service=req.service, model=req.model,
-        config=req.config or {}
+    instance = create_instance(
+        req.template_id, req.instance_name,
+        registry_entry=registry_entry,
+        env_vars=req.env_vars,
+        service=req.service,
+        model=req.model,
+        config=req.config,
+        icon=req.icon,
+        color=req.color
     )
-    if "error" in result:
-        raise HTTPException(status_code=400, detail=result["error"])
-    await manager.broadcast({"type": "instance_created", "instance": result})
-    return result
+    if "error" in instance:
+        raise HTTPException(status_code=400, detail=instance["error"])
+    await manager.broadcast({"type": "instance_created", "instance": instance})
+    return instance
 
 @app.get("/api/instances")
 async def list_instances():
@@ -1248,17 +1457,25 @@ async def delete_instance_endpoint(instance_id: str):
     return result
 
 @app.patch("/api/instances/{instance_id}/settings")
-async def update_instance_settings(instance_id: str, updates: dict):
-    """Update per-instance settings (name, service, model, env_vars, enabled)."""
+async def update_instance_settings(instance_id: str, req: InstanceUpdate):
+    """Update per-instance settings (name, service, model, env_vars, enabled, icon, color)."""
     instances = load_instances()
     inst = next((i for i in instances if i["instance_id"] == instance_id), None)
     if not inst:
         raise HTTPException(status_code=404, detail="Instance not found")
     
-    for key in ["instance_name", "service", "model", "env_vars", "enabled", "config"]:
-        if key in updates:
-            inst[key] = updates[key]
-    
+    if req.instance_name is not None: inst["instance_name"] = req.instance_name
+    if req.enabled is not None: inst["enabled"] = req.enabled
+    if req.service is not None: inst["service"] = req.service
+    if req.model is not None: inst["model"] = req.model
+    if req.config is not None: inst["config"] = req.config
+    if req.icon is not None: inst["icon"] = req.icon
+    if req.color is not None: inst["color"] = req.color
+
+    # Merge env_vars if provided
+    if req.env_vars:
+        inst.setdefault("env_vars", {}).update(req.env_vars)
+
     save_instances(instances)
     await manager.broadcast({"type": "instance_updated", "instance": inst})
     return {"success": True, "instance": inst}
@@ -1498,6 +1715,32 @@ async def verify_api_key(req: VerifyKeyRequest):
         except Exception:
             pass
 
+    # 4. MiniMax — no standard key prefix; try as a final fallback
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://api.minimaxi.chat/v1/models",
+                headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"}
+            )
+            if resp.status_code == 200:
+                data = resp.json()
+                raw_models = data.get("data", data.get("models", []))
+                models = [
+                    {"id": m.get("id", m.get("model", "")), "name": m.get("id", m.get("model", ""))}
+                    for m in raw_models if m.get("id") or m.get("model")
+                ]
+                if not models:
+                    models = SERVICE_MODELS["minimax"]["models"]
+                return {
+                    "valid": True,
+                    "service": "minimax",
+                    "env_key_name": "MINIMAX_API_KEY",
+                    "models": models,
+                    "default_model": "MiniMax-M2.5"
+                }
+    except Exception:
+        pass
+
     return {
         "valid": False,
         "error": "Invalid API key or unknown provider format."
@@ -1534,6 +1777,37 @@ async def update_agent_params(agent_id: str, updates: dict):
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 # INTEGRATION ROUTES
+# ─── Profile Management ──────────────────────────────────────────────────────────
+
+@app.get("/api/profiles")
+async def list_profiles():
+    """List all saved agent profiles."""
+    profiles = []
+    for p in PROFILES_DIR.glob("*.json"):
+        try:
+            profiles.append(json.loads(p.read_text(encoding="utf-8")))
+        except Exception:
+            pass
+    return profiles
+
+@app.post("/api/profiles")
+async def save_profile(profile: dict):
+    """Save a new agent profile."""
+    profile_id = profile.get("id") or f"profile_{secrets.token_hex(4)}"
+    profile["id"] = profile_id
+    path = PROFILES_DIR / f"{profile_id}.json"
+    path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
+    return profile
+
+@app.delete("/api/profiles/{profile_id}")
+async def delete_profile(profile_id: str):
+    """Delete a saved agent profile."""
+    path = PROFILES_DIR / f"{profile_id}.json"
+    if path.exists():
+        path.unlink()
+    return {"success": True}
+
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 
 @app.get("/api/integrations")
@@ -1554,6 +1828,152 @@ async def receive_webhook(column_id: int, request: Request):
     # Always return 200 to prevent webhook retry storms
     return {"status": "processed" if result else "ignored"}
 
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# BOARD WORKSPACES (Save / Load)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+WORKSPACES_DIR = Path(__file__).parent / "aegis_data" / "workspaces"
+WORKSPACES_DIR.mkdir(parents=True, exist_ok=True)
+
+def _export_board_snapshot() -> dict:
+    """Serialize the current board + agent state to a portable dict (Workflowspace)."""
+    from execution_engine import load_instances
+    columns = store.get_columns()
+    cards = store.get_cards()
+    # Exclude integration-managed cards — they'll be re-synced from the external source on load
+    cards = [c for c in cards if not c.get("external_source")]
+    # Strip volatile runtime fields
+    for card in cards:
+        card.pop("status", None)
+        card.pop("assignee", None)
+    # Include agent instances without sensitive env_vars (API keys stay local)
+    instances = load_instances()
+    agents = [
+        {k: v for k, v in inst.items() if k not in ("env_vars", "path")}
+        for inst in instances
+    ]
+    return {
+        "version": 2,
+        "exported_at": datetime.now().isoformat(),
+        "columns": columns,
+        "cards": cards,
+        "agents": agents,
+    }
+
+@app.get("/api/workspaces")
+async def list_workspaces():
+    """List all saved board workspaces."""
+    workspaces = []
+    for p in sorted(WORKSPACES_DIR.glob("*.json")):
+        try:
+            data = json.loads(p.read_text(encoding="utf-8"))
+            workspaces.append({
+                "name": p.stem,
+                "exported_at": data.get("exported_at"),
+                "columns": len(data.get("columns", [])),
+                "cards": len(data.get("cards", [])),
+                "agents": len(data.get("agents", [])),
+            })
+        except Exception:
+            pass
+    return workspaces
+
+@app.get("/api/workspaces/export")
+async def export_workspace():
+    """Download the current board as a JSON snapshot (no save)."""
+    return _export_board_snapshot()
+
+@app.post("/api/workspaces/{name}/save")
+async def save_workspace(name: str):
+    """Save current board state as a named workspace."""
+    safe_name = "".join(c for c in name if c.isalnum() or c in "-_").strip() or "workspace"
+    snapshot = _export_board_snapshot()
+    path = WORKSPACES_DIR / f"{safe_name}.json"
+    path.write_text(json.dumps(snapshot, indent=2, ensure_ascii=False), encoding="utf-8")
+    return {"name": safe_name, "saved": True, "cards": len(snapshot["cards"]), "columns": len(snapshot["columns"]), "agents": len(snapshot.get("agents", []))}
+
+@app.post("/api/workspaces/{name}/load")
+async def load_workspace(name: str, merge: bool = False):
+    """
+    Restore a saved workspace.
+    merge=false (default): clears the board first, then imports.
+    merge=true: adds workspace cards/columns without clearing existing ones.
+    """
+    path = WORKSPACES_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Workspace '{name}' not found")
+
+    snapshot = json.loads(path.read_text(encoding="utf-8"))
+
+    if not merge:
+        # Clear current board
+        for card in store.get_cards():
+            store.delete_card(card["id"])
+        for col in store.get_columns():
+            store.delete_column(col["id"])
+
+    # Restore columns
+    col_id_map = {}  # old_id → new_id
+    for col in snapshot.get("columns", []):
+        new_col = store.create_column(col["name"], col.get("position", 0), col.get("color"))
+        if new_col:
+            col_id_map[col["id"]] = new_col["id"]
+            # Restore integration metadata without activating (user must re-authenticate)
+            if col.get("integration_type"):
+                store.update_column_integration(
+                    new_col["id"],
+                    integration_type=col.get("integration_type"),
+                    integration_mode=col.get("integration_mode", "read"),
+                    integration_status="inactive",
+                )
+
+    # Restore cards
+    for card in snapshot.get("cards", []):
+        store.create_card(
+            title=card.get("title", ""),
+            description=card.get("description", ""),
+            column=card.get("column", "Inbox"),
+            assignee=None,
+            priority=card.get("priority", "normal"),
+        )
+
+    # Restore agents — add any from snapshot that don't already exist (matched by instance_name)
+    from execution_engine import load_instances, create_instance
+    existing_names = {i["instance_name"] for i in load_instances()}
+    restored_agents = 0
+    for agent in snapshot.get("agents", []):
+        if agent.get("instance_name") and agent["instance_name"] not in existing_names:
+            reg = next((r for r in AGENT_REGISTRY if r["id"] == agent.get("template_id", "")), None)
+            result = create_instance(
+                template_id=agent.get("template_id", "aegis-worker"),
+                instance_name=agent["instance_name"],
+                registry_entry=reg,
+                service=agent.get("service", ""),
+                model=agent.get("model", ""),
+                config=agent.get("config", {}),
+            )
+            if "error" not in result:
+                existing_names.add(agent["instance_name"])
+                restored_agents += 1
+
+    # Broadcast full refresh
+    await manager.broadcast({"type": "board_loaded", "workspace": name})
+    return {
+        "loaded": name,
+        "columns": len(snapshot.get("columns", [])),
+        "cards": len(snapshot.get("cards", [])),
+        "agents": restored_agents,
+    }
+
+@app.delete("/api/workspaces/{name}")
+async def delete_workspace(name: str):
+    """Delete a saved workspace."""
+    path = WORKSPACES_DIR / f"{name}.json"
+    if not path.exists():
+        raise HTTPException(status_code=404, detail=f"Workspace '{name}' not found")
+    path.unlink()
+    return {"deleted": name}
 
 @app.get("/api/telemetry")
 async def get_telemetry():
@@ -1689,15 +2109,16 @@ async def polling_loop():
             logger.error(f"Polling error: {e}")
 
 async def broker_polling_loop():
-    """Periodically broadcasts broker stats to the frontend."""
+    """Broadcasts broker stats only when they change (checked every 2s)."""
+    last_stats_json = ""
     while True:
         try:
-            await asyncio.sleep(2) # Every 2 seconds
+            await asyncio.sleep(2)
             stats = broker.get_stats()
-            await manager.broadcast({
-                "type": "broker_update",
-                "stats": stats
-            })
+            stats_json = json.dumps(stats, sort_keys=True, default=str)
+            if stats_json != last_stats_json:
+                last_stats_json = stats_json
+                await manager.broadcast({"type": "broker_update", "stats": stats})
         except Exception as e:
             logger.error(f"Broker polling error: {e}")
             await asyncio.sleep(5)

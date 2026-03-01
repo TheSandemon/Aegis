@@ -14,6 +14,8 @@ Filters:
 """
 import hashlib
 import hmac
+import json
+import re
 from typing import Optional
 
 import httpx
@@ -72,6 +74,7 @@ class GitHubIntegration(BaseIntegration):
                         title=f"[GH #{issue['number']}] {issue['title']}",
                         description=self._build_description(issue),
                         priority=self._priority_from_labels(issue.get("labels", [])),
+                        metadata=self._build_metadata(issue),
                     )
                     results.append(card)
                 page += 1
@@ -80,21 +83,73 @@ class GitHubIntegration(BaseIntegration):
     # ── sync_out ─────────────────────────────────────────────────────────────
 
     async def sync_out(self, card: dict, event_type: str) -> bool:
+        # Strip the [GH #N] prefix we add locally — GitHub stores the clean title
+        clean_title = re.sub(r'^\[GH #\d+\]\s*', '', card.get("title", ""))
+
+        # 1. Handle NEW cards (no external_id yet)
+        if event_type == "card_created" and not card.get("external_id"):
+            if card.get("column") != self.column_name:
+                return False
+
+            async with httpx.AsyncClient(timeout=20) as client:
+                resp = await client.post(
+                    f"{_BASE}/repos/{self._repo()}/issues",
+                    headers=self._headers(),
+                    json={"title": clean_title, "body": card.get("description", "")},
+                )
+                if resp.status_code == 201:
+                    data = resp.json()
+                    updated = self.store.update_card(
+                        card["id"],
+                        external_id=str(data["number"]),
+                        external_source=self.SOURCE,
+                        external_url=data["html_url"],
+                    )
+                    await self.broadcaster({"type": "card_updated", "card": updated})
+                    return True
+                self.logger.error(f"Failed to create GitHub issue: {resp.status_code} - {resp.text}")
+                return False
+
+        # 2. Handle EXISTING cards
         if card.get("external_source") != self.SOURCE:
             return False
+
         issue_number = card.get("external_id")
         if not issue_number:
             return False
 
         async with httpx.AsyncClient(timeout=20) as client:
-            if event_type == "card_moved" and card.get("column") == "Done":
+            # MOVED TO DONE / DELETED — close the issue
+            if (event_type == "card_moved" and card.get("column") == "Done") or event_type == "card_deleted":
                 resp = await client.patch(
                     f"{_BASE}/repos/{self._repo()}/issues/{issue_number}",
                     headers=self._headers(),
                     json={"state": "closed"},
                 )
+                if resp.status_code == 404:
+                    self.store.delete_card(card["id"])
+                    await self.broadcaster({"type": "card_deleted", "card_id": card["id"]})
+                    return False
                 return resp.status_code == 200
 
+            # CONTENT UPDATED
+            if event_type == "card_updated":
+                resp = await client.patch(
+                    f"{_BASE}/repos/{self._repo()}/issues/{issue_number}",
+                    headers=self._headers(),
+                    json={"title": clean_title, "body": card.get("description", "")},
+                )
+                if resp.status_code == 404:
+                    self.store.delete_card(card["id"])
+                    await self.broadcaster({"type": "card_deleted", "card_id": card["id"]})
+                    return False
+                if resp.status_code == 200:
+                    sync_hash = hashlib.sha256((card.get("description") or "").encode()).hexdigest()
+                    self.store.update_card(card["id"], last_synced_hash=sync_hash)
+                    return True
+                return False
+
+            # COMMENT ADDED
             if event_type == "comment_added":
                 comments = card.get("comments", [])
                 if not comments:
@@ -140,6 +195,7 @@ class GitHubIntegration(BaseIntegration):
                 title=f"[GH #{issue['number']}] {issue['title']}",
                 description=self._build_description(issue),
                 priority=self._priority_from_labels(issue.get("labels", [])),
+                metadata=self._build_metadata(issue),
             )
 
         if action == "closed":
@@ -176,14 +232,21 @@ class GitHubIntegration(BaseIntegration):
     # ── Private helpers ───────────────────────────────────────────────────────
 
     def _build_description(self, issue: dict) -> str:
-        body = issue.get("body") or ""
-        url = issue.get("html_url", "")
-        labels = ", ".join(l["name"] for l in issue.get("labels", []))
-        parts = [body]
-        if labels:
-            parts.append(f"\n**Labels:** {labels}")
-        parts.append(f"\n\nGitHub Issue: {url}")
-        return "\n".join(parts).strip()
+        """Return the raw issue body only. Rich metadata goes to _build_metadata."""
+        return issue.get("body") or ""
+
+    def _build_metadata(self, issue: dict) -> str:
+        """Return a JSON string of structured GitHub metadata for the card's metadata field."""
+        return json.dumps({
+            "source": "github",
+            "action_required": True,
+            "state": issue.get("state", "open"),
+            "github_number": issue.get("number"),
+            "labels": [l["name"] for l in issue.get("labels", [])],
+            "assignees": [a["login"] for a in issue.get("assignees", [])],
+            "milestone": issue["milestone"]["title"] if issue.get("milestone") else None,
+            "external_url": issue.get("html_url", ""),
+        })
 
     def _priority_from_labels(self, labels: list) -> str:
         for label in labels:

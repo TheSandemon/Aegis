@@ -1,9 +1,24 @@
+import hashlib
 import json
 import os
 from pathlib import Path
 import sys
 import logging
 import shutil
+
+def _sha256(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+def _safe_write(path: Path, content: str, label: str = ""):
+    """Write content to path only if it has changed. Returns True if written."""
+    if path.exists():
+        existing = path.read_text(encoding="utf-8")
+        if existing == content:
+            return False  # No change
+    path.write_text(content, encoding="utf-8")
+    if label:
+        print(f"Updated {label}: {path.name}")
+    return True
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(message)s')
@@ -98,34 +113,30 @@ for agent in registry:
     agent_dir = TEMPLATES_DIR / agent["id"]
     agent_dir.mkdir(parents=True, exist_ok=True)
     
-    # Write worker.py from canonical source
+    # Write worker.py to template only if changed (content-addressed)
     if worker_code:
         try:
-            (agent_dir / "worker.py").write_text(worker_code, encoding="utf-8")
-            # Write requirements.txt
-            (agent_dir / "requirements.txt").write_text("requests==2.31.0\n", encoding="utf-8")
+            _safe_write(agent_dir / "worker.py", worker_code, f"template {agent['id']}")
+            _safe_write(agent_dir / "requirements.txt", "requests==2.31.0\n")
         except Exception as e:
             print(f"Warning: Could not write to template directory for {agent['id']}: {e}")
 
-# Bulk sync latest worker.py to ALL existing templates and instances once
+# Sync latest worker.py to OTHER templates (not the canonical one) only if content changed
 if worker_code and TEMPLATES_DIR.exists():
     for t_dir in TEMPLATES_DIR.iterdir():
-        if t_dir.is_dir() and (t_dir / "worker.py").exists():
+        if t_dir.is_dir() and t_dir.name != "aegis-worker" and (t_dir / "worker.py").exists():
             try:
-                (t_dir / "worker.py").write_text(worker_code, encoding='utf-8')
-                print(f"Synced latest worker.py to template {t_dir.name}")
+                updated = _safe_write(t_dir / "worker.py", worker_code)
+                if updated:
+                    print(f"Updated worker.py in template {t_dir.name}")
             except Exception as e:
                 print(f"Warning: Could not sync template {t_dir.name}: {e}")
-            
+
+# NOTE: Instances are NOT updated here to preserve any per-instance customizations.
+# When a new instance is created, it copies the latest template worker.py at that time.
+# To update a running instance's worker, restart it — it picks up the latest from its template dir.
 INSTANCES_DIR = Path("aegis_data/instances")
-if worker_code and INSTANCES_DIR.exists():
-    for i_dir in INSTANCES_DIR.iterdir():
-        if i_dir.is_dir() and (i_dir / "worker.py").exists():
-            try:
-                (i_dir / "worker.py").write_text(worker_code, encoding='utf-8')
-                print(f"Synced latest worker.py to instance {i_dir.name}")
-            except Exception as e:
-                print(f"Warning: Could not sync instance {i_dir.name}: {e}")
+print(f"Skipping instance worker.py overwrite — {len(list(INSTANCES_DIR.iterdir())) if INSTANCES_DIR.exists() else 0} instance(s) left intact.")
 
 with open(REGISTRY_PATH, "w", encoding="utf-8") as f:
     json.dump(registry, f, indent=4)

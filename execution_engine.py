@@ -46,7 +46,8 @@ class AgentProcess:
     def __init__(self, agent_id: str, pid: int, process,
                  card_id: Optional[int] = None, color: str = "#6366f1",
                  instance_id: Optional[str] = None,
-                 instance_name: Optional[str] = None):
+                 instance_name: Optional[str] = None,
+                 icon: str = "🤖"):
         self.agent_id = agent_id          # template id (e.g. openclaw-core)
         self.instance_id = instance_id    # unique instance id (e.g. openclaw-core-a1b2)
         self.instance_name = instance_name  # user-chosen name (e.g. Frontend-Coder)
@@ -56,6 +57,7 @@ class AgentProcess:
         self.paused = False
         self.card_id = card_id
         self.color = color
+        self.icon = icon
         self.started_at = datetime.now().isoformat()
         self.exit_code: Optional[int] = None
         self.logs: list[str] = []
@@ -72,6 +74,7 @@ class AgentProcess:
             "activity": self.activity,
             "card_id": self.card_id,
             "color": self.color,
+            "icon": self.icon,
             "started_at": self.started_at,
             "exit_code": self.exit_code,
             "log_count": len(self.logs),
@@ -397,7 +400,8 @@ class ExecutionEngine:
             # Track the process
             agent_proc = AgentProcess(
                 agent_id, process.pid, process, card_id, color,
-                instance_id=instance_id, instance_name=instance_name
+                instance_id=instance_id, instance_name=instance_name,
+                icon=env.get("AEGIS_AGENT_ICON", "🤖")
             )
             self.active[key] = agent_proc
 
@@ -815,7 +819,9 @@ def create_instance(template_id: str, instance_name: str,
                     env_vars: Optional[dict] = None,
                     service: str = "",
                     model: str = "",
-                    config: Optional[dict] = None) -> dict:
+                    config: Optional[dict] = None,
+                    icon: Optional[str] = None,
+                    color: Optional[str] = None) -> dict:
     """
     Create a new instance from an installed template.
     Copies template files into a unique instance directory.
@@ -847,8 +853,8 @@ def create_instance(template_id: str, instance_name: str,
         "created_at": datetime.now().isoformat(),
         "path": str(instance_dir),
         "enabled": True,
-        "icon": registry_entry.get("icon", "🤖") if registry_entry else "🤖",
-        "color": "#6366f1",
+        "icon": icon or (registry_entry.get("icon", "🤖") if registry_entry else "🤖"),
+        "color": color or "#6366f1",
         "service": service,
         "model": model,
         "env_vars": env_vars or {},

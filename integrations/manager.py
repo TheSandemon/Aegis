@@ -129,12 +129,55 @@ class IntegrationManager:
         col_name = card.get("column")
         for col_id, integration in self._integrations.items():
             if integration.column_name == col_name:
-                if integration.mode in ("write", "read_write"):
+                # Always propagate deletions to prevent deleted cards re-appearing on next sync
+                should_sync_out = (
+                    integration.mode in ("write", "read_write") or
+                    event_type == "card_deleted"
+                )
+                if should_sync_out:
                     try:
                         await integration.sync_out(card, event_type)
                     except Exception as e:
                         logger.error(f"sync_out failed for column {col_id}: {e}")
                 break
+
+    # ── Initial sync after setup ─────────────────────────────────────────────
+
+    async def initial_sync(self, column_id: int):
+        """
+        Called once immediately after setup_integration to validate credentials
+        and pull initial data. Broadcasts integration_status on success or error.
+        """
+        integration = self._integrations.get(column_id)
+        if not integration or integration.mode not in ("read", "read_write"):
+            return
+        try:
+            results = await integration.sync_in()
+            now = datetime.now().isoformat()
+            self.store.update_column_integration(
+                column_id,
+                last_synced_at=now,
+                integration_status="active",
+            )
+            count = len(results) if results else 0
+            logger.info(f"Initial sync for column {column_id}: {count} item(s)")
+            await self.broadcaster({
+                "type": "integration_status",
+                "column_id": column_id,
+                "status": "active",
+                "last_synced_at": now,
+                "synced_count": count,
+            })
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Initial sync failed for column {column_id}: {error_msg}")
+            self.store.update_column_integration(column_id, integration_status="error")
+            await self.broadcaster({
+                "type": "integration_status",
+                "column_id": column_id,
+                "status": "error",
+                "error": error_msg,
+            })
 
     # ── Manual sync ──────────────────────────────────────────────────────────
 
@@ -217,6 +260,12 @@ class IntegrationManager:
         )
 
         if int_type == "github":
+            if not credentials.get("token"):
+                logger.warning(
+                    f"Column {column_id}: GitHub integration missing required 'token' — "
+                    "skipping activation. Reconfigure credentials in column settings."
+                )
+                return None
             from .github_integration import GitHubIntegration
             return GitHubIntegration(**kwargs)
         elif int_type == "jira":
@@ -238,20 +287,36 @@ class IntegrationManager:
         while True:
             try:
                 results = await integration.sync_in()
+                now = datetime.now().isoformat()
                 self.store.update_column_integration(
                     column_id,
-                    last_synced_at=datetime.now().isoformat(),
+                    last_synced_at=now,
                     integration_status="active",
                 )
-                if results:
-                    logger.debug(f"Synced {len(results)} item(s) for column {column_id}")
+                count = len(results) if results else 0
+                if count:
+                    logger.info(f"Synced {count} item(s) for column {column_id}")
+                await self.broadcaster({
+                    "type": "integration_status",
+                    "column_id": column_id,
+                    "status": "active",
+                    "last_synced_at": now,
+                    "synced_count": count,
+                })
                 await asyncio.sleep(interval_s)
             except asyncio.CancelledError:
                 logger.info(f"Polling loop cancelled for column {column_id}")
                 break
             except Exception as e:
-                logger.error(f"Polling error for column {column_id}: {e}")
+                error_msg = str(e)
+                logger.error(f"Polling error for column {column_id}: {error_msg}")
                 self.store.update_column_integration(
                     column_id, integration_status="error"
                 )
+                await self.broadcaster({
+                    "type": "integration_status",
+                    "column_id": column_id,
+                    "status": "error",
+                    "error": error_msg,
+                })
                 await asyncio.sleep(30)  # backoff on error before retrying

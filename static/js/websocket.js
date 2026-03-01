@@ -3,6 +3,7 @@
    ═══════════════════════════════════════════════════════════ */
 
 let ws = null;
+const agentCardMap = {}; // instance_id → { card_id, color }
 
 function connectWebSocket() {
     updateConnectionStatus('connecting');
@@ -55,9 +56,23 @@ function handleWebSocketMessage(data) {
             renderBoard();
             break;
         case 'agent_started':
+            if (data.instance_id && data.card_id) {
+                agentCardMap[data.instance_id] = { card_id: data.card_id, color: data.color || 'var(--primary)' };
+            }
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             break;
         case 'agent_stopped':
+            // Remove card highlight and clean up map entry
+            if (typeof setCardAgentHighlight === 'function') {
+                const stoppedMapping = agentCardMap[data.instance_id];
+                if (stoppedMapping) setCardAgentHighlight(stoppedMapping.card_id, null, false);
+            }
+            delete agentCardMap[data.instance_id];
+            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
+            if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
+                loadActiveRuntimes();
+            }
+            break;
         case 'agent_status_changed':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
@@ -97,12 +112,32 @@ function handleWebSocketMessage(data) {
                 }
             }
 
-            // Speech Bubbles: Show thought on THOUGHT log
-            if (data.entry) {
-                const thoughtMatch = data.entry.match(/💡 THOUGHT: (.+)/);
-                if (thoughtMatch && typeof showAgentBubble === 'function') {
-                    showAgentBubble(data.instance_id || data.agent_id, thoughtMatch[1]);
+            // Agent-card highlight: glow the card while agent is actively logging
+            if (data.instance_id && typeof setCardAgentHighlight === 'function') {
+                const mapping = agentCardMap[data.instance_id];
+                if (mapping) {
+                    const isActive = data.entry.includes('THOUGHT') || data.entry.includes('ACTION') ||
+                                     data.entry.includes('THINKING') || data.entry.includes('PULSE');
+                    if (isActive) setCardAgentHighlight(mapping.card_id, mapping.color, true);
                 }
+            }
+
+            // Speech Bubbles: Show thought on THOUGHT, ERROR, ATTENTION, or explicit NOTIFY logs
+            if (data.entry && typeof showAgentBubble === 'function') {
+                const id = data.instance_id || data.agent_id;
+                const thoughtMatch   = data.entry.match(/💡 THOUGHT: (.+)/);
+                const errorMatch     = data.entry.match(/🛑 ERROR: (.+)/);
+                const attentionMatch = data.entry.match(/⚠️ ATTENTION: (.+)/);
+                const notifyMatch    = data.entry.match(/📢 NOTIFY: (.+)/);
+                const warnNotify     = data.entry.match(/⚠️ NOTIFY: (.+)/);
+                const errNotify      = data.entry.match(/🛑 NOTIFY: (.+)/);
+
+                if (thoughtMatch)   showAgentBubble(id, thoughtMatch[1], 'thought');
+                if (errorMatch)     showAgentBubble(id, errorMatch[1], 'error');
+                if (attentionMatch) showAgentBubble(id, attentionMatch[1], 'attention');
+                if (notifyMatch)    showAgentBubble(id, notifyMatch[1], 'notify');
+                if (warnNotify)     showAgentBubble(id, warnNotify[1], 'attention');
+                if (errNotify)      showAgentBubble(id, errNotify[1], 'error');
             }
             break;
         case 'log_entry':
@@ -124,6 +159,11 @@ function handleWebSocketMessage(data) {
             if (typeof dismissBubble === 'function') {
                 dismissBubble(data.instance_id);
             }
+            // Remove card highlight — agent is sleeping
+            if (typeof setCardAgentHighlight === 'function') {
+                const mapping = agentCardMap[data.instance_id];
+                if (mapping) setCardAgentHighlight(mapping.card_id, null, false);
+            }
             break;
         case 'agent_activity':
             const actId = data.instance_id || data.sender;
@@ -137,6 +177,24 @@ function handleWebSocketMessage(data) {
             // Speech Bubbles: Show thought on activity
             if (data.thought && typeof showAgentBubble === 'function') {
                 showAgentBubble(actId, data.thought);
+            }
+            break;
+        case 'board_loaded':
+            loadCards().then(() => { loadColumns().then(() => { populateColumnSelects(); renderBoard(); }); });
+            showToast(`Board workspace "${data.workspace}" loaded`);
+            break;
+        case 'integration_status':
+            // Update the column's integration badge and trigger card/column reload
+            const intCol = columns.find(c => c.id === data.column_id);
+            if (intCol) {
+                intCol.integration_status = data.status;
+                intCol.last_synced_at = data.last_synced_at || intCol.last_synced_at;
+                renderBoard();
+            }
+            if (data.status === 'error') {
+                showToast(`⚠️ Integration error on "${intCol?.name || 'column'}": ${data.error || 'sync failed'}`);
+            } else if (data.synced_count > 0) {
+                loadCards().then(() => renderBoard());
             }
             break;
         case 'broker_update':

@@ -2,12 +2,163 @@
 let instancesData = [];
 let registryData = [];
 
+async function ensureRegistryLoaded() {
+    if (registryData.length > 0) return;
+    try {
+        const res = await fetch('/api/registry');
+        registryData = await res.json();
+    } catch (e) { console.error('Failed to load registry', e); }
+}
+
 async function loadInstances() {
+    await ensureRegistryLoaded();
     try {
         const res = await fetch('/api/instances');
         instancesData = await res.json();
         renderInstancesSidebar();
     } catch (e) { console.error('Error loading instances:', e); }
+}
+
+let profilesData = [];
+
+async function loadProfiles() {
+    try {
+        const res = await fetch('/api/profiles');
+        profilesData = await res.json();
+        renderProfilesList();
+    } catch (e) { console.error('Error loading profiles:', e); }
+}
+
+function renderProfilesList() {
+    const list = document.getElementById('agentProfilesList');
+    if (!list) return;
+
+    if (profilesData.length === 0) {
+        list.innerHTML = `
+            <div class="empty-state" style="padding:1rem;">
+                <div style="font-size:0.7rem; color:var(--text-secondary);">No saved profiles.</div>
+            </div>`;
+        return;
+    }
+
+    list.innerHTML = profilesData.map(profile => {
+        const iconHtml = profile.icon && (profile.icon.startsWith('http') || profile.icon.startsWith('/assets/'))
+            ? `<img src="${profile.icon}" class="agent-avatar-img" style="width:24px; height:24px; border-width:1px;">`
+            : `<div style="font-size:1rem;">${profile.icon || '🤖'}</div>`;
+
+        return `
+            <div class="profile-card" onclick="createFromProfile('${profile.id}')" style="padding:8px; gap:8px; font-size:0.8rem;">
+                <div class="profile-icon" style="width:30px; height:30px; font-size:1rem;">${iconHtml}</div>
+                <div style="flex:1; min-width:0;">
+                    <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(profile.name)}</div>
+                    <div style="font-size:0.65rem; color:var(--text-secondary);">${profile.template_id}</div>
+                </div>
+                <button class="secondary" onclick="event.stopPropagation(); deleteProfile('${profile.id}')" style="padding:2px 6px; font-size:0.7rem;">×</button>
+            </div>`;
+    }).join('');
+}
+
+async function uploadWorkerIcon(mode) {
+    const fileInput = document.getElementById(`iconUpload-${mode}`);
+    if (!fileInput.files.length) return;
+
+    const formData = new FormData();
+    formData.append('file', fileInput.files[0]);
+
+    try {
+        const res = await fetch('/api/assets/upload', {
+            method: 'POST',
+            body: formData
+        });
+        const data = await res.json();
+        if (data.url) {
+            const inputId = mode === 'create' ? 'workerIcon' : 'instSettingsIcon';
+            document.getElementById(inputId).value = data.url;
+            updateIconPreview(mode);
+            showToast('✅ Icon uploaded');
+        } else {
+            showToast('⚠️ Upload failed');
+        }
+    } catch (e) {
+        console.error('Upload error:', e);
+        showToast('⚠️ Upload failed');
+    }
+}
+
+// ─── Emoji / Icon Picker ─────────────────────────────────────────────────
+
+const AGENT_EMOJIS = [
+    '🤖','🦾','🧠','🔬','🔭','🛸','🚀','⚡',
+    '🔧','🛠️','🤝','📝','🎯','🔍','🧩','💡',
+    '🏗️','🔐','🌐','📊','🧬','👾','🦉','🐉'
+];
+
+function initEmojiGrid(containerId, mode) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    container.innerHTML = AGENT_EMOJIS.map(e =>
+        `<button class="emoji-btn" onclick="selectAgentIcon('${e}','${mode}')" title="${e}">${e}</button>`
+    ).join('');
+}
+
+function selectAgentIcon(emoji, mode) {
+    const prefix = mode === 'create' ? 'worker' : 'instSettings';
+    const input = document.getElementById(`${prefix}Icon`);
+    if (input) input.value = emoji;
+    updateIconPreview(mode);
+}
+
+function updateIconPreview(mode) {
+    const prefix = mode === 'create' ? 'worker' : 'instSettings';
+    const val = document.getElementById(`${prefix}Icon`)?.value || '🤖';
+    const preview = document.getElementById(`iconPreview-${mode}`);
+    if (!preview) return;
+    if (val.startsWith('http') || val.startsWith('/assets/')) {
+        preview.innerHTML = `<img src="${val}" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">`;
+    } else {
+        preview.innerHTML = '';
+        preview.textContent = val || '🤖';
+    }
+}
+
+async function deleteProfile(profileId) {
+    if (!confirm('Delete this profile?')) return;
+    try {
+        const res = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('🗑 Profile deleted');
+            loadProfiles();
+        }
+    } catch (e) { console.error('Error deleting profile:', e); }
+}
+
+function createFromProfile(profileId) {
+    const profile = profilesData.find(p => p.id === profileId);
+    if (!profile) return;
+
+    openCreateWorkerModal();
+
+    // Select the template
+    const templateIdx = registryData.findIndex(a => a.id === profile.template_id);
+    if (templateIdx !== -1) {
+        const tpl = registryData[templateIdx];
+        // Note: Creating worker needs a registry item context, but index is usually enough for the UI
+        selectTemplateForCreation(templateIdx);
+    }
+
+    // Fill the rest
+    document.getElementById('workerName').value = profile.name || '';
+    document.getElementById('workerIcon').value = profile.icon || '🤖';
+    document.getElementById('workerColor').value = profile.color || '#6366f1';
+
+    if (profile.model) {
+        const modelSelect = document.getElementById('workerModelSelect');
+        if (modelSelect) {
+            modelSelect.value = profile.model;
+            // Trigger change to show custom model input if needed
+            modelSelect.dispatchEvent(new Event('change'));
+        }
+    }
 }
 
 function renderInstancesSidebar() {
@@ -31,12 +182,16 @@ function renderInstancesSidebar() {
         const serviceBadge = inst.service ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.service}</span>` : '';
         const modelBadge = inst.model ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.model}</span>` : '';
 
+        const iconHtml = inst.icon && (inst.icon.startsWith('http') || inst.icon.startsWith('/assets/'))
+            ? `<img src="${inst.icon}" class="agent-avatar-img" style="border-color: ${color}">`
+            : `<div class="agent-avatar" style="border-color: ${color}">${inst.icon || '🤖'}</div>`;
+
         return `
             <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
                  style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b};"
                  data-instance-id="${inst.instance_id}">
                 <div class="agent-sidebar-header">
-                    <div class="agent-avatar" style="border-color: ${color}">${inst.icon || '🤖'}</div>
+                    ${iconHtml}
                     <div class="agent-info-main">
                         <div class="agent-name">${escapeHtml(inst.instance_name)}</div>
                         <div class="agent-status-tag ${isRunning ? 'running' : ''}">
@@ -99,8 +254,10 @@ async function deleteWorkerInstance(instanceId) {
 let terminalPollInterval = null;
 
 async function viewInstanceLogs(instanceId) {
+    const inst = instancesData.find(i => i.instance_id === instanceId);
+    const displayName = inst?.instance_name || instanceId;
     document.getElementById('terminalModal').classList.add('active');
-    document.getElementById('terminalTitle').textContent = `Terminal: ${instanceId}`;
+    document.getElementById('terminalTitle').textContent = `Terminal — ${displayName}`;
     const output = document.getElementById('workerTerminalOutput');
     output.textContent = 'Connecting to terminal...';
 
@@ -169,7 +326,7 @@ window.startPulseCountdown = function (instanceId, secondsCount) {
 // ─── Agent Speech Bubbles ─────────────────────────────────────────────────
 const bubbleTimers = {};
 
-function showAgentBubble(instanceId, text) {
+function showAgentBubble(instanceId, text, mood = 'thought') {
     const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
     if (!card) return;
 
@@ -178,16 +335,21 @@ function showAgentBubble(instanceId, text) {
     if (existing) existing.remove();
     if (bubbleTimers[instanceId]) clearTimeout(bubbleTimers[instanceId]);
 
-    // Truncate to 120 chars
-    const truncated = text.length > 120 ? text.substring(0, 117) + '...' : text;
+    // Truncate to 180 chars (increased for personality)
+    const truncated = text.length > 180 ? text.substring(0, 177) + '...' : text;
 
     const bubble = document.createElement('div');
-    bubble.className = 'agent-speech-bubble';
-    bubble.innerHTML = `${escapeHtml(truncated)}<button class="bubble-dismiss" onclick="event.stopPropagation(); dismissBubble('${instanceId}')">×</button>`;
+    bubble.className = `agent-speech-bubble bubble-${mood}`;
+
+    let prefix = '💡';
+    if (mood === 'error') prefix = '🛑';
+    if (mood === 'attention') prefix = '⚠️';
+
+    bubble.innerHTML = `<span class="bubble-prefix">${prefix}</span> ${escapeHtml(truncated)}<button class="bubble-dismiss" onclick="event.stopPropagation(); dismissBubble('${instanceId}')">×</button>`;
     card.appendChild(bubble);
 
-    // Auto-dismiss after 8s
-    bubbleTimers[instanceId] = setTimeout(() => dismissBubble(instanceId), 8000);
+    // Auto-dismiss after 10s
+    bubbleTimers[instanceId] = setTimeout(() => dismissBubble(instanceId), 10000);
 }
 
 function dismissBubble(instanceId) {
@@ -203,52 +365,38 @@ function dismissBubble(instanceId) {
 }
 
 // ─── Service & Model Definitions ──────────────────────────────────────────
+// Populated from GET /api/models at startup — single source of truth is main.py
 
-const SERVICE_MODELS = {
-    'anthropic': {
-        name: 'Anthropic',
-        key_env: 'ANTHROPIC_API_KEY',
-        models: [
-            { id: 'claude-3-7-sonnet-latest', name: 'Claude 3.7 Sonnet' },
-            { id: 'claude-3-5-sonnet-latest', name: 'Claude 3.5 Sonnet' },
-            { id: 'claude-3-5-haiku-latest', name: 'Claude 3.5 Haiku' },
-            { id: 'claude-3-opus-latest', name: 'Claude 3 Opus' }
-        ]
-    },
-    'google': {
-        name: 'Google',
-        key_env: 'GOOGLE_API_KEY',
-        models: [
-            { id: 'gemini-2.5-pro', name: 'Gemini 2.5 Pro' },
-            { id: 'gemini-2.5-flash', name: 'Gemini 2.5 Flash' },
-            { id: 'gemini-2.0-pro-exp-02-05', name: 'Gemini 2.0 Pro Experimental' },
-            { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' }
-        ]
-    },
-    'openai': {
-        name: 'OpenAI',
-        key_env: 'OPENAI_API_KEY',
-        models: [
-            { id: 'o3-mini', name: 'o3-mini' },
-            { id: 'o1', name: 'o1' },
-            { id: 'gpt-4o', name: 'GPT-4o' },
-            { id: 'gpt-4o-mini', name: 'GPT-4o Mini' }
-        ]
-    },
-    'deepseek': {
-        name: 'DeepSeek',
-        key_env: 'DEEPSEEK_API_KEY',
-        models: [
-            { id: 'deepseek-reasoner', name: 'DeepSeek Reasoner (R1)' },
-            { id: 'deepseek-chat', name: 'DeepSeek Chat (V3)' }
-        ]
-    },
-    'custom': {
-        name: 'Custom',
-        key_env: '',
-        models: []
+let SERVICE_MODELS = {};
+
+async function loadServiceModels() {
+    try {
+        const res = await fetch('/api/models');
+        if (!res.ok) throw new Error('Failed to load models');
+        const data = await res.json();
+        // Merge server data into SERVICE_MODELS, preserving any already-loaded keys
+        Object.assign(SERVICE_MODELS, data);
+        // Re-render any open service selects
+        document.querySelectorAll('select[id$="Service"]').forEach(sel => {
+            _populateServiceSelect(sel);
+        });
+    } catch (e) {
+        console.warn('Could not load model registry from server, using fallback');
     }
-};
+}
+
+function _populateServiceSelect(selectEl) {
+    if (!selectEl) return;
+    const current = selectEl.value;
+    selectEl.innerHTML = '<option value="">Select a service...</option>';
+    Object.entries(SERVICE_MODELS).forEach(([id, svc]) => {
+        const opt = document.createElement('option');
+        opt.value = id;
+        opt.textContent = svc.name;
+        if (id === current) opt.selected = true;
+        selectEl.appendChild(opt);
+    });
+}
 
 function renderModelDropdown(service, selectEl, customInputEl, selectedValue = '') {
     const svc = SERVICE_MODELS[service];
@@ -314,7 +462,6 @@ async function verifyApiKey(keyStr, mode) {
                 selectEl.value = data.default_model;
             }
 
-            // Reveal model selection
             const modelGroup = document.getElementById(`modelGroup-${mode}`);
             if (modelGroup) modelGroup.style.display = 'block';
 
@@ -373,7 +520,7 @@ function renderConfigSchema(templateId, containerId, savedConfig = {}) {
 
         switch (def.type) {
             case 'textarea':
-                html += `<textarea class="config-input" data-config-key="${key}" rows="2" style="font-size:0.8rem;">${escapeHtml(String(saved))}</textarea>`;
+                html += `<textarea class="config-input" data-config-key="${key}" data-mention="true" rows="2" style="font-size:0.8rem;">${escapeHtml(String(saved))}</textarea>`;
                 break;
             case 'range':
                 html += `<div style="display:flex;align-items:center;gap:0.5rem;">`;
@@ -430,14 +577,7 @@ function collectConfigValues(containerId) {
 
 async function openCreateWorkerModal() {
     document.getElementById('createWorkerModal').classList.add('active');
-
-    // Explicitly fetch the registry to get the configuration schema for the unified worker
-    try {
-        const res = await fetch('/api/registry');
-        registryData = await res.json();
-    } catch (e) {
-        console.error('Failed to load registry', e);
-    }
+    await ensureRegistryLoaded();
 
     // Default to aegis-worker
     const templateId = 'aegis-worker';
@@ -448,7 +588,13 @@ async function openCreateWorkerModal() {
     document.getElementById('workerService').value = '';
     document.getElementById('unifiedApiKey-create').value = '';
     document.getElementById('feedback-create-apikey').innerHTML = '';
-    document.getElementById('modelGroup-create').style.display = 'none';
+    document.getElementById('workerIcon').value = '🤖';
+    document.getElementById('workerColor').value = '#6366f1';
+    document.getElementById('saveAsProfile').checked = false;
+
+    onServiceChange('create');
+    initEmojiGrid('emojiGrid-create', 'create');
+    updateIconPreview('create');
 
     // Render config schema for the default worker
     renderConfigSchema(templateId, 'createConfigSection');
@@ -476,12 +622,45 @@ async function createWorkerInstance() {
     // Gather config schema values
     const config = collectConfigValues('createConfigSection');
 
+    const icon = document.getElementById('workerIcon').value || '🤖';
+    const color = document.getElementById('workerColor').value || '#6366f1';
+    const saveProfile = document.getElementById('saveAsProfile').checked;
+
+    const payload = {
+        template_id: templateId,
+        instance_name: instanceName,
+        service: service,
+        model: model,
+        env_vars: env_vars,
+        config: config,
+        icon: icon,
+        color: color
+    };
+
+    if (saveProfile) {
+        const template = registryData.find(a => a.id === templateId);
+        await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: instanceName,
+                template_id: template.id,
+                icon: icon,
+                color: color,
+                service: service,
+                model: model,
+                config: config
+            })
+        });
+        loadProfiles();
+    }
+
     showToast(`Creating ${instanceName}...`);
     try {
         const res = await fetch('/api/instances/create', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ template_id: templateId, instance_name: instanceName, service, model, env_vars, config })
+            body: JSON.stringify(payload)
         });
         if (res.ok) {
             showToast(`✅ Worker "${instanceName}" created!`);
@@ -517,14 +696,7 @@ async function openInstanceSettings(instanceId) {
     // Now set the model value
     const modelSelect = document.getElementById('instSettingsModelSelect');
     const modelCustom = document.getElementById('instSettingsModelCustom');
-    const modelGroup = document.getElementById('modelGroup-edit');
     const savedModel = inst.model || '';
-
-    if (svc) {
-        modelGroup.style.display = 'block';
-    } else {
-        modelGroup.style.display = 'none';
-    }
 
     const svcData = SERVICE_MODELS[svc];
     if (svcData && svcData.models.find(m => m.id === savedModel)) {
@@ -538,6 +710,12 @@ async function openInstanceSettings(instanceId) {
 
     // Render config schema with saved values
     renderConfigSchema(inst.template_id, 'editConfigSection', inst.config || {});
+
+    document.getElementById('instSettingsIcon').value = inst.icon || '🤖';
+    document.getElementById('instSettingsColor').value = inst.color || '#6366f1';
+
+    initEmojiGrid('emojiGrid-edit', 'edit');
+    updateIconPreview('edit');
 
     document.getElementById('instanceSettingsModal').classList.add('active');
 }
@@ -563,7 +741,10 @@ async function saveInstanceSettings() {
     // Gather config schema values
     const config = collectConfigValues('editConfigSection');
 
-    const updateData = { instance_name, service, model, enabled, config };
+    const icon = document.getElementById('instSettingsIcon').value;
+    const color = document.getElementById('instSettingsColor').value;
+
+    const updateData = { instance_name, service, model, enabled, config, icon, color };
     // Only include env_vars if a new API key was actually entered
     if (Object.keys(env_vars).length > 0) {
         updateData.env_vars = env_vars;
@@ -592,6 +773,9 @@ function updateGlowEffects() {
 }
 
 // Called on page load
-async function loadAgents() { await loadInstances(); }
+async function loadAgents() {
+    await loadInstances();
+    await loadProfiles();
+}
 
 function updateAgentParam(agentId, key, value) { /* Legacy no-op */ }

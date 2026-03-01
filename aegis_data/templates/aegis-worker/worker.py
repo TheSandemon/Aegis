@@ -10,10 +10,12 @@ api_url = os.environ.get("AEGIS_API_URL", "http://localhost:8080/api")
 agent_name = os.environ.get("AEGIS_INSTANCE_NAME", os.environ.get("AEGIS_AGENT_ID", "Agent"))
 goal = os.environ.get("AEGIS_CONFIG_GOALS", "Process tasks and help the team.")
 try:
-    pulse_interval = int(os.environ.get("AEGIS_CONFIG_PULSE_INTERVAL", "30"))
+    pulse_interval = int(os.environ.get("AEGIS_CONFIG_PULSE_INTERVAL", "60"))
 except ValueError:
-    pulse_interval = 30
-    
+    pulse_interval = 60
+
+mode = os.environ.get("AEGIS_CONFIG_MODE", "continuous")  # "continuous" | "one-shot"
+
 # Unique token used to fetch live configs
 instance_id = os.environ.get("AEGIS_INSTANCE_ID", "")
 
@@ -24,12 +26,24 @@ openai_key = os.environ.get("OPENAI_API_KEY", "")
 anthropic_key = os.environ.get("ANTHROPIC_API_KEY", "")
 google_key = os.environ.get("GOOGLE_API_KEY", os.environ.get("GEMINI_API_KEY", ""))
 deepseek_key = os.environ.get("DEEPSEEK_API_KEY", "")
+minimax_key = os.environ.get("MINIMAX_API_KEY", "")
 
 if not service:
     if openai_key: service = "openai"
     elif anthropic_key: service = "anthropic"
     elif google_key: service = "google"
     elif deepseek_key: service = "deepseek"
+    elif minimax_key: service = "minimax"
+
+# Enforce minimum pulse interval from broker rate limit
+try:
+    _min_resp = requests.get(f"{api_url}/broker/min_pulse", timeout=5)
+    _min_pulse = int(_min_resp.json().get("min_pulse_seconds", 0))
+    if _min_pulse > pulse_interval:
+        print(f"[{agent_name}] ⚠️ Pulse {pulse_interval}s < broker minimum {_min_pulse}s — clamping to {_min_pulse}s.")
+        pulse_interval = _min_pulse
+except Exception:
+    pass
 
 def prompt_llm(system_prompt, user_text):
     """Call the LLM with a system prompt and user text.
@@ -84,7 +98,19 @@ def prompt_llm(system_prompt, user_text):
         res = requests.post("https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {deepseek_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
         content = res.json()["choices"][0]["message"]["content"]
         return parse_json(content)
-        
+    elif service == "minimax" and minimax_key:
+        m = model or "MiniMax-Text-01"
+        res = requests.post(
+            "https://api.minimaxi.chat/v1/chat/completions",
+            headers={"Authorization": f"Bearer {minimax_key}", "Content-Type": "application/json"},
+            json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]}
+        )
+        if res.status_code != 200:
+            print(f"[{agent_name}] MiniMax API Error {res.status_code}: {res.text[:200]}")
+            return None
+        content = res.json()["choices"][0]["message"]["content"]
+        return parse_json(content)
+
     print(f"[{agent_name}] ERROR: Unsupported service '{service}' or missing API key.")
     return None
 
@@ -122,11 +148,25 @@ while True:
         continue
         
     system_prompt = raw_prompt.replace("{agent_name}", agent_name).replace("{goal}", goal)
-    
+
     if not isinstance(cards, list) or not isinstance(cols, list) or not system_prompt:
         print(f"[{agent_name}] ❌ API Error: Invalid state format received. Waiting...")
         time.sleep(pulse_interval)
         continue
+
+    # Build read-only column set — agents must not write to these
+    read_only_columns = set()
+    for col in cols:
+        if col.get("integration_type") and col.get("integration_mode") == "read":
+            read_only_columns.add(col["name"])
+    if read_only_columns:
+        ro_note = (
+            f"\n\n⚠️ READ-ONLY COLUMNS: {', '.join(sorted(read_only_columns))} "
+            f"are synced from external services and are READ-ONLY. "
+            f"Do NOT use delete_card or update_card on cards in these columns. "
+            f"post_comment is still allowed."
+        )
+        system_prompt += ro_note
 
     # Check if agent is assigned to a specific card
     my_card_id = None
@@ -144,6 +184,24 @@ while True:
         
         board_context = f"--- FOCUS CARD ---\n[#{focus.get('id')}] {focus.get('title')}\n"
         board_context += f"Priority: {focus.get('priority', 'normal')} | Column: {focus.get('column')}\n"
+        # Surface structured external metadata (GitHub labels, assignees, etc.)
+        meta = focus.get("metadata") or {}
+        if meta.get("source"):
+            src_line = f"[Source: {meta['source'].upper()}"
+            if meta.get("github_number"):
+                src_line += f" #{meta['github_number']}"
+            if meta.get("action_required"):
+                src_line += " | ACTION REQUIRED"
+            src_line += f" | State: {meta.get('state', 'open')}]"
+            board_context += src_line + "\n"
+            if meta.get("labels"):
+                board_context += f"Labels: {', '.join(meta['labels'])}\n"
+            if meta.get("assignees"):
+                board_context += f"Assignees: {', '.join(meta['assignees'])}\n"
+            if meta.get("milestone"):
+                board_context += f"Milestone: {meta['milestone']}\n"
+            if meta.get("external_url"):
+                board_context += f"External: {meta['external_url']}\n"
         board_context += f"Description: {focus.get('description', '')}\n"
         if focus.get('comments'):
             board_context += "Comments:\n"
@@ -165,18 +223,24 @@ while True:
             
     else:
         # Fallback to full board if no specific assignment
-        board_context = f"COLUMNS: {[{'id': c['id'], 'name': c['name']} for c in cols]}\n\nCARDS:\n"
+        col_summary = ", ".join([f"{c['name']} (id:{c['id']})" for c in cols])
+        board_context = f"COLUMNS: {col_summary}\n\nCARDS:\n"
         for c in cards:
             comments = c.get("comments", [])
-            last_comment = f" | Last Comment: {comments[-1]['content'][:50]}" if comments else ""
-            board_context += f"- [#{c['id']}] {c['title']} (Col: {c['column']}) | Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}{last_comment}\n  Desc: {c.get('description', '')[:100]}\n"
+            last_comment = f" | Last Comment: {comments[-1]['content'][:60]}" if comments else ""
+            board_context += (
+                f"- [#{c['id']}] {c['title']} | Col: {c['column']} | "
+                f"Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}"
+                f"{last_comment}\n  Desc: {c.get('description', '')[:120]}\n"
+            )
 
     print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
-    
-    # Internal ReAct Loop (Max 5 steps per pulse)
+
+    # Internal ReAct Loop (Max 20 steps per pulse — agents exit early via done/wait)
     observations = []
-    
-    for step in range(5):
+    MAX_STEPS = 20
+
+    for step in range(MAX_STEPS):
         try:
             if not service:
                  raise Exception("No active service or API key configured.")
@@ -196,7 +260,7 @@ while True:
                 res = [res] # Normalize single dict to list
 
             step_observations = []
-            should_wait = False
+            should_break = False
 
             for action_block in res:
                 res_lower = {k.lower(): v for k, v in action_block.items()}
@@ -205,7 +269,7 @@ while True:
                 thought = res_lower.get("thought", "")
                 
                 if thought:
-                    print(f"[{agent_name}] 💡 THOUGHT (Step {step+1}): {thought}")
+                    print(f"[{agent_name}] 💡 THOUGHT: {thought}")
                 
                 print(f"[{agent_name}] ⚡ ACTION (Step {step+1}): {action} {args}")
                 
@@ -218,25 +282,46 @@ while True:
 
                 obs = ""
                 if action == "create_card":
-                    r = requests.post(f"{api_url}/cards", json=args)
-                    obs = check_res(r, "create_card")
-                    if "SUCCESS" in obs:
-                        try:
-                            new_id = r.json().get("id")
-                            obs += f" (Created Card #{new_id})"
-                        except: pass
+                    # Validate column exists
+                    col_name = args.get("column", "")
+                    valid_cols = [c["name"] for c in cols]
+                    if col_name and col_name not in valid_cols:
+                        obs = f"❌ INVALID COLUMN '{col_name}'. Valid columns: {valid_cols}"
+                        print(f"[{agent_name}] {obs}")
+                    else:
+                        r = requests.post(f"{api_url}/cards", json=args)
+                        obs = check_res(r, "create_card")
+                        if r.status_code < 400:
+                            try: obs += f" (Card #{r.json().get('id')})"
+                            except: pass
                 elif action == "update_card":
                     cid = args.pop("card_id", None)
-                    if cid: 
+                    if not cid:
+                        obs = "❌ update_card requires card_id"
+                    else:
                         if isinstance(cid, str): cid = cid.strip("# ")
-                        r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
-                        obs = check_res(r, "update_card")
+                        # Pre-flight: block writes to read-only columns
+                        target = next((c for c in cards if c.get("id") == int(cid)), None)
+                        if target and target.get("column") in read_only_columns:
+                            obs = f"❌ BLOCKED: Card #{cid} is in read-only column '{target['column']}'"
+                            print(f"[{agent_name}] {obs}")
+                        else:
+                            r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+                            obs = check_res(r, "update_card")
                 elif action == "delete_card":
                     cid = args.get("card_id")
-                    if cid: 
+                    if not cid:
+                        obs = "❌ delete_card requires card_id"
+                    else:
                         if isinstance(cid, str): cid = cid.strip("# ")
-                        r = requests.delete(f"{api_url}/cards/{cid}")
-                        obs = check_res(r, "delete_card")
+                        # Pre-flight: block deletes on read-only columns
+                        target = next((c for c in cards if c.get("id") == int(cid)), None)
+                        if target and target.get("column") in read_only_columns:
+                            obs = f"❌ BLOCKED: Card #{cid} is in read-only column '{target['column']}'"
+                            print(f"[{agent_name}] {obs}")
+                        else:
+                            r = requests.delete(f"{api_url}/cards/{cid}", headers={"X-Aegis-Agent": "true"})
+                            obs = check_res(r, "delete_card")
                 elif action == "post_comment":
                     cid = args.get("card_id")
                     content = args.get("content")
@@ -284,22 +369,33 @@ while True:
                         except Exception as e:
                             obs = f"❌ WRITE_FILE ERROR: {e}"
                             print(f"[{agent_name}] {obs}")
+                elif action == "done":
+                    reason = args.get('reason', 'Task complete')
+                    print(f"[{agent_name}] ✅ DONE: {reason}")
+                    obs = f"DONE: {reason}"
+                    should_break = True
                 elif action == "wait":
                     reason = args.get('reason', 'None')
-                    print(f"[{agent_name}] 💤 Waiting... reason: {reason}")
-                    obs = f"SLEEPING: {reason}"
-                    should_wait = True
-                
+                    print(f"[{agent_name}] 💤 WAIT: {reason}")
+                    obs = f"WAITING: {reason}"
+                    should_break = True
+                elif action == "notify":
+                    msg = args.get("message", "")
+                    mood = args.get("mood", "info")
+                    prefix = {"info": "📢", "warning": "⚠️", "error": "🛑"}.get(mood, "📢")
+                    print(f"[{agent_name}] {prefix} NOTIFY: {msg}")
+                    obs = f"NOTIFIED: {msg}"
+
                 if obs:
                     step_observations.append(obs)
-                
-            if should_wait:
+
+            if should_break:
                 break
-                
+
             observations.extend(step_observations)
-            
+
             # Small delay between ReAct steps to be nice to the API
-            if step < 4:
+            if step < MAX_STEPS - 1:
                 time.sleep(1)
 
         except Exception as e:
@@ -307,10 +403,15 @@ while True:
             break
 
     # Send pulse websocket event so UI can show countdown
-    try:
-        requests.post(f"{api_url}/instances/{instance_id}/pulse", json={"interval": pulse_interval})
-    except Exception:
-        pass
+    if instance_id:
+        try:
+            requests.post(f"{api_url}/instances/{instance_id}/pulse", json={"interval": pulse_interval})
+        except Exception:
+            pass
         
     print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")
     time.sleep(pulse_interval)
+
+    if mode == "one-shot":
+        print(f"[{agent_name}] 🏁 One-shot mode: task complete. Exiting.")
+        break

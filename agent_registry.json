@@ -20,10 +20,20 @@
                 "label": "Agent Goals",
                 "default": "Process tasks and help the team."
             },
+            "mode": {
+                "type": "select",
+                "label": "Execution Mode",
+                "options": [
+                    "continuous",
+                    "one-shot"
+                ],
+                "default": "continuous",
+                "description": "Continuous: loops indefinitely each pulse. One-shot: runs once then exits."
+            },
             "pulse_interval": {
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
-                "default": 30
+                "default": 60
             },
             "work_dir": {
                 "type": "text",

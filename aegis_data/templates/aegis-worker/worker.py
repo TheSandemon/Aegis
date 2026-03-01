@@ -180,6 +180,7 @@ while True:
         )
         system_prompt += gh_note
     else:
+        # List available GitHub-integrated columns
         writeable_gh = [c for c, m in github_columns.items() if m in ("write", "read_write")]
         if writeable_gh:
             gh_note = (
@@ -204,7 +205,7 @@ while True:
             my_card_id = c["id"]
             my_card_column = c.get("column")
             break
-            
+
     if my_card_id:
         print(f"\n[{agent_name}] 🎯 FOCUS: Fetching smart context for Card #{my_card_id}...")
         ctx = requests.get(f"{api_url}/cards/{my_card_id}/context").json()
@@ -401,12 +402,97 @@ while True:
                             print(f"[{agent_name}] {obs}")
 
                 # --- GitHub API Tools (via Aegis proxy) ---
+                # ─── Git CLI Tools ────────────────────────────────────────────
+                elif action == "git_clone":
+                    repo_url = args.get("repo_url", "")
+                    dest = args.get("dest", "repo")
+                    try:
+                        import subprocess
+                        result = subprocess.run(
+                            ["git", "clone", "--depth", "1", repo_url, dest],
+                            capture_output=True, text=True, timeout=120
+                        )
+                        if result.returncode == 0:
+                            obs = f"✅ CLONED {repo_url} → {dest}"
+                            print(f"[{agent_name}] 📥 GIT_CLONE: {obs}")
+                        else:
+                            obs = f"❌ GIT_CLONE ERROR: {result.stderr[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ GIT_CLONE ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "git_branch":
+                    branch_name = args.get("branch_name", "")
+                    checkout = args.get("checkout", True)
+                    cwd = args.get("cwd", ".")
+                    try:
+                        import subprocess
+                        cmd = ["git", "checkout", "-b", branch_name] if checkout else ["git", "branch", branch_name]
+                        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=30)
+                        if result.returncode == 0:
+                            obs = f"✅ BRANCH CREATED: {branch_name}"
+                            print(f"[{agent_name}] 🌿 GIT_BRANCH: {obs}")
+                        else:
+                            obs = f"❌ GIT_BRANCH ERROR: {result.stderr[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ GIT_BRANCH ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "git_commit":
+                    message = args.get("message", "Automated commit")
+                    files = args.get("files", ["."])
+                    cwd = args.get("cwd", ".")
+                    try:
+                        import subprocess
+                        # Stage files
+                        for f in (files if isinstance(files, list) else [files]):
+                            subprocess.run(["git", "add", f], cwd=cwd, capture_output=True, timeout=15)
+                        # Commit with agent attribution
+                        commit_msg = f"[Aegis: {agent_name}] {message}"
+                        result = subprocess.run(
+                            ["git", "commit", "-m", commit_msg],
+                            capture_output=True, text=True, cwd=cwd, timeout=30
+                        )
+                        if result.returncode == 0:
+                            obs = f"✅ COMMITTED: {commit_msg}"
+                            print(f"[{agent_name}] 📝 GIT_COMMIT: {obs}")
+                        else:
+                            obs = f"❌ GIT_COMMIT ERROR: {result.stderr[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ GIT_COMMIT ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                elif action == "git_push":
+                    remote = args.get("remote", "origin")
+                    branch = args.get("branch", "")
+                    cwd = args.get("cwd", ".")
+                    try:
+                        import subprocess
+                        cmd = ["git", "push", remote]
+                        if branch:
+                            cmd.append(branch)
+                        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
+                        if result.returncode == 0:
+                            obs = f"✅ PUSHED to {remote}/{branch or 'HEAD'}"
+                            print(f"[{agent_name}] 🚀 GIT_PUSH: {obs}")
+                        else:
+                            obs = f"❌ GIT_PUSH ERROR: {result.stderr[:300]}"
+                            print(f"[{agent_name}] {obs}")
+                    except Exception as e:
+                        obs = f"❌ GIT_PUSH ERROR: {e}"
+                        print(f"[{agent_name}] {obs}")
+
+                # ─── GitHub API Tools (via Aegis proxy) ───────────────────────
                 elif action == "create_pr":
                     title = args.get("title", "")
                     body = args.get("body", "")
                     head = args.get("head", "")
                     base = args.get("base", "main")
                     gh_column = args.get("column", my_card_column)
+                    gh_column = args.get("column", my_card_column)  # Use agent's card column if not specified
                     try:
                         r = requests.post(f"{api_url}/github/pulls",
                             headers={"X-Aegis-Agent": "true"},
@@ -515,9 +601,10 @@ while True:
             break
 
     # Send pulse websocket event so UI can show countdown
-    if instance_id:
+    clean_id = (instance_id or "").strip()
+    if clean_id:
         try:
-            requests.post(f"{api_url}/instances/{instance_id}/pulse", json={"interval": pulse_interval})
+            requests.post(f"{api_url}/instances/{clean_id}/pulse", json={"interval": pulse_interval})
         except Exception:
             pass
         

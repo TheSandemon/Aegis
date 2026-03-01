@@ -259,6 +259,50 @@ class GitHubIntegration(BaseIntegration):
                 return "low"
         return "normal"
 
+    # ── PR Sync-In ────────────────────────────────────────────────────────────
+
+    async def sync_in_prs(self) -> list:
+        """Pull open PRs into Aegis cards alongside issues."""
+        params: dict = {"state": "open", "per_page": 100}
+        results = []
+        page = 1
+        async with httpx.AsyncClient(timeout=20) as client:
+            while True:
+                params["page"] = page
+                resp = await client.get(
+                    f"{_BASE}/repos/{self._repo()}/pulls",
+                    headers=self._headers(),
+                    params=params,
+                )
+                resp.raise_for_status()
+                prs = resp.json()
+                if not prs:
+                    break
+                for pr in prs:
+                    card = await self._upsert_card(
+                        external_id=f"pr-{pr['number']}",
+                        external_source=self.SOURCE,
+                        external_url=pr["html_url"],
+                        title=f"[PR #{pr['number']}] {pr['title']}",
+                        description=pr.get("body") or "",
+                        priority=self._priority_from_labels(pr.get("labels", [])),
+                        metadata=json.dumps({
+                            "source": "github",
+                            "type": "pull_request",
+                            "state": pr.get("state", "open"),
+                            "github_number": pr.get("number"),
+                            "head_branch": pr.get("head", {}).get("ref", ""),
+                            "base_branch": pr.get("base", {}).get("ref", ""),
+                            "mergeable": pr.get("mergeable"),
+                            "draft": pr.get("draft", False),
+                            "labels": [l["name"] for l in pr.get("labels", [])],
+                            "external_url": pr.get("html_url", ""),
+                        }),
+                    )
+                    results.append(card)
+                page += 1
+        return results
+
     # ── PR / Branch Operations ────────────────────────────────────────────────
 
     async def create_branch(self, branch_name: str, base: str = "main") -> dict:
@@ -302,7 +346,7 @@ class GitHubIntegration(BaseIntegration):
             return {"error": f"Failed to create PR: {resp.status_code} - {resp.text}"}
 
     async def merge_pull_request(self, pr_number: int, merge_method: str = "squash", commit_message: str = "") -> dict:
-        """Merge a pull request."""
+        """Merge a pull request. merge_method: merge, squash, or rebase."""
         async with httpx.AsyncClient(timeout=20) as client:
             payload = {"merge_method": merge_method}
             if commit_message:

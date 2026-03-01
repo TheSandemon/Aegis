@@ -92,7 +92,24 @@ delete_card    — {{"card_id": int}}
 post_comment   — {{"card_id": int, "content": str}}
 create_column  — {{"name": str, "position": int}}
 delete_column  — {{"column_id": int}}
+list_dir       — {{"path": str}}  ← List files in a directory
+read_file      — {{"path": str}}  ← Read a file
+write_file     — {{"path": str, "content": str}}  ← Write/overwrite a file
 wait           — {{"reason": str}}  ← Use ONLY when genuinely blocked; ends the pulse.
+
+━━━ GIT & GITHUB ACTIONS ━━━
+git_clone            — {{"repo_url": str, "dest": str}}  ← Clone a repo into your workspace
+git_branch           — {{"branch_name": str, "checkout": bool, "cwd": str}}  ← Create a local branch
+git_commit           — {{"message": str, "files": list|str, "cwd": str}}  ← Stage and commit (auto-attributed to you)
+git_push             — {{"remote": str, "branch": str, "cwd": str}}  ← Push commits to remote
+create_branch_remote — {{"branch_name": str, "base": str}}  ← Create a branch on GitHub (via API)
+create_pr            — {{"title": str, "body": str, "head": str, "base": str}}  ← Open a Pull Request
+merge_pr             — {{"pr_number": int, "merge_method": "squash"|"merge"|"rebase", "commit_message": str}}  ← Merge a PR
+list_prs             — {{"state": "open"|"closed"|"all"}}  ← List Pull Requests
+list_branches        — {{}}  ← List repo branches
+
+⚠️ BRANCH SAFETY: Always create feature branches. Never push directly to main.
+⚠️ COMMIT ATTRIBUTION: All commits are prefixed with [Aegis: {agent_name}] automatically.
 
 ━━━━━━━━ PERSONALITY ━━━━━━━━
 • You are an autonomous entity with a distinct name ({agent_name}) and goal ({goal}).
@@ -1321,6 +1338,7 @@ def _resolve_github_integration(agent_column: str = None):
     """Find the first active GitHub integration adapter.
 
     If agent_column is provided, use the integration for that column.
+    If agent_column is provided, use the integration for that column.
     Otherwise, finds the first write-capable integration.
     """
     # If agent specifies a column, try to use that column's integration first
@@ -1369,20 +1387,17 @@ def _check_github_write_access(gh_integration, agent_column: str = None) -> bool
                 return True
     return False
 
-
 class BranchCreate(BaseModel):
     branch_name: str
     base: str = "main"
-    column: Optional[str] = None
-
+    column: Optional[str] = None  # Optional column context for integration selection
 
 class PRCreate(BaseModel):
     title: str
     body: str = ""
     head: str
     base: str = "main"
-    column: Optional[str] = None
-
+    column: Optional[str] = None  # Optional column context for integration selection
 
 class PRMerge(BaseModel):
     pr_number: int
@@ -1406,6 +1421,7 @@ async def create_github_branch(request: Request, req: BranchCreate):
     gh = _resolve_github_integration(req.column)
     if not gh:
         raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    # Agents must have write access to use GitHub write operations
     if is_agent and not _check_github_write_access(gh, req.column):
         raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
     result = await gh.create_branch(req.branch_name, req.base)
@@ -1430,6 +1446,7 @@ async def create_github_pr(request: Request, req: PRCreate):
     gh = _resolve_github_integration(req.column)
     if not gh:
         raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    # Agents must have write access to use GitHub write operations
     if is_agent and not _check_github_write_access(gh, req.column):
         raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
     result = await gh.create_pull_request(req.title, req.body, req.head, req.base)
@@ -1445,6 +1462,7 @@ async def merge_github_pr(request: Request, req: PRMerge):
     gh = _resolve_github_integration()
     if not gh:
         raise HTTPException(status_code=404, detail="No GitHub integration configured on any column")
+    # Agents must have write access to use GitHub write operations
     if is_agent and not _check_github_write_access(gh):
         raise HTTPException(status_code=403, detail="No write-enabled GitHub integration found. Agents can only use GitHub integrations with 'write' or 'read_write' mode.")
     result = await gh.merge_pull_request(req.pr_number, req.merge_method, req.commit_message)
@@ -1635,12 +1653,19 @@ class PulseRequest(BaseModel):
 @app.post("/api/instances/{instance_id}/pulse")
 async def broadcast_pulse(instance_id: str, req: PulseRequest):
     """Broadcasts to the UI that a worker finished its action loop and is sleeping."""
+    if not instance_id or instance_id == "/":
+        return {"success": False, "error": "Empty instance_id"}
     await manager.broadcast({
         "type": "agent_pulse",
         "instance_id": instance_id,
         "interval": req.interval
     })
     return {"success": True}
+
+@app.post("/api/instances//pulse")
+async def broadcast_pulse_empty(req: PulseRequest):
+    """Quietly handle orphaned pulse requests with empty IDs to stop 404 logs."""
+    return {"success": False, "error": "orphaned_pulse_ignored"}
 
 @app.post("/api/instances/{instance_id}/start")
 async def start_instance_endpoint(instance_id: str):

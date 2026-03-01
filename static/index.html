@@ -192,50 +192,49 @@
                 </div>
             </div>
 
-            <div class="agent-menu-header"
-                style="margin-top:1.5rem; border-top: 1px solid var(--border-color); padding-top: 1.5rem;">
-                <h2>Profiles</h2>
-            </div>
-            <div id="agentProfilesList" style="padding: 0 1rem; margin-bottom: 2rem;">
-                <div class="empty-state" style="padding:1rem;">
-                    <div style="font-size:0.7rem; color:var(--text-secondary);">No saved profiles.</div>
+            <details class="broker-collapse"
+                style="margin: 1.5rem 1rem 0; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                <summary
+                    style="cursor:pointer; font-weight:600; font-size:0.85rem; color:var(--text-secondary); display:flex; align-items:center; gap:0.5rem; user-select:none;">
+                    🚦 Prompt Broker
+                    <span id="brokerStatusBadge"
+                        style="font-size:0.6rem; padding:1px 6px; border-radius:8px; background:#22c55e22; color:#22c55e; font-weight:700; margin-left:auto;">●
+                        ACTIVE</span>
+                </summary>
+                <div id="brokerStats"
+                    style="padding: 0.75rem; font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-dark); border-radius: 0.5rem; margin-top: 0.75rem;">
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                        <span>Status:</span>
+                        <span id="brokerStatus" style="color:#22c55e; font-weight:bold;">ACTIVE</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                        <span>Queue Depth:</span>
+                        <span id="brokerQueueDepth" style="color:var(--text-primary); font-weight:bold;">0</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                        <span>In Progress:</span>
+                        <span id="brokerInProgress" style="color:var(--text-primary); font-size:0.75rem;">—</span>
+                    </div>
+                    <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                        <span>Processed:</span>
+                        <span id="brokerProcessed" style="color:var(--text-primary);">0</span>
+                    </div>
+                    <div
+                        style="display:flex; align-items:center; gap:0.25rem; margin-bottom:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid var(--border);">
+                        <span style="flex:1;">PPM:</span>
+                        <input type="number" id="brokerRateInput" value="1" min="1" max="60"
+                            style="width:50px; font-size:0.75rem; padding:0.2rem; background:var(--bg-column); border:1px solid var(--border); border-radius:4px; color:var(--text-primary);">
+                        <button onclick="setBrokerRate()"
+                            style="font-size:0.65rem; padding:0.15rem 0.35rem;">Set</button>
+                    </div>
+                    <div style="font-size:0.7rem; color:var(--text-secondary); margin-bottom:0.5rem;">
+                        Min safe pulse: <span id="brokerMinPulse">60</span>s
+                    </div>
+                    <button id="brokerPauseBtn" onclick="toggleBrokerPause()"
+                        style="width:100%; font-size:0.75rem; padding:0.3rem 0.5rem; margin-top:0.25rem;">⏸
+                        Pause</button>
                 </div>
-            </div>
-
-            <div class="agent-menu-header" style="margin-top:2rem;">
-                <h2>🚦 Prompt Broker</h2>
-            </div>
-            <div id="brokerStats"
-                style="padding: 1rem; font-size: 0.8rem; color: var(--text-secondary); background: var(--bg-dark); border-radius: 0.5rem; margin: 0 1rem;">
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span>Status:</span>
-                    <span id="brokerStatus" style="color:#22c55e; font-weight:bold;">ACTIVE</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span>Queue Depth:</span>
-                    <span id="brokerQueueDepth" style="color:var(--text-primary); font-weight:bold;">0</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span>In Progress:</span>
-                    <span id="brokerInProgress" style="color:var(--text-primary); font-size:0.75rem;">—</span>
-                </div>
-                <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
-                    <span>Processed:</span>
-                    <span id="brokerProcessed" style="color:var(--text-primary);">0</span>
-                </div>
-                <div
-                    style="display:flex; align-items:center; gap:0.25rem; margin-bottom:0.5rem; margin-top:0.75rem; padding-top:0.75rem; border-top:1px solid var(--border);">
-                    <span style="flex:1;">PPM:</span>
-                    <input type="number" id="brokerRateInput" value="1" min="1" max="60"
-                        style="width:50px; font-size:0.75rem; padding:0.2rem; background:var(--bg-column); border:1px solid var(--border); border-radius:4px; color:var(--text-primary);">
-                    <button onclick="setBrokerRate()" style="font-size:0.65rem; padding:0.15rem 0.35rem;">Set</button>
-                </div>
-                <div style="font-size:0.7rem; color:var(--text-secondary); margin-bottom:0.5rem;">
-                    Min safe pulse: <span id="brokerMinPulse">60</span>s
-                </div>
-                <button id="brokerPauseBtn" onclick="toggleBrokerPause()"
-                    style="width:100%; font-size:0.75rem; padding:0.3rem 0.5rem; margin-top:0.25rem;">⏸ Pause</button>
-            </div>
+            </details>
         </aside>
 
         <!-- Board View -->
@@ -479,6 +478,13 @@
             <div class="modal-body">
 
                 <div class="form-group">
+                    <label>Load Profile</label>
+                    <select id="profileDropdown" onchange="applyProfile(this.value)" style="font-size:0.85rem;">
+                        <option value="">— Start from scratch —</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
                     <label>Worker Name</label>
                     <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
                 </div>
@@ -508,7 +514,8 @@
                     <label>Icon &amp; Color</label>
                     <div style="display:flex;gap:0.75rem;align-items:flex-start;">
                         <div id="iconPreview-create" class="agent-avatar icon-preview"
-                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">🤖</div>
+                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
+                            🤖</div>
                         <div style="flex:1;">
                             <div class="emoji-grid" id="emojiGrid-create"></div>
                             <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
@@ -586,7 +593,8 @@
                     <label>Icon &amp; Color</label>
                     <div style="display:flex;gap:0.75rem;align-items:flex-start;">
                         <div id="iconPreview-edit" class="agent-avatar icon-preview"
-                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">🤖</div>
+                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
+                            🤖</div>
                         <div style="flex:1;">
                             <div class="emoji-grid" id="emojiGrid-edit"></div>
                             <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">

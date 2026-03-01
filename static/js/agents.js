@@ -25,37 +25,23 @@ async function loadProfiles() {
     try {
         const res = await fetch('/api/profiles');
         profilesData = await res.json();
-        renderProfilesList();
+        populateProfileDropdown();
     } catch (e) { console.error('Error loading profiles:', e); }
 }
 
-function renderProfilesList() {
-    const list = document.getElementById('agentProfilesList');
-    if (!list) return;
+function populateProfileDropdown() {
+    const dd = document.getElementById('profileDropdown');
+    if (!dd) return;
+    dd.innerHTML = '<option value="">— Start from scratch —</option>' +
+        profilesData.map(p => {
+            const label = `${p.icon || '🤖'} ${escapeHtml(p.name)} (${p.template_id})`;
+            return `<option value="${p.id}">${label}</option>`;
+        }).join('');
+}
 
-    if (profilesData.length === 0) {
-        list.innerHTML = `
-            <div class="empty-state" style="padding:1rem;">
-                <div style="font-size:0.7rem; color:var(--text-secondary);">No saved profiles.</div>
-            </div>`;
-        return;
-    }
-
-    list.innerHTML = profilesData.map(profile => {
-        const iconHtml = profile.icon && (profile.icon.startsWith('http') || profile.icon.startsWith('/assets/'))
-            ? `<img src="${profile.icon}" class="agent-avatar-img" style="width:24px; height:24px; border-width:1px;">`
-            : `<div style="font-size:1rem;">${profile.icon || '🤖'}</div>`;
-
-        return `
-            <div class="profile-card" onclick="createFromProfile('${profile.id}')" style="padding:8px; gap:8px; font-size:0.8rem;">
-                <div class="profile-icon" style="width:30px; height:30px; font-size:1rem;">${iconHtml}</div>
-                <div style="flex:1; min-width:0;">
-                    <div style="font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;">${escapeHtml(profile.name)}</div>
-                    <div style="font-size:0.65rem; color:var(--text-secondary);">${profile.template_id}</div>
-                </div>
-                <button class="secondary" onclick="event.stopPropagation(); deleteProfile('${profile.id}')" style="padding:2px 6px; font-size:0.7rem;">×</button>
-            </div>`;
-    }).join('');
+function applyProfile(profileId) {
+    if (!profileId) return; // "Start from scratch" selected
+    createFromProfile(profileId);
 }
 
 async function uploadWorkerIcon(mode) {
@@ -88,9 +74,9 @@ async function uploadWorkerIcon(mode) {
 // ─── Emoji / Icon Picker ─────────────────────────────────────────────────
 
 const AGENT_EMOJIS = [
-    '🤖','🦾','🧠','🔬','🔭','🛸','🚀','⚡',
-    '🔧','🛠️','🤝','📝','🎯','🔍','🧩','💡',
-    '🏗️','🔐','🌐','📊','🧬','👾','🦉','🐉'
+    '🤖', '🦾', '🧠', '🔬', '🔭', '🛸', '🚀', '⚡',
+    '🔧', '🛠️', '🤝', '📝', '🎯', '🔍', '🧩', '💡',
+    '🏗️', '🔐', '🌐', '📊', '🧬', '👾', '🦉', '🐉'
 ];
 
 function initEmojiGrid(containerId, mode) {
@@ -591,6 +577,11 @@ async function openCreateWorkerModal() {
     document.getElementById('workerIcon').value = '🤖';
     document.getElementById('workerColor').value = '#6366f1';
     document.getElementById('saveAsProfile').checked = false;
+
+    // Populate profile dropdown
+    populateProfileDropdown();
+    const dd = document.getElementById('profileDropdown');
+    if (dd) dd.value = '';
 
     onServiceChange('create');
     initEmojiGrid('emojiGrid-create', 'create');

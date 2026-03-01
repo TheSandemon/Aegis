@@ -66,11 +66,19 @@ echo ========================================
 echo.
 echo Starting Aegis...
 echo.
-echo The dashboard will open at: http://localhost:8080
+echo The dashboard will open at: http://localhost:42069
 echo.
 echo Press Ctrl+C to stop the server
 REM Small delay to ensure ports/files are released
 timeout /t 2 >nul
+
+REM Kill any process hogging port 42069 to prevent bind errors
+echo Clearing port 42069...
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr ":42069 " ^| findstr "LISTENING"') do (
+    echo   Killing PID %%a on port 42069
+    taskkill /F /PID %%a >nul 2>&1
+)
+echo   [OK] Port 42069 clear
 
 REM Generate agent templates
 echo Initializing agent templates...

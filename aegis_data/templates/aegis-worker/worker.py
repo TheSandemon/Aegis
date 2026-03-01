@@ -6,7 +6,7 @@ import json
 
 sys.stdout.reconfigure(encoding='utf-8')
 
-api_url = os.environ.get("AEGIS_API_URL", "http://localhost:8080/api")
+api_url = os.environ.get("AEGIS_API_URL", "http://localhost:42069/api")
 agent_name = os.environ.get("AEGIS_INSTANCE_NAME", os.environ.get("AEGIS_AGENT_ID", "Agent"))
 goal = os.environ.get("AEGIS_CONFIG_GOALS", "Process tasks and help the team.")
 try:

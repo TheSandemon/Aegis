@@ -356,7 +356,7 @@ class ExecutionEngine:
         env["AEGIS_CARD_TITLE"] = str(card.get("title") or "")
         env["AEGIS_CARD_DESCRIPTION"] = str(card.get("description") or "")
         env["AEGIS_AGENT_PROFILE"] = str(agent_config.get("profile") or "")
-        env["AEGIS_API_URL"] = str(os.environ.get("AEGIS_API_URL", "http://localhost:8080/api"))
+        env["AEGIS_API_URL"] = str(os.environ.get("AEGIS_API_URL", "http://localhost:42069/api"))
         env["PYTHONUNBUFFERED"] = "1"
         env["PYTHONUTF8"] = "1"
         if instance_id:

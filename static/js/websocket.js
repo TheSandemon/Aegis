@@ -83,16 +83,42 @@ function handleWebSocketMessage(data) {
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             break;
         case 'agent_log':
-            const logEl = document.getElementById(`logs-${data.agent_id}`);
-            if (logEl) {
-                const entry = document.createElement('div');
-                entry.textContent = data.entry;
-                logEl.appendChild(entry);
-                logEl.scrollTop = logEl.scrollHeight;
+            const targetId = data.instance_id || data.agent_id;
+
+            // Strip [STDOUT] [worker_name] prefix for cleaner UI display
+            const displayEntry = data.entry.replace(/^\[.*?\]\s*\[.*?\]\s*/, '');
+
+            // Try to append to full terminal if open
+            const activeTerminalId = document.getElementById('activeTerminalInstanceId')?.value;
+            if (activeTerminalId && activeTerminalId === targetId) {
+                const output = document.getElementById('workerTerminalOutput');
+                if (output) {
+                    const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
+                    output.textContent += (output.textContent ? '\n' : '') + displayEntry;
+                    if (isScrolledToBottom) {
+                        output.scrollTop = output.scrollHeight;
+                    }
+                }
+            }
+
+            // Append to Mini Terminal on Worker Card
+            const miniTerm = document.getElementById(`mini-term-${targetId}`);
+            if (miniTerm) {
+                // If log is just starting, clear placeholder
+                if (miniTerm.textContent === 'Waiting for logs...') miniTerm.textContent = '';
+
+                miniTerm.textContent += (miniTerm.textContent ? '\n' : '') + displayEntry;
+
+                // Keep only the last ~4 lines in DOM to prevent bloating
+                const lines = miniTerm.textContent.split('\n');
+                if (lines.length > 5) {
+                    miniTerm.textContent = lines.slice(-5).join('\n');
+                }
+                // Scroll to bottom
+                miniTerm.scrollTop = miniTerm.scrollHeight;
             }
 
             // Extract and update agent activity
-            const targetId = data.instance_id || data.agent_id;
             const activityEl = document.getElementById(`activity-${targetId}`);
             if (activityEl) {
                 const text = data.entry;
@@ -117,7 +143,7 @@ function handleWebSocketMessage(data) {
                 const mapping = agentCardMap[data.instance_id];
                 if (mapping) {
                     const isActive = data.entry.includes('THOUGHT') || data.entry.includes('ACTION') ||
-                                     data.entry.includes('THINKING') || data.entry.includes('PULSE');
+                        data.entry.includes('THINKING') || data.entry.includes('PULSE');
                     if (isActive) setCardAgentHighlight(mapping.card_id, mapping.color, true);
                 }
             }
@@ -125,23 +151,29 @@ function handleWebSocketMessage(data) {
             // Speech Bubbles: Show thought on THOUGHT, ERROR, ATTENTION, or explicit NOTIFY logs
             if (data.entry && typeof showAgentBubble === 'function') {
                 const id = data.instance_id || data.agent_id;
-                const thoughtMatch   = data.entry.match(/💡 THOUGHT: (.+)/);
-                const errorMatch     = data.entry.match(/🛑 ERROR: (.+)/);
+                const thoughtMatch = data.entry.match(/💡 THOUGHT: (.+)/);
+                const errorMatch = data.entry.match(/🛑 ERROR: (.+)/);
                 const attentionMatch = data.entry.match(/⚠️ ATTENTION: (.+)/);
-                const notifyMatch    = data.entry.match(/📢 NOTIFY: (.+)/);
-                const warnNotify     = data.entry.match(/⚠️ NOTIFY: (.+)/);
-                const errNotify      = data.entry.match(/🛑 NOTIFY: (.+)/);
+                const notifyMatch = data.entry.match(/📢 NOTIFY: (.+)/);
+                const warnNotify = data.entry.match(/⚠️ NOTIFY: (.+)/);
+                const errNotify = data.entry.match(/🛑 NOTIFY: (.+)/);
 
-                if (thoughtMatch)   showAgentBubble(id, thoughtMatch[1], 'thought');
-                if (errorMatch)     showAgentBubble(id, errorMatch[1], 'error');
+                if (thoughtMatch) showAgentBubble(id, thoughtMatch[1], 'thought');
+                if (errorMatch) showAgentBubble(id, errorMatch[1], 'error');
                 if (attentionMatch) showAgentBubble(id, attentionMatch[1], 'attention');
-                if (notifyMatch)    showAgentBubble(id, notifyMatch[1], 'notify');
-                if (warnNotify)     showAgentBubble(id, warnNotify[1], 'attention');
-                if (errNotify)      showAgentBubble(id, errNotify[1], 'error');
+                if (notifyMatch) showAgentBubble(id, notifyMatch[1], 'notify');
+                if (warnNotify) showAgentBubble(id, warnNotify[1], 'attention');
+                if (errNotify) showAgentBubble(id, errNotify[1], 'error');
             }
             break;
         case 'log_entry':
             appendLogEntry(data.card_id, data.entry);
+            break;
+        case 'agent_conflict':
+            showToast(`⚠️ Agent ${data.agent_id} encountered a fatal error/conflict!`, 'error');
+            if (typeof triggerConflictWizard === 'function') {
+                triggerConflictWizard(data);
+            }
             break;
         case 'agent_paused':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();

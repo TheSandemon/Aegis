@@ -39,7 +39,7 @@
         const rect = inputEl.getBoundingClientRect();
         const lineHeight = parseInt(getComputedStyle(inputEl).lineHeight) || 20;
         dd.style.left = `${rect.left + window.scrollX}px`;
-        dd.style.top  = `${rect.bottom + window.scrollY + 4}px`;
+        dd.style.top = `${rect.bottom + window.scrollY + 4}px`;
         dd.style.display = 'block';
 
         // Click to select
@@ -73,7 +73,7 @@
         const opt = filteredOptions[idx];
         const val = activeInput.value;
         const before = val.slice(0, mentionStart);
-        const after  = val.slice(activeInput.selectionStart);
+        const after = val.slice(activeInput.selectionStart);
         activeInput.value = before + opt.insertText + ' ' + after;
         const newPos = (before + opt.insertText + ' ').length;
         activeInput.setSelectionRange(newPos, newPos);
@@ -112,26 +112,6 @@
                 const name = inst.instance_name || inst.agent_id;
                 if (!q || name.toLowerCase().includes(q)) {
                     opts.push({ typeLabel: 'agent', label: name, insertText: `@${name}`, priority: 2 });
-                }
-            });
-        }
-
-        // Card groups — @group-name (collected from card.card_group fields)
-        if (typeof cards !== 'undefined') {
-            const groups = new Set(cards.map(c => c.card_group).filter(Boolean));
-            groups.forEach(g => {
-                if (!q || g.toLowerCase().includes(q)) {
-                    opts.push({ typeLabel: 'group', label: g, insertText: `@${g}`, priority: 3 });
-                }
-            });
-        }
-
-        // Card tags — #tag-name
-        if (typeof cards !== 'undefined') {
-            const tags = new Set(cards.flatMap(c => c.card_tags || []));
-            tags.forEach(t => {
-                if (!q || t.toLowerCase().includes(q)) {
-                    opts.push({ typeLabel: 'tag', label: `#${t}`, insertText: `@${t}`, priority: 4 });
                 }
             });
         }
@@ -228,7 +208,7 @@
     // ─── Utility ─────────────────────────────────────────────────────────────
 
     function escapeHtml(str) {
-        return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
     }
 
     document.addEventListener('DOMContentLoaded', window.mentionPickerInit);

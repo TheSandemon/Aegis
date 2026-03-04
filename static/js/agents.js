@@ -434,11 +434,12 @@ async function viewInstanceLogs(instanceId) {
         }
     };
 
-    // Initial fetch and start polling every 2s
+    // Initial fetch to populate history
     await fetchLogs();
     // Scroll to bottom immediately on open
     output.scrollTop = output.scrollHeight;
-    terminalPollInterval = setInterval(fetchLogs, 2000);
+    // Live appending is handled entirely by websocket.js
+
 }
 
 function closeTerminal() {
@@ -763,30 +764,62 @@ function collectConfigValues(containerId) {
     return config;
 }
 
+function switchWorkerTab(modalType, tabName) {
+    const parentId = modalType === 'create' ? 'createWorkerModal' : 'instanceSettingsModal';
+    const modal = document.getElementById(parentId);
+    if (!modal) return;
+
+    // Reset all buttons
+    modal.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderBottom = '2px solid transparent';
+        btn.style.fontWeight = '500';
+    });
+
+    // Reset all content
+    modal.querySelectorAll('.tab-content').forEach(content => {
+        content.style.display = 'none';
+        content.classList.remove('active');
+    });
+
+    // Activate selected
+    const activeBtn = modal.querySelector(`#btn-${modalType}-${tabName}`);
+    const activeContent = modal.querySelector(`#tab-${modalType}-${tabName}`);
+
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.color = 'var(--primary)';
+        activeBtn.style.borderBottom = '2px solid var(--primary)';
+        activeBtn.style.fontWeight = '600';
+    }
+    if (activeContent) {
+        activeContent.style.display = 'block';
+        activeContent.classList.add('active');
+    }
+}
+
 // ─── Create Worker Modal (with per-instance settings) ───────────────────
 
 async function openCreateWorkerModal() {
     document.getElementById('createWorkerModal').classList.add('active');
-    await ensureRegistryLoaded();
-
-    // Default to aegis-worker
-    const templateId = 'aegis-worker';
-
-    // Clear fields
     document.getElementById('workerName').value = '';
-    document.getElementById('workerModelCustom').value = '';
-    document.getElementById('workerService').value = '';
+
+    // Reset tabs to general
+    switchWorkerTab('create', 'general');
+
+    const templateId = 'aegis-worker'; // We just have one universal worker type now
     document.getElementById('unifiedApiKey-create').value = '';
     document.getElementById('feedback-create-apikey').innerHTML = '';
+
+    loadProfiles(); // Populate the load profile dropdown
+
+    document.getElementById('workerService').value = 'anthropic';
     document.getElementById('workerIcon').value = '🤖';
     document.getElementById('workerColor').value = '#6366f1';
     document.getElementById('saveAsProfile').checked = false;
 
-    // Populate profile dropdown
-    populateProfileDropdown();
-    const dd = document.getElementById('profileDropdown');
-    if (dd) dd.value = '';
-
+    // Trigger service updates to populate models
     onServiceChange('create');
     initEmojiGrid('emojiGrid-create', 'create');
     updateIconPreview('create');
@@ -880,6 +913,9 @@ async function createWorkerInstance() {
 async function openInstanceSettings(instanceId) {
     const inst = instancesData.find(i => i.instance_id === instanceId);
     if (!inst) { showToast('Instance not found'); return; }
+
+    // Default to general tab
+    switchWorkerTab('edit', 'general');
 
     document.getElementById('instSettingsId').value = instanceId;
     document.getElementById('instSettingsTitle').textContent = inst.instance_name;
@@ -1018,6 +1054,7 @@ async function loadAvailableSkills(containerId, selectedSkills = []) {
                     <div style="font-weight: 600; color: ${isChecked ? 'var(--primary)' : 'var(--text-primary)'}; font-size: 0.9rem; display: flex; align-items: center; gap: 0.4rem;">
                         <span style="font-size: 1.1rem;">${getSkillIcon(t.name)}</span>
                         ${t.name}
+                        ${t.is_core ? '<span style="font-size: 0.55rem; background: var(--primary); color: white; padding: 1px 4px; border-radius: 4px; font-weight: 700; letter-spacing: 0.05em;">CORE</span>' : ''}
                     </div>
                     <input type="checkbox" value="${t.name}" ${isChecked ? 'checked' : ''} style="accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer;" onchange="this.closest('.skill-card').classList.toggle('selected', this.checked); this.closest('.skill-card').style.borderColor = this.checked ? 'var(--primary)' : 'var(--border-color)'; this.closest('.skill-card').style.background = this.checked ? 'rgba(99, 102, 241, 0.05)' : 'var(--bg-card)';">
                 </div>
@@ -1065,7 +1102,9 @@ function getSkillIcon(name) {
 }
 
 let marketplaceSkills = [];
-let currentSort = 'name'; // 'name', 'date'
+let marketplaceCursor = null;
+let installedSkillsSet = new Set();
+let installedSkillsFull = [];
 
 async function openSkillsMarketplaceModal() {
     document.getElementById('skillsMarketplaceModal').classList.add('active');
@@ -1073,28 +1112,122 @@ async function openSkillsMarketplaceModal() {
     listEl.innerHTML = '<div class="loading-spinner">Loading curated skills...</div>';
 
     try {
+        // Fetch installed skills to know which button to show and populate "Installed" filter
+        const toolsRes = await fetch('/api/tools');
+        const tools = await toolsRes.json();
+        installedSkillsSet = new Set();
+        installedSkillsFull = [];
+
+        tools.forEach(t => {
+            if (!t.is_core) {
+                const s_id = t.id || t.name;
+                installedSkillsSet.add(s_id.toLowerCase());
+                installedSkillsSet.add(t.name.toLowerCase());
+                installedSkillsFull.push({
+                    id: s_id,
+                    name: t.name,
+                    description: t.description,
+                    github_url: `https://clawhub.ai/api/v1/download?slug=${s_id}`,
+                    stats: { downloads: 0, stars: 0 },
+                    tags: { latest: 'installed' }
+                });
+            }
+        });
+
+        // Fetch first page
         const res = await fetch('/api/skills/marketplace');
-        marketplaceSkills = await res.json();
+        const data = await res.json();
+        marketplaceSkills = data.items || [];
+        marketplaceCursor = data.nextCursor || null;
         renderMarketplaceSkills();
     } catch (e) {
         listEl.innerHTML = '<div style="color:var(--danger); padding:1rem;">Failed to load marketplace</div>';
     }
 }
 
+async function loadMoreMarketplaceSkills() {
+    if (!marketplaceCursor) return;
+    const loadBtn = document.getElementById('btn-load-more-skills');
+    if (loadBtn) loadBtn.innerText = 'Loading...';
+
+    try {
+        const res = await fetch(`/api/skills/marketplace?cursor=${encodeURIComponent(marketplaceCursor)}`);
+        const data = await res.json();
+        marketplaceSkills = marketplaceSkills.concat(data.items || []);
+        marketplaceCursor = data.nextCursor || null;
+        renderMarketplaceSkills();
+    } catch (e) {
+        if (loadBtn) loadBtn.innerText = 'Failed to load more. Try again.';
+    }
+}
+
+let searchDebounceTimeout = null;
+
+function debounceSearchMarketplaceSkills() {
+    clearTimeout(searchDebounceTimeout);
+    searchDebounceTimeout = setTimeout(() => {
+        performMarketplaceSearch();
+    }, 400);
+}
+
+async function performMarketplaceSearch() {
+    const q = (document.getElementById('marketplaceSearch').value || '').trim();
+    const listEl = document.getElementById('marketplaceList');
+    listEl.innerHTML = '<div class="loading-spinner">Searching skills...</div>';
+
+    try {
+        let url = '/api/skills/marketplace';
+        if (q) {
+            url += `?q=${encodeURIComponent(q)}`;
+        }
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        // Reset full state with the new search results
+        marketplaceSkills = data.items || [];
+        marketplaceCursor = data.nextCursor || null;
+
+        renderMarketplaceSkills();
+    } catch (e) {
+        listEl.innerHTML = '<div style="color:var(--danger); padding:1rem; grid-column: 1 / -1; text-align: center;">Search failed. Try again.</div>';
+    }
+}
+
 function renderMarketplaceSkills() {
     const q = (document.getElementById('marketplaceSearch').value || '').toLowerCase();
+    const filter = document.getElementById('marketplaceFilter')?.value || 'all';
+    const sort = document.getElementById('marketplaceSort')?.value || 'name';
     const listEl = document.getElementById('marketplaceList');
 
-    let filtered = marketplaceSkills.filter(s =>
-        s.name.toLowerCase().includes(q) || s.description.toLowerCase().includes(q)
-    );
+    let sourceSkills = marketplaceSkills;
+    if (filter === 'installed') {
+        sourceSkills = installedSkillsFull;
+    }
 
-    // Sort logic
-    if (currentSort === 'name') {
-        filtered.sort((a, b) => a.name.localeCompare(b.name));
-    } else if (currentSort === 'date') {
-        // Since we don't have date yet from the backend simplified format, just mock it or skip
-        filtered.sort((a, b) => b.id.localeCompare(a.id));
+    let filtered = sourceSkills.filter(s => {
+        // If we are looking at Installed skills but we typed a search query, we must filter locally.
+        if (filter === 'installed' && q) {
+            const matchesQ = s.name.toLowerCase().includes(q) || (s.description && s.description.toLowerCase().includes(q));
+            if (!matchesQ) return false;
+        }
+
+        const isInstalled = installedSkillsSet.has(s.name.toLowerCase()) || installedSkillsSet.has(s.id.toLowerCase());
+
+        if (filter === 'installed' && !isInstalled) return false;
+        if (filter === 'not_installed' && isInstalled) return false;
+        return true;
+    });
+
+    // Sort logic (only if not actively searching, to preserve relevance)
+    if (!q) {
+        if (sort === 'name') {
+            filtered.sort((a, b) => a.name.localeCompare(b.name));
+        } else if (sort === 'recent') {
+            filtered.sort((a, b) => b.id.localeCompare(a.id));
+        } else if (sort === 'downloads') {
+            filtered.sort((a, b) => (b.stats?.downloads || 0) - (a.stats?.downloads || 0));
+        }
     }
 
     if (filtered.length === 0) {
@@ -1102,15 +1235,16 @@ function renderMarketplaceSkills() {
         return;
     }
 
-    // Add grid styling to the container
+    // Add grid styling to the container. Erase flex direction.
+    listEl.style.flexDirection = '';
     listEl.style.display = 'grid';
-    listEl.style.gridTemplateColumns = 'repeat(auto-fill, minmax(280px, 1fr))';
+    listEl.style.gridTemplateColumns = 'repeat(auto-fill, minmax(260px, 1fr))';
     listEl.style.gap = '1rem';
     listEl.style.padding = '0.5rem';
 
-    listEl.innerHTML = filtered.map(s => {
+    let htmlParts = filtered.map(s => {
         return `
-            <div class="marketplace-skill-card" style="background:var(--bg-column); border:1px solid var(--border-color); border-radius:12px; padding:1.25rem; display:flex; flex-direction:column; gap:0.75rem; transition: all 0.2s ease; position:relative; overflow:hidden;">
+            <div class="marketplace-skill-card" style="background:var(--bg-column); border:1px solid var(--border-color); border-radius:12px; padding:1.25rem; display:flex; flex-direction:column; gap:0.75rem; transition: all 0.2s ease; position:relative; overflow:hidden; min-height:180px; height:auto; cursor: pointer;" onclick="this.classList.toggle('expanded')">
                 <!-- Decorative background glow -->
                 <div style="position:absolute; top:-20px; right:-20px; width:100px; height:100px; background:var(--primary); opacity:0.05; filter:blur(40px); border-radius:50%; pointer-events:none;"></div>
 
@@ -1124,18 +1258,32 @@ function renderMarketplaceSkills() {
                     </div>
                 </div>
 
-                <div style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5; flex-grow: 1; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical; overflow:hidden;">${s.description}</div>
+                <div class="skill-desc" style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5; flex-grow: 1; display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;">${s.description}</div>
 
                 <div style="margin-top:auto; padding-top:1rem; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
                     <div style="display:flex; gap: 0.5rem; font-size: 0.75rem; color: var(--text-muted);">
                         <span title="Downloads">⬇️ ${s.stats?.downloads || 0}</span>
                         <span title="Stars">⭐ ${s.stats?.stars || 0}</span>
                     </div>
-                    <button class="btn-primary" id="btn-install-${s.id}" onclick="installSkill('${s.github_url}', '${s.id}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500;">Install Skill</button>
+                    ${installedSkillsSet.has(s.name.toLowerCase()) || installedSkillsSet.has(s.id.toLowerCase())
+                ? `<button class="danger" id="btn-uninstall-${s.id}" onclick="event.stopPropagation(); uninstallMarketplaceSkill('${s.id}', '${s.name}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500; z-index:2; position:relative; background: var(--danger);">Uninstall</button>`
+                : `<button id="btn-install-${s.id}" onclick="event.stopPropagation(); installSkill('${s.github_url}', '${s.id}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500; z-index:2; position:relative;">Install Skill</button>`
+            }
                 </div>
             </div>
         `;
-    }).join('');
+    });
+
+    // Add "Load More" if pagination cursor exists
+    if (marketplaceCursor) {
+        htmlParts.push(`
+            <div style="grid-column: 1 / -1; display:flex; justify-content:center; padding: 1rem;">
+                <button id="btn-load-more-skills" onclick="loadMoreMarketplaceSkills()" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color); padding:0.75rem 2rem; border-radius:8px; cursor:pointer;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='var(--bg-card)'">Load More Skills</button>
+            </div>
+        `);
+    }
+
+    listEl.innerHTML = htmlParts.join('');
 }
 
 async function installSkill(githubUrl, skillId) {
@@ -1158,6 +1306,24 @@ async function installSkill(githubUrl, skillId) {
                 showToast(`Skill ${skillId} is already installed`);
             } else {
                 showToast(`✅ Successfully installed ${skillId}`);
+                installedSkillsSet.add(skillId.toLowerCase());
+                // Refresh full installed skills array
+                fetch('/api/tools').then(r => r.json()).then(tools => {
+                    installedSkillsFull = [];
+                    tools.forEach(t => {
+                        if (!t.is_core) {
+                            installedSkillsFull.push({
+                                id: t.id || t.name,
+                                name: t.name,
+                                description: t.description,
+                                github_url: `https://clawhub.ai/api/v1/download?slug=${t.id || t.name}`,
+                                stats: { downloads: 0, stars: 0 },
+                                tags: { latest: 'installed' }
+                            });
+                        }
+                    });
+                    renderMarketplaceSkills();
+                });
             }
             if (btn) {
                 btn.textContent = 'Installed';
@@ -1175,6 +1341,44 @@ async function installSkill(githubUrl, skillId) {
         if (btn) {
             btn.disabled = false;
             btn.textContent = 'Retry Install';
+        }
+    }
+}
+
+async function uninstallMarketplaceSkill(skillId, skillName) {
+    const btn = document.getElementById(`btn-uninstall-${skillId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Uninstalling...';
+    }
+
+    try {
+        const res = await fetch(`/api/skills/uninstall/${skillId}`, { method: 'DELETE' });
+        const d = await res.json();
+
+        if (res.ok) {
+            showToast(`✅ Successfully uninstalled ${skillName}`);
+            installedSkillsSet.delete(skillName.toLowerCase());
+            installedSkillsSet.delete(skillId.toLowerCase());
+            installedSkillsFull = installedSkillsFull.filter(s => s.id.toLowerCase() !== skillId.toLowerCase());
+            renderMarketplaceSkills();
+
+            // Optionally, refresh available skills if the worker settings modal happens to be active behind this one
+            if (document.getElementById('workerSettingsModal')?.classList.contains('active')) {
+                loadAvailableSkills('workerSkillsList', getCheckedSkills('workerSkillsList'));
+            }
+        } else {
+            showToast(`⚠️ Uninstall failed: ${d.detail || 'Unknown error'}`);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Retry Uninstall';
+            }
+        }
+    } catch (e) {
+        showToast('⚠️ Uninstall failed');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Retry Uninstall';
         }
     }
 }

@@ -51,6 +51,59 @@ class SkillManager:
                     },
                     "required": ["command"]
                 }
+            },
+            "github_create_branch": {
+                "name": "github_create_branch",
+                "description": "Creates a new branch in a GitHub repository using the native API.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "The target repository in owner/repo format (e.g., 'TheSandemon/Aegis')."},
+                        "branch_name": {"type": "string", "description": "Name of the new branch to create."},
+                        "base_branch": {"type": "string", "description": "Name of the base branch to branch from (default 'main')."}
+                    },
+                    "required": ["repo", "branch_name"]
+                }
+            },
+            "github_create_pr": {
+                "name": "github_create_pr",
+                "description": "Opens a Pull Request in a GitHub repository using the native API.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "The target repository in owner/repo format."},
+                        "title": {"type": "string", "description": "PR title."},
+                        "body": {"type": "string", "description": "PR description."},
+                        "head_branch": {"type": "string", "description": "The name of the branch where your changes are implemented."},
+                        "base_branch": {"type": "string", "description": "The name of the branch you want the changes pulled into. Default usually 'main'."}
+                    },
+                    "required": ["repo", "title", "body", "head_branch"]
+                }
+            },
+            "github_list_prs": {
+                "name": "github_list_prs",
+                "description": "Lists open Pull Requests for a specific GitHub repository.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "The target repository in owner/repo format."},
+                        "state": {"type": "string", "description": "State of the PR to list: 'open', 'closed', or 'all'. default 'open'."}
+                    },
+                    "required": ["repo"]
+                }
+            },
+            "github_merge_pr": {
+                "name": "github_merge_pr",
+                "description": "Merges an open Pull Request using the native API.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "repo": {"type": "string", "description": "The target repository in owner/repo format."},
+                        "pr_number": {"type": "integer", "description": "The integer ID of the Pull Request."},
+                        "merge_method": {"type": "string", "description": "The merge method: 'merge', 'squash', or 'rebase'. default 'squash'."}
+                    },
+                    "required": ["repo", "pr_number"]
+                }
             }
         }
 
@@ -107,12 +160,26 @@ class SkillManager:
 
     def get_all_tools(self) -> List[Dict[str, Any]]:
         """Returns all available tools (core + loaded skills)."""
-        all_tools = list(self.core_tools.values())
-        for skill in self.skills.values():
+        all_tools = []
+        for core_tool in self.core_tools.values():
+            tool_data = dict(core_tool)
+            tool_data["is_core"] = True
+            all_tools.append(tool_data)
+            
+        for skill_id, skill in self.skills.items():
+            skill_name = skill["name"]
+            is_core = False
+            
+            # Label calculator as core dynamically for UI
+            if skill_name.lower() == "calculator":
+                is_core = True
+                
             all_tools.append({
-                "name": skill["name"],
+                "id": skill_id,
+                "name": skill_name,
                 "description": skill["description"],
-                "parameters": skill["parameters"]
+                "parameters": skill["parameters"],
+                "is_core": is_core
             })
         return all_tools
 
@@ -156,6 +223,74 @@ class SkillManager:
             )
             stdout, stderr = await proc.communicate()
             return (stdout or stderr).decode().strip()
+
+        elif name.startswith("github_"):
+            token = os.environ.get("GITHUB_TOKEN")
+            if not token:
+                config_path = Path("aegis.config.json")
+                if config_path.exists():
+                    try:
+                        conf = json.loads(config_path.read_text())
+                        for c in conf.get("integration_connections", []):
+                            if c.get("type") == "github" and c.get("credentials", {}).get("token"):
+                                token = c["credentials"]["token"]
+                                break
+                    except Exception:
+                        pass
+            if not token:
+                return "Error: No GitHub token configured in aegis.config.json or GITHUB_TOKEN environment variable."
+            
+            repo = args.get("repo")
+            if not repo:
+                return "Error: 'repo' parameter is required for GitHub operations."
+                
+            import httpx
+            headers = {
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            }
+            base_url = "https://api.github.com"
+            
+            async with httpx.AsyncClient(timeout=20) as client:
+                if name == "github_create_branch":
+                    base = args.get("base_branch", "main")
+                    branch_name = args.get("branch_name")
+                    ref_resp = await client.get(f"{base_url}/repos/{repo}/git/ref/heads/{base}", headers=headers)
+                    if ref_resp.status_code != 200:
+                        return f"Error: Base branch '{base}' not found: {ref_resp.status_code} - {ref_resp.text}"
+                    sha = ref_resp.json()["object"]["sha"]
+                    create_resp = await client.post(f"{base_url}/repos/{repo}/git/refs", headers=headers, json={"ref": f"refs/heads/{branch_name}", "sha": sha})
+                    if create_resp.status_code == 201:
+                        return f"Success: Created branch {branch_name} from {base} (SHA: {sha})"
+                    return f"Error: Failed to create branch: {create_resp.status_code} - {create_resp.text}"
+
+                elif name == "github_create_pr":
+                    title = args.get("title")
+                    body = args.get("body", "")
+                    head = args.get("head_branch")
+                    base = args.get("base_branch", "main")
+                    resp = await client.post(f"{base_url}/repos/{repo}/pulls", headers=headers, json={"title": title, "body": body, "head": head, "base": base})
+                    if resp.status_code == 201:
+                        data = resp.json()
+                        return f"Success: Created Pull Request #{data['number']} at {data['html_url']}"
+                    return f"Error: Failed to create PR: {resp.status_code} - {resp.text}"
+
+                elif name == "github_list_prs":
+                    state = args.get("state", "open")
+                    resp = await client.get(f"{base_url}/repos/{repo}/pulls", headers=headers, params={"state": state, "per_page": 30})
+                    if resp.status_code == 200:
+                        prs = resp.json()
+                        return json.dumps([{"number": pr["number"], "title": pr["title"], "state": pr["state"], "url": pr["html_url"], "head": pr.get("head", {}).get("ref", ""), "base": pr.get("base", {}).get("ref", "")} for pr in prs])
+                    return f"Error: Failed to list PRs: {resp.status_code} - {resp.text}"
+
+                elif name == "github_merge_pr":
+                    pr_number = args.get("pr_number")
+                    merge_method = args.get("merge_method", "squash")
+                    resp = await client.put(f"{base_url}/repos/{repo}/pulls/{pr_number}/merge", headers=headers, json={"merge_method": merge_method})
+                    if resp.status_code == 200:
+                        return f"Success: Merged PR #{pr_number} using {merge_method}."
+                    return f"Error: Merge failed: {resp.status_code} - {resp.text}"
 
     async def _execute_modular_tool(self, name: str, args: Dict[str, Any], context: Dict[str, Any]) -> Any:
         """Handles execution of ported ClawHub skills."""

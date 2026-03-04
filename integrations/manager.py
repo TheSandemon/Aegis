@@ -158,6 +158,7 @@ class IntegrationManager:
                 column_id,
                 last_synced_at=now,
                 integration_status="active",
+                integration_error=None,
             )
             count = len(results) if results else 0
             logger.info(f"Initial sync for column {column_id}: {count} item(s)")
@@ -170,8 +171,19 @@ class IntegrationManager:
             })
         except Exception as e:
             error_msg = str(e)
+            # Make HTTP errors more user-friendly
+            if "401" in error_msg:
+                error_msg = "Authentication failed — check your token/credentials"
+            elif "404" in error_msg:
+                error_msg = "Repository or resource not found — check the repo name"
+            elif "403" in error_msg:
+                error_msg = "Access denied — token may lack required permissions"
             logger.error(f"Initial sync failed for column {column_id}: {error_msg}")
-            self.store.update_column_integration(column_id, integration_status="error")
+            self.store.update_column_integration(
+                column_id,
+                integration_status="error",
+                integration_error=error_msg,
+            )
             await self.broadcaster({
                 "type": "integration_status",
                 "column_id": column_id,
@@ -209,6 +221,7 @@ class IntegrationManager:
                 "mode": integration.mode,
                 "last_synced_at": col.get("last_synced_at"),
                 "status": col.get("integration_status", "active"),
+                "error": col.get("integration_error"),
                 "poll_active": col_id in self._poll_tasks,
             })
         return result
@@ -292,6 +305,7 @@ class IntegrationManager:
                     column_id,
                     last_synced_at=now,
                     integration_status="active",
+                    integration_error=None,
                 )
                 count = len(results) if results else 0
                 if count:
@@ -309,9 +323,17 @@ class IntegrationManager:
                 break
             except Exception as e:
                 error_msg = str(e)
+                if "401" in error_msg:
+                    error_msg = "Authentication failed — check your token/credentials"
+                elif "404" in error_msg:
+                    error_msg = "Repository or resource not found — check the repo name"
+                elif "403" in error_msg:
+                    error_msg = "Access denied — token may lack required permissions"
                 logger.error(f"Polling error for column {column_id}: {error_msg}")
                 self.store.update_column_integration(
-                    column_id, integration_status="error"
+                    column_id,
+                    integration_status="error",
+                    integration_error=error_msg,
                 )
                 await self.broadcaster({
                     "type": "integration_status",

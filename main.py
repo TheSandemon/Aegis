@@ -96,6 +96,7 @@ list_dir       — {{"path": str}}  ← List files in a directory
 read_file      — {{"path": str}}  ← Read a file
 write_file     — {{"path": str, "content": str}}  ← Write/overwrite a file
 wait           — {{"reason": str}}  ← Use ONLY when genuinely blocked; ends the pulse.
+search_terminal — {{"query": str, "limit": int|null}}  ← Search your historical terminal logs
 
 ━━━ GIT & GITHUB ACTIONS ━━━
 git_clone            — {{"repo_url": str, "dest": str}}  ← Clone a repo into your workspace
@@ -181,6 +182,40 @@ class AegisStore:
                     color TEXT DEFAULT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS instance_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    tag TEXT NOT NULL,
+                    content TEXT NOT NULL
+                )
+            """)
+            try:
+                conn.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS instance_logs_fts USING fts5(
+                        instance_id UNINDEXED,
+                        timestamp UNINDEXED,
+                        tag,
+                        content,
+                        content='instance_logs',
+                        content_rowid='id'
+                    )
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS instance_logs_ai AFTER INSERT ON instance_logs BEGIN
+                      INSERT INTO instance_logs_fts(rowid, instance_id, timestamp, tag, content) 
+                      VALUES (new.id, new.instance_id, new.timestamp, new.tag, new.content);
+                    END;
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS instance_logs_ad AFTER DELETE ON instance_logs BEGIN
+                      INSERT INTO instance_logs_fts(instance_logs_fts, rowid, instance_id, timestamp, tag, content) 
+                      VALUES ('delete', old.id, old.instance_id, old.timestamp, old.tag, old.content);
+                    END;
+                """)
+            except sqlite3.OperationalError as e:
+                logger.warning(f"FTS5 not enabled or error creating virtual table: {e}")
             conn.commit()
             
             # Seed default columns if none exist
@@ -478,6 +513,38 @@ class AegisStore:
             conn.commit()
             return cursor.rowcount > 0
 
+    def add_instance_log(self, instance_id: str, tag: str, content: str):
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                'INSERT INTO instance_logs (instance_id, timestamp, tag, content) VALUES (?, ?, ?, ?)',
+                (instance_id, now, tag, content)
+            )
+            conn.commit()
+
+    def search_instance_logs(self, instance_id: str, query: str, limit: int = 50):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute('''
+                    SELECT timestamp, tag, content 
+                    FROM instance_logs_fts 
+                    WHERE instance_id = ? AND instance_logs_fts MATCH ? 
+                    ORDER BY rank LIMIT ?
+                ''', (instance_id, query, limit)).fetchall()
+                if not rows:
+                    raise sqlite3.OperationalError("Fallback")
+                return [dict(r) for r in rows]
+            except sqlite3.OperationalError:
+                # FTS fallback
+                query_like = f"%{query}%"
+                rows = conn.execute('''
+                    SELECT timestamp, tag, content
+                    FROM instance_logs
+                    WHERE instance_id = ? AND (content LIKE ? OR tag LIKE ?)
+                    ORDER BY timestamp DESC LIMIT ?
+                ''', (instance_id, query_like, query_like, limit)).fetchall()
+                return [dict(r) for r in rows]
 
 # Store factory: Firebase or SQLite
 def _create_store():
@@ -947,6 +1014,9 @@ async def update_column(col_id: int, update: ColumnUpdate):
     if update.color is not None:
         db_updates["color"] = update.color
 
+    if update.is_locked is not None:
+        db_updates["is_locked"] = update.is_locked
+
     if db_updates:
         store.update_column(col_id, **db_updates)
 
@@ -1197,6 +1267,83 @@ async def get_card_context(card_id: int):
         "mentioned_agents": [{"instance_name": i.get("instance_name"), "agent_id": i.get("agent_id"), "goal": i.get("goal")} for i in mentioned_agents],
     }
 
+class BulkDeleteRequest(BaseModel):
+    card_ids: List[int]
+
+class CardBulkUpdateItem(BaseModel):
+    card_id: int
+    title: Optional[str] = None
+    description: Optional[str] = None
+    column: Optional[str] = None
+    assignee: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+
+class BulkUpdateRequest(BaseModel):
+    updates: List[CardBulkUpdateItem]
+
+@app.delete("/api/cards/bulk")
+async def bulk_delete_cards(req: BulkDeleteRequest, request: Request):
+    """Delete multiple cards in a single API request."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    deleted_ids = []
+    errors = []
+    
+    for cid in req.card_ids:
+        card = store.get_card(cid)
+        if not card:
+            errors.append(f"#{cid}: Not found")
+            continue
+            
+        if is_agent:
+            col_obj = next((c for c in store.get_columns() if c["name"] == card.get("column")), {})
+            if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+                errors.append(f"#{cid}: Read-only column")
+                continue
+                
+        if store.delete_card(cid):
+            deleted_ids.append(cid)
+            asyncio.create_task(integration_manager.notify_card_change(card, "card_deleted"))
+            
+    if deleted_ids:
+        for cid in deleted_ids:
+            await manager.broadcast({"type": "card_deleted", "card_id": cid})
+            
+    return {"success": True, "deleted": deleted_ids, "errors": errors}
+
+@app.patch("/api/cards/bulk")
+async def bulk_update_cards(req: BulkUpdateRequest, request: Request):
+    """Update multiple cards in a single API request."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    updated_ids = []
+    errors = []
+    
+    for update in req.updates:
+        cid = update.card_id
+        card = store.get_card(cid)
+        if not card:
+            errors.append(f"#{cid}: Not found")
+            continue
+            
+        if is_agent:
+            col_obj = next((c for c in store.get_columns() if c["name"] == card.get("column")), {})
+            if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+                errors.append(f"#{cid}: Read-only column")
+                continue
+                
+        kwargs = {k: v for k, v in update.dict(exclude_unset=True).items() if k != "card_id" and v is not None}
+        if kwargs:
+            store.update_card(cid, **kwargs)
+            updated = store.get_card(cid)
+            updated_ids.append(cid)
+            asyncio.create_task(integration_manager.notify_card_change(updated, "card_updated"))
+            
+    for cid in updated_ids:
+        updated = store.get_card(cid)
+        await manager.broadcast({"type": "card_updated", "card": updated})
+        
+    return {"success": True, "updated": updated_ids, "errors": errors}
+
 @app.patch("/api/cards/{card_id}")
 async def update_card(card_id: int, update: CardUpdate, request: Request):
     """Update a card. Arbitrary transitions are now allowed for Sandbox Agents."""
@@ -1277,6 +1424,8 @@ async def delete_card(card_id: int, request: Request, close_external: bool = Fal
         return {"success": True}
     raise HTTPException(status_code=404, detail="Card not found")
 
+
+
 @app.get("/api/cards/{card_id}/diff")
 async def get_card_diff(card_id: int):
     """
@@ -1356,15 +1505,23 @@ async def refresh_skills():
     return {"status": "refreshed", "count": len(skill_manager.skills)}
 
 @app.get("/api/skills/marketplace")
-async def get_marketplace_skills():
-    """Returns a curated list of port-ready ClawHub skills."""
+async def get_marketplace_skills(q: Optional[str] = None, cursor: Optional[str] = None):
+    """Returns a paginated list of port-ready ClawHub skills."""
     url = "https://clawhub.ai/api/v1/skills"
+    
+    params = {}
+    if q:
+        url = "https://clawhub.ai/api/v1/search"
+        params["q"] = q
+    if cursor:
+        params["cursor"] = cursor
+        
     try:
         async with httpx.AsyncClient() as client:
-            response = await client.get(url, timeout=10)
+            response = await client.get(url, params=params, timeout=10)
             response.raise_for_status()
             data = response.json()
-            skills = data.get("items", [])
+            skills = data.get("items", data.get("results", []))
             
             # Map Clawhub skills to the format expected by the frontend
             formatted_skills = []
@@ -1375,36 +1532,31 @@ async def get_marketplace_skills():
                     "description": skill.get("summary", ""),
                     "github_url": f"https://clawhub.ai/api/v1/download?slug={skill.get('slug')}"
                 })
-            return formatted_skills
+                
+            return {
+                "items": formatted_skills,
+                "nextCursor": data.get("nextCursor")
+            }
     except Exception as e:
         logger.error(f"Failed to fetch Clawhub skills: {e}")
         # Fallback to the old hardcoded list if the API fails
-        return [
-            {
-                "id": "decodo-scraper",
-                "name": "Decodo Scraper",
-                "description": "Powerful web scraping and data extraction tool using Playwright.",
-                "github_url": "https://github.com/clawhub/decodo-scraper.git"
-            },
-            {
-                "id": "mulch",
-                "name": "Mulch OS Agent",
-                "description": "Core operating system operations, file system management, and environment execution.",
-                "github_url": "https://github.com/clawhub/mulch.git"
-            },
-            {
-                "id": "skills-security-audit",
-                "name": "Security Auditor",
-                "description": "Static code analysis and vulnerability scanning tool suite.",
-                "github_url": "https://github.com/clawhub/skills-security-audit.git"
-            },
-            {
-                "id": "agentic-devops",
-                "name": "Agentic DevOps",
-                "description": "CI/CD and infrastructure management abilities for agents.",
-                "github_url": "https://github.com/clawhub/agentic-devops.git"
-            }
-        ]
+        return {
+            "items": [
+                {
+                    "id": "skills-security-audit",
+                    "name": "Security Auditor",
+                    "description": "Static code analysis and vulnerability scanning tool suite.",
+                    "github_url": "https://github.com/clawhub/skills-security-audit.git"
+                },
+                {
+                    "id": "agentic-devops",
+                    "name": "Agentic DevOps",
+                    "description": "CI/CD and infrastructure management abilities for agents.",
+                    "github_url": "https://github.com/clawhub/agentic-devops.git"
+                }
+            ],
+            "nextCursor": None
+        }
 
 @app.post("/api/skills/install")
 async def install_skill(req: SkillInstallRequest):
@@ -1433,7 +1585,8 @@ async def install_skill(req: SkillInstallRequest):
     if "clawhub.ai/api/v1/download" in req.github_url:
         try:
             async with httpx.AsyncClient() as client:
-                response = await client.get(req.github_url, timeout=30, follow_redirects=True)
+                headers = {"User-Agent": "Aegis/2.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+                response = await client.get(req.github_url, timeout=30, follow_redirects=True, headers=headers)
                 response.raise_for_status()
                 
                 # Extract zip file
@@ -1459,6 +1612,40 @@ async def install_skill(req: SkillInstallRequest):
         
     skill_manager.refresh_skills()
     return {"status": "success", "skill_id": repo_name, "message": f"Successfully installed {repo_name}"}
+
+@app.delete("/api/skills/uninstall/{skill_id}")
+async def uninstall_skill(skill_id: str):
+    """Uninstalls a skill and removes it from all active workers."""
+    import shutil
+    from skill_manager import SKILLS_DIR
+    target_dir = SKILLS_DIR / skill_id
+    
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' is not installed.")
+        
+    try:
+        shutil.rmtree(target_dir, ignore_errors=True)
+    except Exception as e:
+        logger.error(f"Error removing skill directory for {skill_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove skill files: {e}")
+        
+    # Remove from instances to prevent ghost skills
+    try:
+        instances = load_instances()
+        changed = False
+        for inst in instances:
+            skills = inst.get("config", {}).get("skills", [])
+            if skill_id in skills:
+                skills.remove(skill_id)
+                changed = True
+        
+        if changed:
+            save_instances(instances)
+    except Exception as e:
+        logger.error(f"Error removing skill {skill_id} from instances: {e}")
+        
+    skill_manager.refresh_skills()
+    return {"status": "success", "skill_id": skill_id, "message": f"Successfully uninstalled {skill_id}"}
 
 # ─── Agent Control ───────────────────────────────────────────────────────────────
 
@@ -2072,6 +2259,14 @@ async def get_instance_logs(instance_id: str, tail: int = 100):
     """Get recent logs for an instance process."""
     logs = engine.get_logs(instance_id, tail)
     return {"instance_id": instance_id, "logs": logs}
+
+@app.get("/api/instances/{instance_id}/search_logs")
+async def search_instance_logs(instance_id: str, query: str = "", limit: int = 50):
+    """Search historical logs for an instance using FTS5."""
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+    logs = store.search_instance_logs(instance_id, query, limit)
+    return {"instance_id": instance_id, "query": query, "logs": logs}
 
 # ─── Instance Intervention (Glass Box) ───────────────────────────────────────────
 class ChatMessage(BaseModel):

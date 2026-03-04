@@ -31,8 +31,84 @@ async function init() {
     await loadCards();
     connectWebSocket();
     renderBoard();
+    initBoardPanZoom();
     document.getElementById('loadingSpinner').style.display = 'none';
     setupViewRouting();
+}
+
+// ── Kanban Pan & Zoom ────────────────────────────────────────────────────────
+
+let boardScale = 1;
+let boardPanX = 0;
+let boardPanY = 0;
+let isPanning = false;
+let startPanX = 0;
+let startPanY = 0;
+
+function initBoardPanZoom() {
+    const boardView = document.getElementById('boardView');
+    const board = document.getElementById('board');
+    if (!boardView || !board) return;
+
+    board.style.transformOrigin = '0 0';
+
+    function updateTransform() {
+        board.style.transform = `translate(${boardPanX}px, ${boardPanY}px) scale(${boardScale})`;
+    }
+
+    boardView.addEventListener('wheel', (e) => {
+        // Find if we are scrolling over a scrollable column component
+        const scrollableNode = e.target.closest('.column-body, #terminalOutput, .modal-body');
+
+        if (e.ctrlKey || e.metaKey) {
+            e.preventDefault();
+            // Zoom towards mouse pointer
+            const zoomAmount = e.deltaY * -0.001;
+            const newScale = Math.min(Math.max(0.1, boardScale + zoomAmount), 3);
+
+            const rect = boardView.getBoundingClientRect();
+            const mouseX = e.clientX - rect.left;
+            const mouseY = e.clientY - rect.top;
+
+            boardPanX = mouseX - (mouseX - boardPanX) * (newScale / boardScale);
+            boardPanY = mouseY - (mouseY - boardPanY) * (newScale / boardScale);
+
+            boardScale = newScale;
+            updateTransform();
+        } else if (!scrollableNode) {
+            // Normal trackpad pan / mouse scroll on the board background
+            e.preventDefault();
+            boardPanX -= e.deltaX;
+            boardPanY -= e.deltaY;
+            updateTransform();
+        }
+    }, { passive: false });
+
+    boardView.addEventListener('mousedown', (e) => {
+        if (e.button === 1 || (e.button === 0 && e.altKey)) { // Middle click or Alt+LeftClick
+            e.preventDefault();
+            isPanning = true;
+            startPanX = e.clientX - boardPanX;
+            startPanY = e.clientY - boardPanY;
+            boardView.style.cursor = 'grabbing';
+            document.body.style.userSelect = 'none'; // Prevent text selection while panning
+        }
+    });
+
+    window.addEventListener('mousemove', (e) => {
+        if (!isPanning) return;
+        boardPanX = e.clientX - startPanX;
+        boardPanY = e.clientY - startPanY;
+        updateTransform();
+    });
+
+    window.addEventListener('mouseup', (e) => {
+        if (isPanning) {
+            isPanning = false;
+            boardView.style.cursor = '';
+            document.body.style.userSelect = '';
+        }
+    });
 }
 
 async function loadConfig() {
@@ -113,10 +189,9 @@ function renderBoard() {
                     ${isIntegrated ? `<span title="Integration: ${colObj.integration_type} (${colObj.integration_status || 'active'})" style="font-size:0.65rem; cursor:default;">
                         <span style="color:${colObj.integration_status === 'error' ? '#ef4444' : '#22c55e'}">●</span>🔗</span>` : ''}
                 </h2>
+                <button onclick="event.stopPropagation(); toggleColumnLock(${colObj.id})" style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="${colObj.is_locked ? 'Unlock Column' : 'Lock Column'}">${colObj.is_locked ? '🔒' : '🔓'}</button>
                 <button class="col-settings-btn" onclick="event.stopPropagation(); openColumnSettings(${colObj.id}, '${column.replace(/'/g, "\\'")}')"
                     style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="Column Settings">⚙</button>
-                <button class="col-delete-btn secondary" onclick="event.stopPropagation(); deleteColumn(${colObj.id}, '${column.replace(/'/g, "\\'")}')" 
-                    style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; opacity:0.4;" title="Delete Column">🗑</button>
                 <span class="collapse-icon" onclick="toggleColumn('${column}')" style="cursor:pointer;">▼</span>
             </div>
             <div class="column-body" data-column="${column}">
@@ -193,9 +268,17 @@ function renderCard(card, doneIds) {
     const tags = card.card_tags || [];
     const tagsHtml = tags.length ? `<div class="card-tags">${tags.map(t => `<span class="card-tag">#${escapeHtml(t)}</span>`).join('')}</div>` : '';
 
+    // Check if the card has a registered agent conflict
+    const conflictIcon = (card.status === 'blocked' && card.agent_error) ?
+        `<div style="position:absolute; top:-8px; right:-8px; background:#ef4444; border-radius:50%; width:26px; height:26px; display:flex; align-items:center; justify-content:center; cursor:pointer; box-shadow:0 0 8px #ef4444; z-index:10; animation: pulse 2s infinite; font-size:12px;" onclick="event.stopPropagation(); triggerConflictWizard({agent_id: '${card.assignee || ''}', card_id: ${card.id}})" title="Agent Error/Conflict - Click to Resolve">⚠️</div>` : '';
+
     return `
-        <div class="card ${card.status === 'running' ? 'agent-active' : ''}" draggable="true" data-id="${card.id}">
-            <div class="card-title">${escapeHtml(card.title)}</div>
+        <div class="card ${card.status === 'running' ? 'agent-active' : ''} ${card.status === 'blocked' ? 'has-conflict' : ''} ${card.is_locked ? 'locked' : ''}" style="position:relative; ${card.is_locked ? 'opacity: 0.85;' : ''}" draggable="${!card.is_locked}" data-id="${card.id}">
+            ${conflictIcon}
+            <div style="display:flex; justify-content:space-between; align-items:flex-start;">
+                <div class="card-title">${escapeHtml(card.title)}</div>
+                <button onclick="event.stopPropagation(); toggleCardLock('${card.id}')" style="border:none;background:transparent;cursor:pointer;font-size:0.8rem;opacity:${card.is_locked ? '1' : '0.4'};" title="${card.is_locked ? 'Unlock Card' : 'Lock Card'}" onmouseover="this.style.opacity='1'" onmouseout="this.style.opacity='${card.is_locked ? '1' : '0.4'}'">${card.is_locked ? '🔒' : '🔓'}</button>
+            </div>
             ${depHtml}
             ${tagsHtml}
             ${activityHtml}
@@ -219,13 +302,54 @@ function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
 async function handleDrop(e) {
     e.preventDefault();
     const column = e.currentTarget.dataset.column;
+    const targetColumnObj = columns.find(c => c.name === column);
+    if (targetColumnObj && targetColumnObj.is_locked) {
+        showToast('Column is locked');
+        draggedCardId = null;
+        return;
+    }
     const card = cards.find(c => c.id === draggedCardId);
     if (card && card.column !== column) {
-        await fetch(`/api/cards/${card.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ column }) });
-        await loadCards();
-        renderBoard();
+        try {
+            const res = await fetch(`/api/cards/${card.id}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ column }) });
+            if (!res.ok) throw new Error('Lock rejected or server error');
+            await loadCards();
+            renderBoard();
+        } catch (e) {
+            console.error('Failed to move card', e);
+            showToast('Failed to move card - might be locked');
+        }
     }
     draggedCardId = null;
+}
+
+// Locks
+async function toggleColumnLock(id) {
+    const col = columns.find(c => c.id === id);
+    if (!col) return;
+    try {
+        await fetch(`/api/columns/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_locked: !col.is_locked })
+        });
+        await loadColumns();
+        renderBoard();
+    } catch (e) { console.error('Error toggling column lock', e); showToast('Failed to toggle lock'); }
+}
+
+async function toggleCardLock(id) {
+    const card = cards.find(c => c.id === parseInt(id));
+    if (!card) return;
+    try {
+        await fetch(`/api/cards/${id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ is_locked: !card.is_locked })
+        });
+        await loadCards();
+        renderBoard();
+    } catch (e) { console.error('Error toggling card lock', e); showToast('Failed to toggle lock'); }
 }
 
 // Modals
@@ -233,8 +357,60 @@ function openNewCardModal() { document.getElementById('newCardModal').classList.
 
 function openNewColumnModal() { document.getElementById('newColumnModal').classList.add('active'); document.getElementById('columnName').focus(); }
 
+function triggerConflictWizard(data) {
+    const card = cards.find(c => c.id == data.card_id);
+    if (card) {
+        if (data.error) card.agent_error = data.error;
+        if (card.status !== 'blocked') {
+            fetch(`/api/cards/${card.id}`, {
+                method: 'PATCH',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ status: 'blocked' })
+            });
+            card.status = 'blocked';
+        }
+        renderBoard();
+    }
+
+    document.getElementById('conflictAgentId').value = data.agent_id;
+    document.getElementById('conflictCardId').value = data.card_id;
+    document.getElementById('conflictErrorLog').textContent = data.error || (card ? card.agent_error : 'Unknown Error');
+
+    if (data.agent_id && data.error) {
+        fetch(`/api/instances/${data.agent_id}/pause`, { method: 'POST' });
+    }
+    document.getElementById('agentConflictModal').classList.add('active');
+}
+
+async function resolveAgentConflict() {
+    const agentId = document.getElementById('conflictAgentId').value;
+    const cardId = document.getElementById('conflictCardId').value;
+    const card = cards.find(c => c.id == cardId);
+
+    if (card) {
+        delete card.agent_error;
+        card.status = 'assigned';
+        await fetch(`/api/cards/${card.id}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'assigned' })
+        });
+        renderBoard();
+    }
+
+    if (agentId) {
+        await fetch(`/api/instances/${agentId}/resume`, { method: 'POST' });
+        showToast('Agent resumed successfully.', 'success');
+    }
+
+    closeModal('agentConflictModal');
+}
+
 // ── Integration field definitions ────────────────────────────────────────────
 const INTEGRATION_CRED_FIELDS = {
+    local_folder: [
+        { id: 'lf_path', label: 'Absolute Folder Path (e.g. C:/Projects/MyRepo)', type: 'text', key: 'local_path' }
+    ],
     github: [
         { id: 'gh_token', label: 'GitHub Token (ghp_...)', type: 'password', key: 'token' },
         { id: 'gh_repo', label: 'Repository (owner/repo)', type: 'text', key: 'repo' },
@@ -268,6 +444,13 @@ function onIntegrationTypeChange() {
     const container = document.getElementById('integrationCredFields');
     container.innerHTML = '';
     if (!type || !INTEGRATION_CRED_FIELDS[type]) return;
+
+    // If GitHub and we have saved connections, show connection picker
+    if (type === 'github' && window._savedConnections && window._savedConnections.length > 0) {
+        _renderConnectionPicker(container, '', false);
+        return;
+    }
+
     INTEGRATION_CRED_FIELDS[type].forEach(field => {
         const div = document.createElement('div');
         div.className = 'form-group';
@@ -285,6 +468,32 @@ function onIntegrationTypeChange() {
 function _collectIntegrationPayload() {
     const type = document.getElementById('integrationType').value;
     if (!type) return null;
+
+    // If using connection picker
+    const connSelect = document.getElementById('gh_connection_picker');
+    if (type === 'github' && connSelect && connSelect.value) {
+        const repoSelect = document.getElementById('gh_repo_picker');
+        const repo = repoSelect ? repoSelect.value : '';
+        if (!repo) return null;
+        const stateEl = document.getElementById('gh_state');
+        const labelsEl = document.getElementById('gh_labels');
+
+        return {
+            type,
+            mode: document.getElementById('integrationMode').value,
+            credentials: {
+                connection_id: connSelect.value,
+                repo: repo,
+            },
+            filters: {
+                state: stateEl ? stateEl.value : 'open',
+                labels: labelsEl ? labelsEl.value.trim() : '',
+            },
+            sync_interval_ms: parseInt(document.getElementById('integrationSyncInterval').value) || 60000,
+            webhook_secret: document.getElementById('integrationWebhookSecret').value || null,
+        };
+    }
+
     const fieldDefs = INTEGRATION_CRED_FIELDS[type] || [];
     const credentials = {};
     const filters = {};
@@ -306,6 +515,35 @@ function _collectIntegrationPayload() {
         sync_interval_ms: parseInt(document.getElementById('integrationSyncInterval').value) || 60000,
         webhook_secret: document.getElementById('integrationWebhookSecret').value || null,
     };
+}
+
+function _renderConnectionPicker(container, currentRepo, isEdit) {
+    const prefix = isEdit ? 'edit_' : '';
+    const conns = (window._savedConnections || []).filter(c => c.type === 'github');
+
+    container.innerHTML = `
+        <div class="form-group">
+            <label>Connection</label>
+            <select id="${prefix}gh_connection_picker" onchange="_onConnectionSelected('${prefix}')">
+                <option value="">Select a saved connection...</option>
+                ${conns.map(c => {
+        const user = c.user_info || {};
+        return `<option value="${c.id}">${escapeHtml(c.name)}${user.login ? ' - @' + user.login : ''}</option>`;
+    }).join('')}
+            </select>
+            <div style="font-size:0.68rem;color:var(--text-secondary);margin-top:0.15rem;">Add connections in the 🔗 Integrations tab.</div>
+        </div>
+        <div id="${prefix}gh_repo_section"></div>
+    `;
+}
+
+async function _onConnectionSelected(prefix) {
+    const connSelect = document.getElementById(`${prefix}gh_connection_picker`);
+    const repoSection = document.getElementById(`${prefix}gh_repo_section`);
+    if (!connSelect || !repoSection) return;
+    const connId = connSelect.value;
+    if (!connId) { repoSection.innerHTML = ''; return; }
+    _renderGitHubRepoPicker(repoSection, connId, '', prefix === 'edit_');
 }
 
 function _resetColumnModal() {
@@ -372,6 +610,14 @@ async function deleteColumn(id, name) {
         const err = await res.json().catch(() => null);
         showToast(err?.detail || 'Failed to delete column');
     }
+}
+
+async function deleteColumnFromSettings() {
+    const id = parseInt(document.getElementById('editColId').value);
+    const name = document.getElementById('editColName').value;
+    if (!id || !name) return;
+    await deleteColumn(id, name);
+    closeModal('editColumnModal');
 }
 
 async function createCard() {
@@ -838,18 +1084,48 @@ function openColumnSettings(colId) {
     document.getElementById('editIntegrationWebhookSecret').value = '';
 
     const intStatus = document.getElementById('editColIntegrationStatus');
+    const errorDisplay = document.getElementById('editColErrorDisplay');
+    const errorMessage = document.getElementById('editColErrorMessage');
+
     if (col.integration_type) {
         const dotColor = col.integration_status === 'error' ? '#ef4444' : '#22c55e';
         intStatus.innerHTML = `<span style="color:${dotColor}">●</span> <strong>${col.integration_type}</strong> · ${col.integration_mode || 'read'}`;
         document.getElementById('editColAddIntegrationRow').style.display = 'none';
         document.getElementById('editColRemoveIntegration').style.display = 'block';
+
+        // Show error details if present
+        if (col.integration_status === 'error' && col.integration_error) {
+            errorDisplay.style.display = 'block';
+            errorMessage.textContent = col.integration_error;
+        } else {
+            errorDisplay.style.display = 'none';
+        }
     } else {
         intStatus.innerHTML = '<span style="color:var(--text-secondary)">None</span>';
         document.getElementById('editColAddIntegrationRow').style.display = 'block';
         document.getElementById('editColRemoveIntegration').style.display = 'none';
+        errorDisplay.style.display = 'none';
     }
 
     document.getElementById('editColumnModal').classList.add('active');
+}
+
+async function retryIntegrationSync() {
+    const colId = document.getElementById('editColId').value;
+    if (!colId) return;
+    showToast('Syncing...');
+    try {
+        const res = await fetch(`/api/integrations/${colId}/sync`, { method: 'POST' });
+        const data = await res.json();
+        showToast(`Synced ${data.synced || 0} item(s)`);
+        // Refresh columns to get updated status
+        await loadColumns();
+        renderBoard();
+        // Re-open with refreshed data
+        openColumnSettings(parseInt(colId));
+    } catch (e) {
+        showToast('Sync failed');
+    }
 }
 
 async function saveColumnSettings() {

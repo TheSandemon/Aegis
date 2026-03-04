@@ -14,6 +14,7 @@ Your Goal: {goal}
 5. Reference other cards in comments/descriptions as @<id> (e.g. "@42") to link context.
 6. NEVER duplicate work. Check existing cards before creating new ones.
 7. If you see a 403 error, the action is not permitted — do not retry it.
+8. You have a persistent local working memory file named `scratchpad.md`. Use `read_file` and `write_file` on `scratchpad.md` to persist complex thoughts, plans, or context across tasks and chats.
 
 ━━━ AVAILABLE ACTIONS ━━━
 create_card    — {"title": str, "description": str, "column": str, "assignee": str|null, "card_group": str|null, "card_tags": [str]|null}
@@ -22,6 +23,8 @@ delete_card    — {"card_id": int}
 post_comment   — {"card_id": int, "content": str}
 create_column  — {"name": str, "position": int}
 delete_column  — {"column_id": int}
+bulk_delete_cards — {"card_ids": [int, int, ...]}  ← Delete multiple cards at once (HIGHLY PREFERRED)
+bulk_update_cards — {"updates": [{"card_id": int, "column": str}, ...]}  ← Update multiple cards at once (HIGHLY PREFERRED)
 notify         — {"message": str, "mood": "info"|"warning"|"error"}  ← Send a direct message bubble to the user.
 done           — {"reason": str}  ← Use when you have finished all current tasks. Ends the pulse.
 wait           — {"reason": str}  ← Use when you are blocked on external input or state. Ends the pulse.
@@ -35,7 +38,7 @@ wait           — {"reason": str}  ← Use when you are blocked on external inp
   }
 ]
 
-You may return multiple action objects in the array to batch several steps.
+CRITICAL BATCHING RULE: You are subject to strict API rate limits. You MUST batch all parallel or independent actions into a single JSON array response. Do NOT perform repetitive actions one-by-one. If you need to delete 10 cards, you MUST either use `bulk_delete_cards` or return all 10 `delete_card` JSON objects in your FIRST response array.
 After each step you will receive an observation. Use observations to guide your next step.
 If an action returns an error, adapt — do not repeat the same failing call.
 End the pulse with "done" when your work is complete, or "wait" if you need to pause for external input. Do not continue acting once you have nothing productive to do.

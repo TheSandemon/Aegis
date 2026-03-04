@@ -96,6 +96,7 @@ list_dir       — {{"path": str}}  ← List files in a directory
 read_file      — {{"path": str}}  ← Read a file
 write_file     — {{"path": str, "content": str}}  ← Write/overwrite a file
 wait           — {{"reason": str}}  ← Use ONLY when genuinely blocked; ends the pulse.
+search_terminal — {{"query": str, "limit": int|null}}  ← Search your historical terminal logs
 
 ━━━ GIT & GITHUB ACTIONS ━━━
 git_clone            — {{"repo_url": str, "dest": str}}  ← Clone a repo into your workspace
@@ -139,6 +140,10 @@ def load_system_prompt():
 
 SYSTEM_PROMPT = load_system_prompt()
 
+def save_config():
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=4)
+
 # ═══════════════════════════════════════════════════════════════════════════════════
 # PERSISTENCE LAYER (Phase 4: Firebase or SQLite)
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -177,6 +182,40 @@ class AegisStore:
                     color TEXT DEFAULT NULL
                 )
             """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS instance_logs (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    instance_id TEXT NOT NULL,
+                    timestamp TEXT NOT NULL,
+                    tag TEXT NOT NULL,
+                    content TEXT NOT NULL
+                )
+            """)
+            try:
+                conn.execute("""
+                    CREATE VIRTUAL TABLE IF NOT EXISTS instance_logs_fts USING fts5(
+                        instance_id UNINDEXED,
+                        timestamp UNINDEXED,
+                        tag,
+                        content,
+                        content='instance_logs',
+                        content_rowid='id'
+                    )
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS instance_logs_ai AFTER INSERT ON instance_logs BEGIN
+                      INSERT INTO instance_logs_fts(rowid, instance_id, timestamp, tag, content) 
+                      VALUES (new.id, new.instance_id, new.timestamp, new.tag, new.content);
+                    END;
+                """)
+                conn.execute("""
+                    CREATE TRIGGER IF NOT EXISTS instance_logs_ad AFTER DELETE ON instance_logs BEGIN
+                      INSERT INTO instance_logs_fts(instance_logs_fts, rowid, instance_id, timestamp, tag, content) 
+                      VALUES ('delete', old.id, old.instance_id, old.timestamp, old.tag, old.content);
+                    END;
+                """)
+            except sqlite3.OperationalError as e:
+                logger.warning(f"FTS5 not enabled or error creating virtual table: {e}")
             conn.commit()
             
             # Seed default columns if none exist
@@ -260,16 +299,70 @@ class AegisStore:
                 conn.execute('ALTER TABLE columns ADD COLUMN integration_status TEXT DEFAULT NULL')
             except sqlite3.OperationalError:
                 pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN integration_error TEXT DEFAULT NULL')
+            except sqlite3.OperationalError:
+                pass
             # Card groups (column-scoped swimlane labels) + global card tags
             try:
                 conn.execute('ALTER TABLE cards ADD COLUMN card_group TEXT DEFAULT NULL')
             except sqlite3.OperationalError:
                 pass
             try:
+                conn.execute('ALTER TABLE cards ADD COLUMN is_locked BOOLEAN DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+            try:
+                conn.execute('ALTER TABLE columns ADD COLUMN is_locked BOOLEAN DEFAULT 0')
+            except sqlite3.OperationalError:
+                pass
+            try:
                 conn.execute('ALTER TABLE cards ADD COLUMN card_tags TEXT DEFAULT "[]"')
             except sqlite3.OperationalError:
                 pass
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS profiles (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    name TEXT NOT NULL,
+                    template_id TEXT NOT NULL,
+                    icon TEXT DEFAULT '🤖',
+                    color TEXT DEFAULT '#6366f1',
+                    service TEXT DEFAULT '',
+                    model TEXT DEFAULT '',
+                    config TEXT DEFAULT '{}',
+                    created_at TEXT DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
             conn.commit()
+
+    def get_profiles(self):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            rows = conn.execute('SELECT * FROM profiles ORDER BY created_at DESC').fetchall()
+            return [dict(r) for r in rows]
+
+    def create_profile(self, data: dict):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('''
+                INSERT INTO profiles (name, template_id, icon, color, service, model, config)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                data.get("name", "Unknown Profile"),
+                data.get("template_id", "aegis-worker"),
+                data.get("icon", "🤖"),
+                data.get("color", "#6366f1"),
+                data.get("service", ""),
+                data.get("model", ""),
+                json.dumps(data.get("config", {}))
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def delete_profile(self, profile_id: int):
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.execute('DELETE FROM profiles WHERE id = ?', (profile_id,))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def get_columns(self):
         with sqlite3.connect(self.db_path) as conn:
@@ -287,6 +380,9 @@ class AegisStore:
                 return None  # Already exists
 
     def delete_column(self, col_id: int):
+        col = self.get_column_by_id(col_id)
+        if col and col.get("is_locked"):
+            raise HTTPException(status_code=403, detail="Column is locked.")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute('DELETE FROM columns WHERE id = ?', (col_id,))
             conn.commit()
@@ -302,6 +398,13 @@ class AegisStore:
         """Update non-integration column fields (name, position, color)."""
         if not kwargs:
             return self.get_column_by_id(col_id)
+        
+        col = self.get_column_by_id(col_id)
+        if col and col.get("is_locked"):
+            # Only allow unlocking
+            if kwargs.get("is_locked") is not False and kwargs.get("is_locked") != 0:
+                raise HTTPException(status_code=403, detail="Column is locked.")
+                
         fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
         values = list(kwargs.values()) + [col_id]
         with sqlite3.connect(self.db_path) as conn:
@@ -342,11 +445,12 @@ class AegisStore:
         external_id = kwargs.get("external_id")
         external_source = kwargs.get("external_source")
         external_url = kwargs.get("external_url")
+        metadata = kwargs.get("metadata", "{}")
         with sqlite3.connect(self.db_path) as conn:
             conn.row_factory = sqlite3.Row
             cursor = conn.execute(
-                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at, depends_on, priority, external_id, external_source, external_url) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-                (title, description, column, assignee, now, now, depends_on, priority, external_id, external_source, external_url)
+                'INSERT INTO cards (title, description, "column", assignee, created_at, updated_at, depends_on, priority, external_id, external_source, external_url, metadata) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+                (title, description, column, assignee, now, now, depends_on, priority, external_id, external_source, external_url, metadata)
             )
             conn.commit()
             return self.get_card(cursor.lastrowid)
@@ -354,6 +458,12 @@ class AegisStore:
     def update_card(self, card_id, **kwargs):
         if not kwargs:
             return self.get_card(card_id)
+            
+        card = self.get_card(card_id)
+        if card and card.get("is_locked"):
+            if kwargs.get("is_locked") is not False and kwargs.get("is_locked") != 0:
+                raise HTTPException(status_code=403, detail="Card is locked.")
+                
         kwargs["updated_at"] = datetime.now().isoformat()
         fields = ", ".join([f'"{k}" = ?' for k in kwargs.keys()])
         values = list(kwargs.values()) + [card_id]
@@ -395,11 +505,46 @@ class AegisStore:
             return cards
 
     def delete_card(self, card_id):
+        card = self.get_card(card_id)
+        if card and card.get("is_locked"):
+            raise HTTPException(status_code=403, detail="Card is locked.")
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.execute('DELETE FROM cards WHERE id = ?', (card_id,))
             conn.commit()
             return cursor.rowcount > 0
 
+    def add_instance_log(self, instance_id: str, tag: str, content: str):
+        now = datetime.now().isoformat()
+        with sqlite3.connect(self.db_path) as conn:
+            conn.execute(
+                'INSERT INTO instance_logs (instance_id, timestamp, tag, content) VALUES (?, ?, ?, ?)',
+                (instance_id, now, tag, content)
+            )
+            conn.commit()
+
+    def search_instance_logs(self, instance_id: str, query: str, limit: int = 50):
+        with sqlite3.connect(self.db_path) as conn:
+            conn.row_factory = sqlite3.Row
+            try:
+                rows = conn.execute('''
+                    SELECT timestamp, tag, content 
+                    FROM instance_logs_fts 
+                    WHERE instance_id = ? AND instance_logs_fts MATCH ? 
+                    ORDER BY rank LIMIT ?
+                ''', (instance_id, query, limit)).fetchall()
+                if not rows:
+                    raise sqlite3.OperationalError("Fallback")
+                return [dict(r) for r in rows]
+            except sqlite3.OperationalError:
+                # FTS fallback
+                query_like = f"%{query}%"
+                rows = conn.execute('''
+                    SELECT timestamp, tag, content
+                    FROM instance_logs
+                    WHERE instance_id = ? AND (content LIKE ? OR tag LIKE ?)
+                    ORDER BY timestamp DESC LIMIT ?
+                ''', (instance_id, query_like, query_like, limit)).fetchall()
+                return [dict(r) for r in rows]
 
 # Store factory: Firebase or SQLite
 def _create_store():
@@ -579,6 +724,7 @@ class CardUpdate(BaseModel):
     priority: Optional[str] = None
     card_group: Optional[str] = None
     card_tags: Optional[list[str]] = None
+    is_locked: Optional[bool] = None
 
 class InstanceCreate(BaseModel):
     template_id: str
@@ -587,6 +733,7 @@ class InstanceCreate(BaseModel):
     model: Optional[str] = ""
     env_vars: Optional[dict] = {}
     config: Optional[dict] = {}
+    skills: Optional[list[str]] = []
     icon: Optional[str] = None
     color: Optional[str] = None
 
@@ -597,6 +744,7 @@ class InstanceUpdate(BaseModel):
     model: Optional[str] = None
     env_vars: Optional[dict] = None
     config: Optional[dict] = None
+    skills: Optional[list[str]] = None
     icon: Optional[str] = None
     color: Optional[str] = None
     priority: Optional[str] = None
@@ -604,6 +752,9 @@ class InstanceUpdate(BaseModel):
 class CommentCreate(BaseModel):
     author: str
     content: str
+
+class SkillInstallRequest(BaseModel):
+    github_url: str
 
 class IntegrationConfig(BaseModel):
     type: str                             # "github" | "jira" | "linear" | "firestore"
@@ -635,6 +786,7 @@ class ColumnUpdate(BaseModel):
     color: Optional[str] = None
     integration: Optional[IntegrationConfig] = None
     remove_integration: bool = False
+    is_locked: Optional[bool] = None
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -645,6 +797,23 @@ class ColumnUpdate(BaseModel):
 async def get_columns():
     """Get all columns from the board."""
     return store.get_columns()
+def _resolve_connection_credentials(creds: dict) -> dict:
+    """If credentials contain a connection_id, resolve the actual token from saved connections."""
+    if not creds or "connection_id" not in creds:
+        return creds
+    conn_id = creds["connection_id"]
+    conns = CONFIG.get("integration_connections", [])
+    conn = next((c for c in conns if c["id"] == conn_id), None)
+    if not conn:
+        raise HTTPException(status_code=400, detail=f"Connection '{conn_id}' not found")
+    token = conn.get("credentials", {}).get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Connection has no token")
+    resolved = dict(creds)
+    del resolved["connection_id"]
+    resolved["token"] = token
+    return resolved
+
 
 @app.post("/api/columns")
 async def create_column(col: ColumnCreate):
@@ -654,11 +823,12 @@ async def create_column(col: ColumnCreate):
         raise HTTPException(status_code=400, detail="Column already exists")
 
     if col.integration:
+        creds = _resolve_connection_credentials(col.integration.credentials)
         col_data = {
             "name": col.name,
             "integration_type": col.integration.type,
             "integration_mode": col.integration.mode,
-            "integration_credentials": json.dumps(col.integration.credentials),
+            "integration_credentials": json.dumps(creds),
             "integration_filters": json.dumps(col.integration.filters),
             "sync_interval_ms": col.integration.sync_interval_ms,
             "webhook_secret": col.integration.webhook_secret,
@@ -666,6 +836,8 @@ async def create_column(col: ColumnCreate):
         await integration_manager.setup_integration(new_col["id"], col_data)
         # Immediately pull initial data so cards appear without waiting for first poll
         asyncio.create_task(integration_manager.initial_sync(new_col["id"]))
+        # Re-fetch to include integration fields in the broadcast
+        new_col = store.get_column_by_id(new_col["id"]) or new_col
 
     await manager.broadcast({"type": "column_created", "column": new_col})
     return new_col
@@ -842,6 +1014,9 @@ async def update_column(col_id: int, update: ColumnUpdate):
     if update.color is not None:
         db_updates["color"] = update.color
 
+    if update.is_locked is not None:
+        db_updates["is_locked"] = update.is_locked
+
     if db_updates:
         store.update_column(col_id, **db_updates)
 
@@ -849,11 +1024,12 @@ async def update_column(col_id: int, update: ColumnUpdate):
         await integration_manager.teardown_integration(col_id)
     elif update.integration:
         col_name = db_updates.get("name", old_name)
+        creds = _resolve_connection_credentials(update.integration.credentials)
         col_data = {
             "name": col_name,
             "integration_type": update.integration.type,
             "integration_mode": update.integration.mode,
-            "integration_credentials": json.dumps(update.integration.credentials),
+            "integration_credentials": json.dumps(creds),
             "integration_filters": json.dumps(update.integration.filters),
             "sync_interval_ms": update.integration.sync_interval_ms,
             "webhook_secret": update.integration.webhook_secret,
@@ -885,9 +1061,34 @@ async def update_config(updates: dict):
     return {"success": True, "config": CONFIG}
 
 @app.get("/api/system_prompt")
-async def get_system_prompt():
-    """Get the current system prompt for agents."""
-    return {"prompt": SYSTEM_PROMPT}
+async def get_system_prompt(request: Request):
+    """Get the current system prompt, injecting agent-specific skills if configured."""
+    prompt = SYSTEM_PROMPT
+    
+    # Try to identify which instance is requesting the prompt
+    instance_id = request.headers.get("X-Aegis-Instance")
+    agent_id = request.headers.get("X-Aegis-Agent")
+    
+    if instance_id or agent_id:
+        instances = load_instances()
+        matcher = instance_id or agent_id
+        inst = next((i for i in instances if i.get("instance_id") == matcher or i.get("instance_name") == matcher or i.get("agent_id") == matcher), None)
+        
+        if inst and inst.get("config", {}).get("skills"):
+            enabled_skills = inst["config"]["skills"]
+            prompt += "\n\n# Your Equipped Skills:\n"
+            prompt += "You have been granted access to the following specialized skills.\n"
+            prompt += "To use them, perform an HTTP POST request to `/api/tools/execute?name=<skill_name>`.\n"
+            prompt += "Pass the required parameters as a JSON payload in the request body.\n\n"
+            
+            all_tools = skill_manager.get_all_tools()
+            for t in all_tools:
+                if t["name"] in enabled_skills:
+                    prompt += f"## {t['name']}\n"
+                    prompt += f"- **Description**: {t['description']}\n"
+                    prompt += f"- **Parameters Schema**: {json.dumps(t.get('parameters', {}))}\n\n"
+                    
+    return {"prompt": prompt}
 
 @app.put("/api/system_prompt")
 async def update_system_prompt(update: SystemPromptUpdate):
@@ -896,6 +1097,39 @@ async def update_system_prompt(update: SystemPromptUpdate):
     SYSTEM_PROMPT_PATH.write_text(SYSTEM_PROMPT, encoding="utf-8")
     return {"success": True, "prompt": SYSTEM_PROMPT}
 
+async def _trigger_mentioned_agents(text: str, card_id: int, author: str = "User"):
+    """Scans text for @mentions and starts/alerts the corresponding agents."""
+    import re
+    instances = load_instances()
+    agent_names = {i.get("instance_name"): i for i in instances if i.get("instance_name")}
+    agent_names.update({i.get("agent_id"): i for i in instances if i.get("agent_id")})
+    
+    mentions = re.findall(r'@([A-Za-z0-9_\-]+)', text)
+    for m in set(mentions):
+        if m in agent_names:
+            inst = agent_names[m]
+            instance_id = inst.get("instance_id")
+            
+            # Start the agent if not running
+            key = instance_id or inst.get("agent_id")
+            if key not in engine.active or engine.active[key].status != "running":
+                card = store.get_card(card_id)
+                registry = dict(CONFIG.get("registry", {}))
+                registry_entry = registry.get(inst.get("agent_id"), {})
+                await engine.run_agent(
+                    card_id=card_id,
+                    agent_id=inst.get("agent_id"),
+                    agent_config=inst,
+                    card=card,
+                    store=store,
+                    registry_entry=registry_entry,
+                    instance_id=instance_id,
+                    instance_name=inst.get("instance_name")
+                )
+            
+            # Also inject the mention into stdin so it can react instantly if supported
+            if key in engine.active:
+                await engine.inject_stdin(key, f"System: Mentioned by {author} -> {text}")
 
 # ─── Cards CRUD ──────────────────────────────────────────────────────────────────
 
@@ -918,6 +1152,9 @@ async def create_card(card: CardCreate):
         create_kwargs["card_tags"] = json.dumps(card.card_tags)
     new_card = store.create_card(card.title, card.description, card.column, card.assignee, **create_kwargs)
     await manager.broadcast({"type": "card_created", "card": new_card})
+    
+    if card.description:
+        asyncio.create_task(_trigger_mentioned_agents(card.description, new_card["id"], "User"))
     
     # Push change to external integration
     asyncio.create_task(integration_manager.notify_card_change(new_card, "card_created"))
@@ -1030,6 +1267,83 @@ async def get_card_context(card_id: int):
         "mentioned_agents": [{"instance_name": i.get("instance_name"), "agent_id": i.get("agent_id"), "goal": i.get("goal")} for i in mentioned_agents],
     }
 
+class BulkDeleteRequest(BaseModel):
+    card_ids: List[int]
+
+class CardBulkUpdateItem(BaseModel):
+    card_id: int
+    title: Optional[str] = None
+    description: Optional[str] = None
+    column: Optional[str] = None
+    assignee: Optional[str] = None
+    status: Optional[str] = None
+    priority: Optional[str] = None
+
+class BulkUpdateRequest(BaseModel):
+    updates: List[CardBulkUpdateItem]
+
+@app.delete("/api/cards/bulk")
+async def bulk_delete_cards(req: BulkDeleteRequest, request: Request):
+    """Delete multiple cards in a single API request."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    deleted_ids = []
+    errors = []
+    
+    for cid in req.card_ids:
+        card = store.get_card(cid)
+        if not card:
+            errors.append(f"#{cid}: Not found")
+            continue
+            
+        if is_agent:
+            col_obj = next((c for c in store.get_columns() if c["name"] == card.get("column")), {})
+            if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+                errors.append(f"#{cid}: Read-only column")
+                continue
+                
+        if store.delete_card(cid):
+            deleted_ids.append(cid)
+            asyncio.create_task(integration_manager.notify_card_change(card, "card_deleted"))
+            
+    if deleted_ids:
+        for cid in deleted_ids:
+            await manager.broadcast({"type": "card_deleted", "card_id": cid})
+            
+    return {"success": True, "deleted": deleted_ids, "errors": errors}
+
+@app.patch("/api/cards/bulk")
+async def bulk_update_cards(req: BulkUpdateRequest, request: Request):
+    """Update multiple cards in a single API request."""
+    is_agent = request.headers.get("X-Aegis-Agent", "false").lower() == "true"
+    updated_ids = []
+    errors = []
+    
+    for update in req.updates:
+        cid = update.card_id
+        card = store.get_card(cid)
+        if not card:
+            errors.append(f"#{cid}: Not found")
+            continue
+            
+        if is_agent:
+            col_obj = next((c for c in store.get_columns() if c["name"] == card.get("column")), {})
+            if col_obj.get("integration_type") and col_obj.get("integration_mode") == "read":
+                errors.append(f"#{cid}: Read-only column")
+                continue
+                
+        kwargs = {k: v for k, v in update.dict(exclude_unset=True).items() if k != "card_id" and v is not None}
+        if kwargs:
+            store.update_card(cid, **kwargs)
+            updated = store.get_card(cid)
+            updated_ids.append(cid)
+            asyncio.create_task(integration_manager.notify_card_change(updated, "card_updated"))
+            
+    for cid in updated_ids:
+        updated = store.get_card(cid)
+        await manager.broadcast({"type": "card_updated", "card": updated})
+        
+    return {"success": True, "updated": updated_ids, "errors": errors}
+
 @app.patch("/api/cards/{card_id}")
 async def update_card(card_id: int, update: CardUpdate, request: Request):
     """Update a card. Arbitrary transitions are now allowed for Sandbox Agents."""
@@ -1072,6 +1386,9 @@ async def update_card(card_id: int, update: CardUpdate, request: Request):
     card = store.update_card(card_id, **updates)
     await manager.broadcast({"type": "card_updated", "card": card})
 
+    if "description" in updates and updates["description"]:
+        asyncio.create_task(_trigger_mentioned_agents(updates["description"], card_id, "User"))
+
     # Push change to external integration (write/read_write columns)
     event_type = "card_moved" if new_column else "card_updated"
     asyncio.create_task(integration_manager.notify_card_change(card, event_type))
@@ -1106,6 +1423,8 @@ async def delete_card(card_id: int, request: Request, close_external: bool = Fal
         await manager.broadcast({"type": "card_deleted", "card_id": card_id})
         return {"success": True}
     raise HTTPException(status_code=404, detail="Card not found")
+
+
 
 @app.get("/api/cards/{card_id}/diff")
 async def get_card_diff(card_id: int):
@@ -1148,6 +1467,8 @@ async def add_comment(card_id: int, comment: CommentCreate):
 
     await manager.broadcast({"type": "comment_added", "card_id": card_id, "comment": comment_obj})
 
+    asyncio.create_task(_trigger_mentioned_agents(comment.content, card_id, comment.author))
+
     # Push comment to external integration (write/read_write columns)
     updated_card = store.get_card(card_id)
     asyncio.create_task(integration_manager.notify_card_change(updated_card, "comment_added"))
@@ -1183,6 +1504,148 @@ async def refresh_skills():
     skill_manager.refresh_skills()
     return {"status": "refreshed", "count": len(skill_manager.skills)}
 
+@app.get("/api/skills/marketplace")
+async def get_marketplace_skills(q: Optional[str] = None, cursor: Optional[str] = None):
+    """Returns a paginated list of port-ready ClawHub skills."""
+    url = "https://clawhub.ai/api/v1/skills"
+    
+    params = {}
+    if q:
+        url = "https://clawhub.ai/api/v1/search"
+        params["q"] = q
+    if cursor:
+        params["cursor"] = cursor
+        
+    try:
+        async with httpx.AsyncClient() as client:
+            response = await client.get(url, params=params, timeout=10)
+            response.raise_for_status()
+            data = response.json()
+            skills = data.get("items", data.get("results", []))
+            
+            # Map Clawhub skills to the format expected by the frontend
+            formatted_skills = []
+            for skill in skills:
+                formatted_skills.append({
+                    "id": skill.get("slug"),
+                    "name": skill.get("displayName"),
+                    "description": skill.get("summary", ""),
+                    "github_url": f"https://clawhub.ai/api/v1/download?slug={skill.get('slug')}"
+                })
+                
+            return {
+                "items": formatted_skills,
+                "nextCursor": data.get("nextCursor")
+            }
+    except Exception as e:
+        logger.error(f"Failed to fetch Clawhub skills: {e}")
+        # Fallback to the old hardcoded list if the API fails
+        return {
+            "items": [
+                {
+                    "id": "skills-security-audit",
+                    "name": "Security Auditor",
+                    "description": "Static code analysis and vulnerability scanning tool suite.",
+                    "github_url": "https://github.com/clawhub/skills-security-audit.git"
+                },
+                {
+                    "id": "agentic-devops",
+                    "name": "Agentic DevOps",
+                    "description": "CI/CD and infrastructure management abilities for agents.",
+                    "github_url": "https://github.com/clawhub/agentic-devops.git"
+                }
+            ],
+            "nextCursor": None
+        }
+
+@app.post("/api/skills/install")
+async def install_skill(req: SkillInstallRequest):
+    """Downloads/clones a skill into aegis_data/skills/ and refreshes."""
+    import asyncio
+    from pathlib import Path
+    import zipfile
+    import io
+    import urllib.parse
+    
+    # Parse the repo name differently depending on if it's a clawhub download URL or a git URL
+    if "clawhub.ai/api/v1/download" in req.github_url:
+        parsed_url = urllib.parse.urlparse(req.github_url)
+        query_params = urllib.parse.parse_qs(parsed_url.query)
+        repo_name = query_params.get('slug', ['unknown'])[0]
+    else:
+        repo_name = req.github_url.rstrip("/").split("/")[-1].replace(".git", "")
+        
+    # Find the skill data dir from existing skill manager
+    from skill_manager import SKILLS_DIR
+    target_dir = SKILLS_DIR / repo_name
+    
+    if target_dir.exists():
+        return {"status": "already_installed", "skill_id": repo_name}
+        
+    if "clawhub.ai/api/v1/download" in req.github_url:
+        try:
+            async with httpx.AsyncClient() as client:
+                headers = {"User-Agent": "Aegis/2.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko)"}
+                response = await client.get(req.github_url, timeout=30, follow_redirects=True, headers=headers)
+                response.raise_for_status()
+                
+                # Extract zip file
+                with zipfile.ZipFile(io.BytesIO(response.content)) as zip_ref:
+                    # Clawhub zips usually have the contents at the root, unlike github zips
+                    zip_ref.extractall(target_dir)
+        except Exception as e:
+            logger.error(f"Failed to download/extract skill from {req.github_url}: {e}")
+            if target_dir.exists():
+                shutil.rmtree(target_dir, ignore_errors=True)
+            raise HTTPException(status_code=400, detail=f"Failed to download skill: {e}")
+    else:
+        # Legacy git clone
+        proc = await asyncio.create_subprocess_exec(
+            "git", "clone", req.github_url, str(target_dir),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE
+        )
+        stdout, stderr = await proc.communicate()
+        
+        if proc.returncode != 0:
+            raise HTTPException(status_code=400, detail=stderr.decode(errors="replace"))
+        
+    skill_manager.refresh_skills()
+    return {"status": "success", "skill_id": repo_name, "message": f"Successfully installed {repo_name}"}
+
+@app.delete("/api/skills/uninstall/{skill_id}")
+async def uninstall_skill(skill_id: str):
+    """Uninstalls a skill and removes it from all active workers."""
+    import shutil
+    from skill_manager import SKILLS_DIR
+    target_dir = SKILLS_DIR / skill_id
+    
+    if not target_dir.exists():
+        raise HTTPException(status_code=404, detail=f"Skill '{skill_id}' is not installed.")
+        
+    try:
+        shutil.rmtree(target_dir, ignore_errors=True)
+    except Exception as e:
+        logger.error(f"Error removing skill directory for {skill_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to remove skill files: {e}")
+        
+    # Remove from instances to prevent ghost skills
+    try:
+        instances = load_instances()
+        changed = False
+        for inst in instances:
+            skills = inst.get("config", {}).get("skills", [])
+            if skill_id in skills:
+                skills.remove(skill_id)
+                changed = True
+        
+        if changed:
+            save_instances(instances)
+    except Exception as e:
+        logger.error(f"Error removing skill {skill_id} from instances: {e}")
+        
+    skill_manager.refresh_skills()
+    return {"status": "success", "skill_id": skill_id, "message": f"Successfully uninstalled {skill_id}"}
 
 # ─── Agent Control ───────────────────────────────────────────────────────────────
 
@@ -1191,6 +1654,46 @@ async def stop_card_agent(card_id: int):
     if await engine.stop_by_card(card_id):
         return {"success": True}
     raise HTTPException(status_code=404, detail="No running agent found for this card")
+
+class ChatMessage(BaseModel):
+    message: str
+
+@app.post("/api/instances/{instance_id}/chat")
+async def chat_with_instance(instance_id: str, msg: ChatMessage):
+    """Start an agent if stopped, and pass a direct chat message via stdin/comments."""
+    instances = load_instances()
+    inst = next((i for i in instances if i.get("instance_id") == instance_id), None)
+    if not inst:
+        raise HTTPException(status_code=404, detail="Instance not found")
+        
+    key = instance_id
+    if key not in engine.active or engine.active[key].status != "running":
+        # Create a scratchpad card to use as execution context for direct chats
+        card = store.create_card(
+            title=f"Direct Chat: {inst.get('instance_name', instance_id)}",
+            description=msg.message,
+            column="Doing",
+            assignee=inst.get("instance_name")
+        )
+        registry = dict(CONFIG.get("registry", {}))
+        registry_entry = registry.get(inst.get("agent_id"), {})
+        await manager.broadcast({"type": "card_created", "card": card})
+        await engine.run_agent(
+            card_id=card["id"],
+            agent_id=inst.get("agent_id"),
+            agent_config=inst,
+            card=card,
+            store=store,
+            registry_entry=registry_entry,
+            instance_id=instance_id,
+            instance_name=inst.get("instance_name")
+        )
+    
+    if key in engine.active:
+        # Also inject into stdin for immediate feedback
+        await engine.inject_stdin(key, f"USER CHAT: {msg.message}")
+        
+    return {"status": "message_sent"}
 
 @app.get("/api/cards/{card_id}/logs")
 async def get_card_logs(card_id: int):
@@ -1481,6 +1984,38 @@ async def get_registry():
     return AGENT_REGISTRY
 
 
+@app.get("/api/profiles")
+async def list_profiles():
+    """Lists all user-saved worker profiles."""
+    return store.get_profiles()
+
+
+class ProfileCreate(BaseModel):
+    name: str
+    template_id: str
+    icon: Optional[str] = "🤖"
+    color: Optional[str] = "#6366f1"
+    service: Optional[str] = ""
+    model: Optional[str] = ""
+    config: Optional[dict] = {}
+
+
+@app.post("/api/profiles")
+async def create_profile(profile: ProfileCreate):
+    """Save a new reusable worker profile."""
+    profile_id = store.create_profile(profile.dict())
+    return {"id": profile_id, "status": "created"}
+
+
+@app.delete("/api/profiles/{profile_id}")
+async def delete_profile_endpoint(profile_id: int):
+    """Delete a saved worker profile."""
+    success = store.delete_profile(profile_id)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Profile {profile_id} not found")
+    return {"status": "deleted"}
+
+
 @app.post("/api/agents/start/{agent_id}")
 async def start_agent_endpoint(agent_id: str):
     """Start a registered agent process."""
@@ -1595,12 +2130,31 @@ async def create_instance_api(req: InstanceCreate):
 
 @app.get("/api/instances")
 async def list_instances():
-    """List all worker instances with runtime status."""
+    """List all worker instances with runtime status and recent logs."""
     instances = load_instances()
+    order = CONFIG.get("agent_order", [])
+    if order:
+        # Sort by index if present, otherwise append to end
+        instances.sort(key=lambda i: order.index(i["instance_id"]) if i["instance_id"] in order else 9999)
+        
     for inst in instances:
         proc = engine.active.get(inst["instance_id"])
         inst["runtime_status"] = proc.status if proc else "stopped"
+        if proc and proc.logs:
+            import re
+            inst["recent_logs"] = "\n".join(re.sub(r'^\[.*?\]\s*\[.*?\]\s*', '', log) for log in proc.logs[-3:])
+        else:
+            inst["recent_logs"] = ""
     return instances
+
+class AgentOrderUpdate(BaseModel):
+    order: List[str]
+
+@app.post("/api/instances/order")
+async def update_agent_order(req: AgentOrderUpdate):
+    CONFIG["agent_order"] = req.order
+    save_config()
+    return {"status": "ok"}
 
 @app.delete("/api/instances/{instance_id}")
 async def delete_instance_endpoint(instance_id: str):
@@ -1706,7 +2260,63 @@ async def get_instance_logs(instance_id: str, tail: int = 100):
     logs = engine.get_logs(instance_id, tail)
     return {"instance_id": instance_id, "logs": logs}
 
+@app.get("/api/instances/{instance_id}/search_logs")
+async def search_instance_logs(instance_id: str, query: str = "", limit: int = 50):
+    """Search historical logs for an instance using FTS5."""
+    if not query:
+        raise HTTPException(status_code=400, detail="Query is required")
+    logs = store.search_instance_logs(instance_id, query, limit)
+    return {"instance_id": instance_id, "query": query, "logs": logs}
+
 # ─── Instance Intervention (Glass Box) ───────────────────────────────────────────
+class ChatMessage(BaseModel):
+    message: str
+
+@app.post("/api/instances/{instance_id}/chat")
+async def chat_with_instance(instance_id: str, payload: ChatMessage):
+    """Inject a user message directly into an agent's standard input. Auto-starts if offline."""
+    status = engine.get_status(instance_id)
+    
+    # Auto-start if not running
+    if not status or status.get("status") != "running":
+        logger.info(f"Auto-starting {instance_id} for terminal chat...")
+        instances = load_instances()
+        inst = next((i for i in instances if i["instance_id"] == instance_id), None)
+        if not inst:
+            raise HTTPException(status_code=404, detail="Instance not found for auto-start")
+            
+        template_id = inst["template_id"]
+        registry_entry = next((a for a in AGENT_REGISTRY if a["id"] == template_id), None)
+        agent_config = CONFIG.get("agents", {}).get(template_id, {})
+        if registry_entry:
+            agent_config.setdefault("execution", registry_entry.get("execution", {}))
+            
+        # Force one-shot for pure chat tasks so they don't hang around forever
+        inst.setdefault("config", {})["mode"] = "one-shot"
+        
+        result = await engine.run_agent(
+            0, template_id, agent_config,
+            {"id": 0, "title": f"Instance: {inst['instance_name']}"},
+            store, registry_entry,
+            instance_id=instance_id,
+            instance_name=inst["instance_name"]
+        )
+        if "error" in result:
+             raise HTTPException(status_code=400, detail=f"Auto-start failed: {result['error']}")
+
+    # Wait briefly for process and stdin pipe to be ready
+    for _ in range(30):
+        agent_proc = engine.active.get(instance_id)
+        if agent_proc and agent_proc.process and agent_proc.process.stdin:
+            break
+        await asyncio.sleep(0.1)
+
+    result = await engine.inject_stdin(instance_id, payload.message)
+    if "success" in result:
+        logger.info(f"Piped terminal message to {instance_id}")
+        return {"status": "message_sent"}
+    else:
+        raise HTTPException(status_code=500, detail=result.get("error", "Failed to write to agent stdin"))
 
 @app.post("/api/instances/{instance_id}/pause")
 async def pause_instance(instance_id: str):
@@ -1994,6 +2604,297 @@ async def receive_webhook(column_id: int, request: Request):
     return {"status": "processed" if result else "ignored"}
 
 
+# ─── Integration Connections ─────────────────────────────────────────────────────
+
+_GH_BASE = "https://api.github.com"
+
+class ConnectionCreate(BaseModel):
+    type: str          # "github" for now
+    name: str          # user-chosen display name
+    token: str         # the credential
+
+@app.get("/api/connections")
+async def list_connections():
+    """List all saved integration connections (tokens redacted)."""
+    conns = CONFIG.get("integration_connections", [])
+    return [
+        {
+            "id": c["id"],
+            "type": c["type"],
+            "name": c["name"],
+            "user_info": c.get("user_info", {}),
+            "scopes": c.get("scopes", []),
+            "created_at": c.get("created_at"),
+        }
+        for c in conns
+    ]
+
+@app.post("/api/connections")
+async def create_connection(req: ConnectionCreate):
+    """Validate credentials and save a new integration connection."""
+    if req.type != "github":
+        raise HTTPException(status_code=400, detail=f"Unsupported connection type: {req.type}")
+
+    if req.token.startswith("github_pat_"):
+        raise HTTPException(status_code=400, detail="Fine-grained tokens are no longer supported. Please use a Classic PAT or OAuth login.")
+
+    # Validate the GitHub token
+    headers = {
+        "Authorization": f"Bearer {req.token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{_GH_BASE}/user", headers=headers)
+        
+        if resp.status_code == 401:
+            raise HTTPException(status_code=401, detail="Invalid token — authentication failed")
+        elif resp.status_code == 403:
+            raise HTTPException(status_code=403, detail="Token lacks required permissions (or might be a restricted token)")
+        elif resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=f"GitHub API error: {resp.status_code}")
+        
+        user = resp.json()
+
+        scopes = resp.headers.get("x-oauth-scopes", "")
+        scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+
+    conn_id = f"conn_{secrets.token_hex(6)}"
+    connection = {
+        "id": conn_id,
+        "type": req.type,
+        "name": req.name,
+        "credentials": {"token": req.token},
+        "user_info": {
+            "login": user["login"],
+            "avatar_url": user.get("avatar_url", ""),
+            "name": user.get("name") or user["login"],
+        },
+        "scopes": scope_list,
+        "created_at": datetime.now().isoformat(),
+    }
+
+    CONFIG.setdefault("integration_connections", [])
+    CONFIG["integration_connections"].append(connection)
+    with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=2)
+
+    # Return without the raw token
+    return {
+        "id": conn_id,
+        "type": req.type,
+        "name": req.name,
+        "user_info": connection["user_info"],
+        "scopes": scope_list,
+        "created_at": connection["created_at"],
+    }
+
+@app.delete("/api/connections/{conn_id}")
+async def delete_connection(conn_id: str):
+    """Remove a saved integration connection."""
+    conns = CONFIG.get("integration_connections", [])
+    CONFIG["integration_connections"] = [c for c in conns if c["id"] != conn_id]
+    with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=2)
+    return {"success": True}
+
+
+def _get_connection(conn_id: str) -> dict:
+    """Helper to find a connection by ID, raises HTTPException if not found."""
+    conns = CONFIG.get("integration_connections", [])
+    conn = next((c for c in conns if c["id"] == conn_id), None)
+    if not conn:
+        raise HTTPException(status_code=404, detail="Connection not found")
+    return conn
+
+
+@app.get("/api/connections/{conn_id}/repos")
+async def list_connection_repos(conn_id: str, search: Optional[str] = None):
+    """List repos accessible to a saved connection."""
+    conn = _get_connection(conn_id)
+    token = conn.get("credentials", {}).get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Connection has no token")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    repos = []
+    page = 1
+    async with httpx.AsyncClient(timeout=15) as client:
+        while True:
+            params = {"per_page": 100, "page": page, "sort": "updated", "direction": "desc"}
+            resp = await client.get(f"{_GH_BASE}/user/repos", headers=headers, params=params)
+            if resp.status_code in (401, 403):
+                # If strictly scoped, /user/repos might fail. Return empty list so frontend can fallback.
+                break
+            if resp.status_code != 200:
+                raise HTTPException(status_code=resp.status_code, detail="Failed to fetch repos")
+            batch = resp.json()
+            if not batch:
+                break
+            repos.extend(batch)
+            if len(batch) < 100:
+                break
+            page += 1
+
+    if search:
+        search_lower = search.lower()
+        repos = [r for r in repos if search_lower in r["full_name"].lower()]
+
+    return [
+        {
+            "full_name": r["full_name"],
+            "name": r["name"],
+            "owner": r["owner"]["login"],
+            "private": r["private"],
+            "description": r.get("description") or "",
+            "has_issues": r.get("has_issues", True),
+            "permissions": r.get("permissions", {}),
+            "updated_at": r.get("updated_at"),
+        }
+        for r in repos[:100]
+    ]
+
+
+@app.get("/api/connections/{conn_id}/repos/{owner}/{repo}/permissions")
+async def check_connection_repo_permissions(conn_id: str, owner: str, repo: str):
+    """Check permissions for a specific repo on a saved connection."""
+    conn = _get_connection(conn_id)
+    token = conn.get("credentials", {}).get("token")
+    if not token:
+        raise HTTPException(status_code=400, detail="Connection has no token")
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+    }
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        resp = await client.get(f"{_GH_BASE}/repos/{owner}/{repo}", headers=headers)
+        if resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="Repository not found or not accessible")
+        if resp.status_code != 200:
+            raise HTTPException(status_code=resp.status_code, detail=f"GitHub API error: {resp.status_code}")
+
+        repo_data = resp.json()
+        perms = repo_data.get("permissions", {})
+
+        return {
+            "full_name": repo_data["full_name"],
+            "private": repo_data["private"],
+            "permissions": {
+                "can_read_issues": perms.get("pull", False) or perms.get("push", False) or perms.get("admin", False),
+                "can_write_issues": perms.get("push", False) or perms.get("admin", False),
+                "can_read_prs": perms.get("pull", False) or perms.get("push", False) or perms.get("admin", False),
+                "can_write_prs": perms.get("push", False) or perms.get("admin", False),
+                "can_manage_webhooks": perms.get("admin", False),
+                "can_push": perms.get("push", False),
+                "is_admin": perms.get("admin", False),
+            },
+            "has_issues": repo_data.get("has_issues", True),
+        }
+
+# ═══════════════════════════════════════════════════════════════════════════════════
+# GITHUB DEVICE FLOW (OAuth)
+# ═══════════════════════════════════════════════════════════════════════════════════
+
+# Open-source public Client ID for Aegis on GitHub
+# TODO: Replace with your actual GitHub OAuth App Client ID that has Device Flow enabled.
+GITHUB_CLIENT_ID = "Ov23ctf2YCfapE8ClL8s"
+
+@app.post("/api/github/device/start")
+async def github_device_start():
+    """Start the GitHub Device Flow to get user and device codes."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://github.com/login/device/code",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "scope": "repo,workflow"
+            }
+        )
+        if resp.status_code != 200:
+            print(f"GitHub Device Flow Start Error ({resp.status_code}): {resp.text}")
+            raise HTTPException(status_code=400, detail="Failed to initialize GitHub login.")
+        return resp.json()
+
+class DevicePollRequest(BaseModel):
+    device_code: str
+
+@app.post("/api/github/device/poll")
+async def github_device_poll(req: DevicePollRequest):
+    """Poll GitHub to see if the user authenticated yet."""
+    async with httpx.AsyncClient(timeout=10) as client:
+        resp = await client.post(
+            "https://github.com/login/oauth/access_token",
+            headers={"Accept": "application/json"},
+            data={
+                "client_id": GITHUB_CLIENT_ID,
+                "device_code": req.device_code,
+                "grant_type": "urn:ietf:params:oauth:grant-type:device_code"
+            }
+        )
+        
+        data = resp.json()
+        
+        if "error" in data:
+            err = data["error"]
+            if err == "authorization_pending":
+                return {"status": "pending"}
+            elif err == "slow_down":
+                return {"status": "slow_down", "interval": data.get("interval", 5)}
+            elif err == "expired_token":
+                return {"status": "expired"}
+            else:
+                return {"status": "error", "message": data.get("error_description", err)}
+                
+        # Success!
+        access_token = data.get("access_token")
+        if not access_token:
+            return {"status": "error", "message": "No access token received"}
+
+        # Fetch User Profile
+        headers = {
+            "Authorization": f"Bearer {access_token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+        }
+        user_resp = await client.get(f"{_GH_BASE}/user", headers=headers)
+        if user_resp.status_code != 200:
+            return {"status": "error", "message": "Failed to fetch GitHub profile"}
+            
+        user = user_resp.json()
+        scopes = user_resp.headers.get("x-oauth-scopes", "")
+        scope_list = [s.strip() for s in scopes.split(",") if s.strip()]
+
+        # Save Connection
+        conn_id = f"conn_{secrets.token_hex(6)}"
+        connection = {
+            "id": conn_id,
+            "type": "github",
+            "name": f"OAuth @{user['login']}",
+            "credentials": {"token": access_token},
+            "user_info": {
+                "login": user["login"],
+                "avatar_url": user.get("avatar_url", ""),
+                "name": user.get("name") or user["login"],
+            },
+            "scopes": scope_list,
+            "created_at": datetime.now().isoformat(),
+        }
+
+        CONFIG.setdefault("integration_connections", [])
+        CONFIG["integration_connections"].append(connection)
+        with open(CONFIG_PATH, 'w', encoding="utf-8") as f:
+            json.dump(CONFIG, f, indent=2)
+
+        return {"status": "success", "connection": connection}
 # ═══════════════════════════════════════════════════════════════════════════════════
 # BOARD WORKSPACES (Save / Load)
 # ═══════════════════════════════════════════════════════════════════════════════════

@@ -19,6 +19,7 @@ env/
 aegis.db
 aegis_data/
 instances/
+aegis.config.json
 
 # Node
 node_modules/

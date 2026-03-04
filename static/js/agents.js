@@ -40,8 +40,73 @@ function populateProfileDropdown() {
 }
 
 function applyProfile(profileId) {
-    if (!profileId) return; // "Start from scratch" selected
+    const delBtn = document.getElementById('deleteProfileBtn');
+    if (!profileId) {
+        if (delBtn) delBtn.style.display = 'none';
+        return; // "Start from scratch" selected
+    }
+    if (delBtn) delBtn.style.display = 'block';
     createFromProfile(profileId);
+}
+
+async function deleteSelectedProfile() {
+    const dd = document.getElementById('profileDropdown');
+    const profileId = dd.value;
+    if (!profileId) return;
+    if (!confirm('Are you sure you want to delete this saved profile?')) return;
+    try {
+        const res = await fetch(`/api/profiles/${profileId}`, { method: 'DELETE' });
+        if (res.ok) {
+            showToast('🗑️ Profile deleted');
+            dd.value = '';
+            if (document.getElementById('deleteProfileBtn')) {
+                document.getElementById('deleteProfileBtn').style.display = 'none';
+            }
+            await loadProfiles();
+        } else {
+            showToast('⚠️ Failed to delete profile');
+        }
+    } catch (e) { console.error(e); }
+}
+
+async function saveInstanceAsProfile() {
+    const instanceId = document.getElementById('instSettingsId').value;
+    const inst = instancesData.find(i => i.instance_id === instanceId);
+    if (!inst) return;
+
+    // Gather latest data from modal form
+    const instanceName = document.getElementById('instSettingsName').value.trim() + ' (Copy)';
+    const service = document.getElementById('instSettingsService').value;
+
+    let model = document.getElementById('instSettingsModelSelect').value;
+    if (model === 'custom' || !model) {
+        model = document.getElementById('instSettingsModelCustom').value.trim();
+    }
+    const config = collectConfigValues('editConfigSection');
+    const icon = document.getElementById('instSettingsIcon').value || '🤖';
+    const color = document.getElementById('instSettingsColor').value || '#6366f1';
+
+    try {
+        const res = await fetch('/api/profiles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                name: instanceName,
+                template_id: inst.template_id,
+                icon: icon,
+                color: color,
+                service: service,
+                model: model,
+                config: config
+            })
+        });
+        if (res.ok) {
+            showToast(`✅ Saved as reusable profile "${instanceName}"`);
+            loadProfiles();
+        } else {
+            showToast('⚠️ Failed to save profile');
+        }
+    } catch (e) { console.error(e); }
 }
 
 async function uploadWorkerIcon(mode) {
@@ -175,29 +240,44 @@ function renderInstancesSidebar() {
         return `
             <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
                  style="--agent-color: ${color}; --agent-color-rgb: ${rgb.r}, ${rgb.g}, ${rgb.b};"
-                 data-instance-id="${inst.instance_id}">
+                 data-instance-id="${inst.instance_id}"
+                 draggable="true"
+                 ondragstart="handleAgentDragStart(event, '${inst.instance_id}')"
+                 ondragover="handleAgentDragOver(event)"
+                 ondragenter="handleAgentDragEnter(event)"
+                 ondragleave="handleAgentDragLeave(event)"
+                 ondrop="handleAgentDrop(event, '${inst.instance_id}')"
+                 ondragend="handleAgentDragEnd(event)">
+                
                 <div class="agent-sidebar-header">
                     ${iconHtml}
-                    <div class="agent-info-main">
+                    <div class="agent-info-main" style="display:flex;gap:0.5rem;align-items:center;">
                         <div class="agent-name">${escapeHtml(inst.instance_name)}</div>
                         <div class="agent-status-tag ${isRunning ? 'running' : ''}">
                             <div class="dot"></div>
                             <span>${inst.runtime_status ? inst.runtime_status.charAt(0).toUpperCase() + inst.runtime_status.slice(1) : 'Stopped'}</span>
                         </div>
-                        ${isRunning ? `<div class="agent-activity-indicator" id="activity-${inst.instance_id}" style="font-size: 0.7rem; color: var(--text-secondary); margin-top: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">💤 Idle</div>
-                        <div id="pulse-${inst.instance_id}" style="font-size: 0.65rem; color: var(--primary); margin-top: 2px; font-weight: bold;"></div>` : ''}
                     </div>
                 </div>
-                <div class="agent-params">
-                    <div class="param-row"><span>Template</span><b>${escapeHtml(inst.template_id)}</b></div>
-                    <div style="display:flex;gap:0.25rem;flex-wrap:wrap;margin-top:0.25rem;">${serviceBadge}${modelBadge}</div>
+
+                ${isRunning ? `<div style="position:absolute;top:0.25rem;right:0.25rem;display:flex;flex-direction:column;align-items:flex-end;z-index:3;">
+                    <div class="agent-activity-indicator" id="activity-${inst.instance_id}" style="font-size: 0.6rem; color: var(--text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100px;">💤 Idle</div>
+                    <div id="pulse-${inst.instance_id}" style="font-size: 0.55rem; color: var(--primary); font-weight: bold;"></div>
+                </div>` : ''}
+
+                <div class="agent-sidebar-badges">
+                    ${serviceBadge}${modelBadge}
                 </div>
-                <div style="display:flex;gap:0.25rem;margin-top:0.5rem;">
-                    ${!isRunning ? `<button onclick="startInstance('${inst.instance_id}')" style="flex:1;background:#22c55e;font-size:0.7rem;">▶ Start</button>` : ''}
-                    ${isRunning ? `<button class="danger" onclick="stopInstance('${inst.instance_id}')" style="flex:1;font-size:0.7rem;">⏹ Stop</button>` : ''}
-                    <button class="secondary" onclick="openInstanceSettings('${inst.instance_id}')" style="font-size:0.7rem;" title="Settings">⚙️</button>
-                    <button class="secondary" onclick="viewInstanceLogs('${inst.instance_id}')" style="font-size:0.7rem;">📋</button>
-                    ${!isRunning ? `<button class="danger" onclick="deleteWorkerInstance('${inst.instance_id}')" style="font-size:0.7rem;">🗑</button>` : ''}
+
+                <!-- Inline Mini Terminal -->
+                <div class="mini-terminal-container" onclick="viewInstanceLogs('${inst.instance_id}')" title="Click to open full terminal">
+                    <pre id="mini-term-${inst.instance_id}" style="margin: 0; font-family: monospace; font-size: 0.65rem; color: #10b981; white-space: pre-wrap; word-break: break-all; max-height: 40px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;">${inst.recent_logs ? escapeHtml(inst.recent_logs) : (isRunning ? 'Waiting for logs...' : 'Stopped')}</pre>
+                </div>
+                
+                <div class="agent-sidebar-actions">
+                    ${!isRunning ? `<button onclick="startInstance('${inst.instance_id}')" style="background:#22c55e;font-size:0.75rem;padding:0.25rem 0.5rem;">▶</button>` : ''}
+                    ${isRunning ? `<button class="danger" onclick="stopInstance('${inst.instance_id}')" style="font-size:0.75rem;padding:0.25rem 0.5rem;" title="Stop Worker">⏹</button>` : ''}
+                    <button class="secondary" onclick="openInstanceSettings('${inst.instance_id}')" style="font-size:0.75rem;padding:0.25rem 0.5rem;" title="Settings">⚙️</button>
                 </div>
             </div>`;
     }).join('');
@@ -206,6 +286,77 @@ function renderInstancesSidebar() {
 function hexToRgb(hex) {
     const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
     return result ? { r: parseInt(result[1], 16), g: parseInt(result[2], 16), b: parseInt(result[3], 16) } : { r: 99, g: 102, b: 241 };
+}
+
+// ─── Drag & Drop Workers ────────────────────────────────────────────────
+let draggedAgentId = null;
+
+function handleAgentDragStart(e, id) {
+    draggedAgentId = id;
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => {
+        if (e.target) e.target.style.opacity = '0.4';
+    }, 0);
+}
+
+function handleAgentDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'move';
+}
+
+function handleAgentDragEnter(e) {
+    e.preventDefault();
+    const card = e.target.closest('.agent-sidebar-card');
+    if (card && card.dataset.instanceId !== draggedAgentId) {
+        card.style.transform = 'translateY(4px)';
+        card.style.transition = 'transform 0.1s ease';
+        card.style.boxShadow = '0 -4px 10px rgba(0,0,0,0.5)';
+    }
+}
+
+function handleAgentDragLeave(e) {
+    const card = e.target.closest('.agent-sidebar-card');
+    // only remove transform if leaving the card entirely
+    if (card && !card.contains(e.relatedTarget)) {
+        card.style.transform = '';
+        card.style.boxShadow = '';
+    }
+}
+
+function handleAgentDragEnd(e) {
+    e.target.style.opacity = '1';
+    document.querySelectorAll('.agent-sidebar-card').forEach(c => {
+        c.style.transform = '';
+        c.style.boxShadow = '';
+    });
+}
+
+async function handleAgentDrop(e, targetId) {
+    e.preventDefault();
+    handleAgentDragEnd(e);
+
+    if (!draggedAgentId || draggedAgentId === targetId) return;
+
+    const fromIndex = instancesData.findIndex(i => i.instance_id === draggedAgentId);
+    const toIndex = instancesData.findIndex(i => i.instance_id === targetId);
+    if (fromIndex < 0 || toIndex < 0) return;
+
+    // Reorder locally
+    const item = instancesData.splice(fromIndex, 1)[0];
+    instancesData.splice(toIndex, 0, item);
+    renderInstancesSidebar();
+
+    // Persist
+    try {
+        await fetch('/api/instances/order', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: instancesData.map(i => i.instance_id) })
+        });
+    } catch (e) {
+        console.error('Save order error:', e);
+        showToast('Failed to save order');
+    }
 }
 
 // ─── Instance Actions ───────────────────────────────────────────────────
@@ -237,6 +388,13 @@ async function deleteWorkerInstance(instanceId) {
     } catch (e) { showToast('Delete failed'); }
 }
 
+async function deleteWorkerInstanceFromSettings() {
+    const instanceId = document.getElementById('instSettingsId').value;
+    if (!instanceId) return;
+    closeModal('instanceSettingsModal');
+    await deleteWorkerInstance(instanceId);
+}
+
 let terminalPollInterval = null;
 
 async function viewInstanceLogs(instanceId) {
@@ -246,6 +404,10 @@ async function viewInstanceLogs(instanceId) {
     document.getElementById('terminalTitle').textContent = `Terminal — ${displayName}`;
     const output = document.getElementById('workerTerminalOutput');
     output.textContent = 'Connecting to terminal...';
+
+    // Store the active instance ID for the chat function
+    const activeIdInput = document.getElementById('activeTerminalInstanceId');
+    if (activeIdInput) activeIdInput.value = instanceId;
 
     // Clear any existing poll
     if (terminalPollInterval) clearInterval(terminalPollInterval);
@@ -260,7 +422,8 @@ async function viewInstanceLogs(instanceId) {
             // Check if scroll is at bottom before update
             const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
 
-            output.textContent = logs.length > 0 ? logs.join('\n') : 'No output yet.';
+            const cleanLogs = logs.map(l => l.replace(/^\[.*?\]\s*\[.*?\]\s*/, ''));
+            output.textContent = cleanLogs.length > 0 ? cleanLogs.join('\n') : 'No output yet.';
 
             // Auto-scroll if it was previously at bottom
             if (isScrolledToBottom) {
@@ -271,11 +434,12 @@ async function viewInstanceLogs(instanceId) {
         }
     };
 
-    // Initial fetch and start polling every 2s
+    // Initial fetch to populate history
     await fetchLogs();
     // Scroll to bottom immediately on open
     output.scrollTop = output.scrollHeight;
-    terminalPollInterval = setInterval(fetchLogs, 2000);
+    // Live appending is handled entirely by websocket.js
+
 }
 
 function closeTerminal() {
@@ -283,6 +447,47 @@ function closeTerminal() {
     if (terminalPollInterval) {
         clearInterval(terminalPollInterval);
         terminalPollInterval = null;
+    }
+}
+
+async function sendTerminalMessage() {
+    const input = document.getElementById('terminalChatInput');
+    const instanceId = document.getElementById('activeTerminalInstanceId')?.value;
+    const message = input.value.trim();
+
+    if (!message || !instanceId) return;
+
+    input.disabled = true;
+    const originalPlaceholder = input.placeholder;
+    input.placeholder = "Sending...";
+
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message })
+        });
+
+        if (res.ok) {
+            input.value = '';
+            showToast('Message sent to agent');
+            // Optimistically add user message to the terminal view
+            const output = document.getElementById('workerTerminalOutput');
+            if (output) {
+                output.textContent += (output.textContent ? '\n' : '') + `👤 USER: ${message}`;
+                output.scrollTop = output.scrollHeight;
+            }
+        } else {
+            const d = await res.json();
+            showToast(`⚠️ Failed to send: ${d.detail || 'Unknown error'}`);
+        }
+    } catch (e) {
+        console.error("Chat send error:", e);
+        showToast('⚠️ Failed to send message');
+    } finally {
+        input.disabled = false;
+        input.placeholder = originalPlaceholder;
+        input.focus();
     }
 }
 
@@ -559,33 +764,68 @@ function collectConfigValues(containerId) {
     return config;
 }
 
+function switchWorkerTab(modalType, tabName) {
+    const parentId = modalType === 'create' ? 'createWorkerModal' : 'instanceSettingsModal';
+    const modal = document.getElementById(parentId);
+    if (!modal) return;
+
+    // Reset all buttons
+    modal.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+        btn.style.color = 'var(--text-secondary)';
+        btn.style.borderBottom = '2px solid transparent';
+        btn.style.fontWeight = '500';
+    });
+
+    // Reset all content
+    modal.querySelectorAll('.tab-content').forEach(content => {
+        content.style.display = 'none';
+        content.classList.remove('active');
+    });
+
+    // Activate selected
+    const activeBtn = modal.querySelector(`#btn-${modalType}-${tabName}`);
+    const activeContent = modal.querySelector(`#tab-${modalType}-${tabName}`);
+
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+        activeBtn.style.color = 'var(--primary)';
+        activeBtn.style.borderBottom = '2px solid var(--primary)';
+        activeBtn.style.fontWeight = '600';
+    }
+    if (activeContent) {
+        activeContent.style.display = 'block';
+        activeContent.classList.add('active');
+    }
+}
+
 // ─── Create Worker Modal (with per-instance settings) ───────────────────
 
 async function openCreateWorkerModal() {
     document.getElementById('createWorkerModal').classList.add('active');
-    await ensureRegistryLoaded();
-
-    // Default to aegis-worker
-    const templateId = 'aegis-worker';
-
-    // Clear fields
     document.getElementById('workerName').value = '';
-    document.getElementById('workerModelCustom').value = '';
-    document.getElementById('workerService').value = '';
+
+    // Reset tabs to general
+    switchWorkerTab('create', 'general');
+
+    const templateId = 'aegis-worker'; // We just have one universal worker type now
     document.getElementById('unifiedApiKey-create').value = '';
     document.getElementById('feedback-create-apikey').innerHTML = '';
+
+    loadProfiles(); // Populate the load profile dropdown
+
+    document.getElementById('workerService').value = 'anthropic';
     document.getElementById('workerIcon').value = '🤖';
     document.getElementById('workerColor').value = '#6366f1';
     document.getElementById('saveAsProfile').checked = false;
 
-    // Populate profile dropdown
-    populateProfileDropdown();
-    const dd = document.getElementById('profileDropdown');
-    if (dd) dd.value = '';
-
+    // Trigger service updates to populate models
     onServiceChange('create');
     initEmojiGrid('emojiGrid-create', 'create');
     updateIconPreview('create');
+
+    // Load available skills
+    await loadAvailableSkills('createSettingsSkillsList');
 
     // Render config schema for the default worker
     renderConfigSchema(templateId, 'createConfigSection');
@@ -612,6 +852,10 @@ async function createWorkerInstance() {
 
     // Gather config schema values
     const config = collectConfigValues('createConfigSection');
+
+    // Gather skills
+    const skillsBoxes = document.querySelectorAll('#createSettingsSkillsList input[type="checkbox"]:checked');
+    config.skills = Array.from(skillsBoxes).map(cb => cb.value);
 
     const icon = document.getElementById('workerIcon').value || '🤖';
     const color = document.getElementById('workerColor').value || '#6366f1';
@@ -670,6 +914,9 @@ async function openInstanceSettings(instanceId) {
     const inst = instancesData.find(i => i.instance_id === instanceId);
     if (!inst) { showToast('Instance not found'); return; }
 
+    // Default to general tab
+    switchWorkerTab('edit', 'general');
+
     document.getElementById('instSettingsId').value = instanceId;
     document.getElementById('instSettingsTitle').textContent = inst.instance_name;
     document.getElementById('instSettingsName').value = inst.instance_name;
@@ -698,6 +945,9 @@ async function openInstanceSettings(instanceId) {
         modelCustom.style.display = 'block';
         modelCustom.value = savedModel;
     }
+
+    // Load available skills
+    await loadAvailableSkills('instSettingsSkillsList', inst.config?.skills || []);
 
     // Render config schema with saved values
     renderConfigSchema(inst.template_id, 'editConfigSection', inst.config || {});
@@ -731,6 +981,10 @@ async function saveInstanceSettings() {
 
     // Gather config schema values
     const config = collectConfigValues('editConfigSection');
+
+    // Gather skills
+    const skillsBoxes = document.querySelectorAll('#instSettingsSkillsList input[type="checkbox"]:checked');
+    config.skills = Array.from(skillsBoxes).map(cb => cb.value);
 
     const icon = document.getElementById('instSettingsIcon').value;
     const color = document.getElementById('instSettingsColor').value;
@@ -770,3 +1024,361 @@ async function loadAgents() {
 }
 
 function updateAgentParam(agentId, key, value) { /* Legacy no-op */ }
+
+// ─── Skills & Marketplace ───────────────────────────────────────────────
+
+async function loadAvailableSkills(containerId, selectedSkills = []) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    try {
+        const res = await fetch('/api/tools');
+        const tools = await res.json();
+        if (!tools || tools.length === 0) {
+            container.innerHTML = '<div style="font-size:0.8rem; color:var(--text-secondary); padding:1rem; text-align:center;">No skills installed yet.</div>';
+            return;
+        }
+
+        // Add a search bar to the skills list
+        const searchInputHtml = `
+            <div style="margin-bottom: 0.75rem; position: relative;">
+                <input type="text" class="skills-search-input" placeholder="Search equipped skills..." style="width: 100%; padding: 0.5rem 0.5rem 0.5rem 2rem; border-radius: 6px; border: 1px solid var(--border-color); background: var(--bg-card); color: var(--text-primary); font-size: 0.85rem;" onkeyup="filterEquippedSkills(this, '${containerId}-grid')">
+                <span style="position: absolute; left: 0.6rem; top: 50%; transform: translateY(-50%); color: var(--text-secondary); font-size: 0.9rem;">🔍</span>
+            </div>
+        `;
+
+        const skillsGridHtml = tools.map(t => {
+            const isChecked = selectedSkills.includes(t.name);
+            return `
+            <label class="skill-card ${isChecked ? 'selected' : ''}" style="display: flex; flex-direction: column; gap: 0.35rem; padding: 0.75rem; border-radius: 8px; border: 1px solid ${isChecked ? 'var(--primary)' : 'var(--border-color)'}; background: ${isChecked ? 'rgba(99, 102, 241, 0.05)' : 'var(--bg-card)'}; cursor: pointer; transition: all 0.2s ease; position: relative; overflow: hidden;" data-skill-name="${t.name.toLowerCase()}" data-skill-desc="${t.description.toLowerCase()}">
+                <div style="display: flex; justify-content: space-between; align-items: flex-start;">
+                    <div style="font-weight: 600; color: ${isChecked ? 'var(--primary)' : 'var(--text-primary)'}; font-size: 0.9rem; display: flex; align-items: center; gap: 0.4rem;">
+                        <span style="font-size: 1.1rem;">${getSkillIcon(t.name)}</span>
+                        ${t.name}
+                        ${t.is_core ? '<span style="font-size: 0.55rem; background: var(--primary); color: white; padding: 1px 4px; border-radius: 4px; font-weight: 700; letter-spacing: 0.05em;">CORE</span>' : ''}
+                    </div>
+                    <input type="checkbox" value="${t.name}" ${isChecked ? 'checked' : ''} style="accent-color: var(--primary); width: 16px; height: 16px; cursor: pointer;" onchange="this.closest('.skill-card').classList.toggle('selected', this.checked); this.closest('.skill-card').style.borderColor = this.checked ? 'var(--primary)' : 'var(--border-color)'; this.closest('.skill-card').style.background = this.checked ? 'rgba(99, 102, 241, 0.05)' : 'var(--bg-card)';">
+                </div>
+                <div style="font-size: 0.75rem; color: var(--text-secondary); line-height: 1.3; overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical;">${t.description}</div>
+                ${isChecked ? '<div style="position: absolute; top: 0; left: 0; width: 4px; height: 100%; background: var(--primary);"></div>' : ''}
+            </label>`;
+        }).join('');
+
+        container.style.padding = "0.75rem";
+        container.style.border = "none";
+        container.style.background = "transparent";
+        container.innerHTML = searchInputHtml + `<div id="${containerId}-grid" class="skills-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 0.75rem; max-height: 250px; overflow-y: auto; padding-right: 0.25rem;">${skillsGridHtml}</div>`;
+    } catch (e) {
+        container.innerHTML = '<div style="font-size:0.8rem; color:var(--danger); padding:1rem;">Failed to load skills</div>';
+    }
+}
+
+function filterEquippedSkills(inputEl, gridId) {
+    const q = inputEl.value.toLowerCase();
+    const grid = document.getElementById(gridId);
+    if (!grid) return;
+    const cards = grid.querySelectorAll('.skill-card');
+    cards.forEach(card => {
+        const name = card.getAttribute('data-skill-name') || '';
+        const desc = card.getAttribute('data-skill-desc') || '';
+        if (name.includes(q) || desc.includes(q)) {
+            card.style.display = 'flex';
+        } else {
+            card.style.display = 'none';
+        }
+    });
+}
+
+// Temporary helper for nicer icons depending on text
+function getSkillIcon(name) {
+    const lower = name.toLowerCase();
+    if (lower.includes('scrape') || lower.includes('web')) return '🕸️';
+    if (lower.includes('os') || lower.includes('system') || lower.includes('mulch')) return '💻';
+    if (lower.includes('security') || lower.includes('audit')) return '🛡️';
+    if (lower.includes('devops') || lower.includes('ci')) return '🚀';
+    if (lower.includes('search')) return '🔍';
+    if (lower.includes('url')) return '🌐';
+    if (lower.includes('shell')) return '🐚';
+    return '🛠️';
+}
+
+let marketplaceSkills = [];
+let marketplaceCursor = null;
+let installedSkillsSet = new Set();
+let installedSkillsFull = [];
+
+async function openSkillsMarketplaceModal() {
+    document.getElementById('skillsMarketplaceModal').classList.add('active');
+    const listEl = document.getElementById('marketplaceList');
+    listEl.innerHTML = '<div class="loading-spinner">Loading curated skills...</div>';
+
+    try {
+        // Fetch installed skills to know which button to show and populate "Installed" filter
+        const toolsRes = await fetch('/api/tools');
+        const tools = await toolsRes.json();
+        installedSkillsSet = new Set();
+        installedSkillsFull = [];
+
+        tools.forEach(t => {
+            if (!t.is_core) {
+                const s_id = t.id || t.name;
+                installedSkillsSet.add(s_id.toLowerCase());
+                installedSkillsSet.add(t.name.toLowerCase());
+                installedSkillsFull.push({
+                    id: s_id,
+                    name: t.name,
+                    description: t.description,
+                    github_url: `https://clawhub.ai/api/v1/download?slug=${s_id}`,
+                    stats: { downloads: 0, stars: 0 },
+                    tags: { latest: 'installed' }
+                });
+            }
+        });
+
+        // Fetch first page
+        const res = await fetch('/api/skills/marketplace');
+        const data = await res.json();
+        marketplaceSkills = data.items || [];
+        marketplaceCursor = data.nextCursor || null;
+        renderMarketplaceSkills();
+    } catch (e) {
+        listEl.innerHTML = '<div style="color:var(--danger); padding:1rem;">Failed to load marketplace</div>';
+    }
+}
+
+async function loadMoreMarketplaceSkills() {
+    if (!marketplaceCursor) return;
+    const loadBtn = document.getElementById('btn-load-more-skills');
+    if (loadBtn) loadBtn.innerText = 'Loading...';
+
+    try {
+        const res = await fetch(`/api/skills/marketplace?cursor=${encodeURIComponent(marketplaceCursor)}`);
+        const data = await res.json();
+        marketplaceSkills = marketplaceSkills.concat(data.items || []);
+        marketplaceCursor = data.nextCursor || null;
+        renderMarketplaceSkills();
+    } catch (e) {
+        if (loadBtn) loadBtn.innerText = 'Failed to load more. Try again.';
+    }
+}
+
+let searchDebounceTimeout = null;
+
+function debounceSearchMarketplaceSkills() {
+    clearTimeout(searchDebounceTimeout);
+    searchDebounceTimeout = setTimeout(() => {
+        performMarketplaceSearch();
+    }, 400);
+}
+
+async function performMarketplaceSearch() {
+    const q = (document.getElementById('marketplaceSearch').value || '').trim();
+    const listEl = document.getElementById('marketplaceList');
+    listEl.innerHTML = '<div class="loading-spinner">Searching skills...</div>';
+
+    try {
+        let url = '/api/skills/marketplace';
+        if (q) {
+            url += `?q=${encodeURIComponent(q)}`;
+        }
+
+        const res = await fetch(url);
+        const data = await res.json();
+
+        // Reset full state with the new search results
+        marketplaceSkills = data.items || [];
+        marketplaceCursor = data.nextCursor || null;
+
+        renderMarketplaceSkills();
+    } catch (e) {
+        listEl.innerHTML = '<div style="color:var(--danger); padding:1rem; grid-column: 1 / -1; text-align: center;">Search failed. Try again.</div>';
+    }
+}
+
+function renderMarketplaceSkills() {
+    const q = (document.getElementById('marketplaceSearch').value || '').toLowerCase();
+    const filter = document.getElementById('marketplaceFilter')?.value || 'all';
+    const sort = document.getElementById('marketplaceSort')?.value || 'name';
+    const listEl = document.getElementById('marketplaceList');
+
+    let sourceSkills = marketplaceSkills;
+    if (filter === 'installed') {
+        sourceSkills = installedSkillsFull;
+    }
+
+    let filtered = sourceSkills.filter(s => {
+        // If we are looking at Installed skills but we typed a search query, we must filter locally.
+        if (filter === 'installed' && q) {
+            const matchesQ = s.name.toLowerCase().includes(q) || (s.description && s.description.toLowerCase().includes(q));
+            if (!matchesQ) return false;
+        }
+
+        const isInstalled = installedSkillsSet.has(s.name.toLowerCase()) || installedSkillsSet.has(s.id.toLowerCase());
+
+        if (filter === 'installed' && !isInstalled) return false;
+        if (filter === 'not_installed' && isInstalled) return false;
+        return true;
+    });
+
+    // Sort logic (only if not actively searching, to preserve relevance)
+    if (!q) {
+        if (sort === 'name') {
+            filtered.sort((a, b) => a.name.localeCompare(b.name));
+        } else if (sort === 'recent') {
+            filtered.sort((a, b) => b.id.localeCompare(a.id));
+        } else if (sort === 'downloads') {
+            filtered.sort((a, b) => (b.stats?.downloads || 0) - (a.stats?.downloads || 0));
+        }
+    }
+
+    if (filtered.length === 0) {
+        listEl.innerHTML = '<div style="color:var(--text-secondary); padding:2rem; text-align:center; grid-column: 1 / -1;">No matching skills found. Try tweaking your search.</div>';
+        return;
+    }
+
+    // Add grid styling to the container. Erase flex direction.
+    listEl.style.flexDirection = '';
+    listEl.style.display = 'grid';
+    listEl.style.gridTemplateColumns = 'repeat(auto-fill, minmax(260px, 1fr))';
+    listEl.style.gap = '1rem';
+    listEl.style.padding = '0.5rem';
+
+    let htmlParts = filtered.map(s => {
+        return `
+            <div class="marketplace-skill-card" style="background:var(--bg-column); border:1px solid var(--border-color); border-radius:12px; padding:1.25rem; display:flex; flex-direction:column; gap:0.75rem; transition: all 0.2s ease; position:relative; overflow:hidden; min-height:180px; height:auto; cursor: pointer;" onclick="this.classList.toggle('expanded')">
+                <!-- Decorative background glow -->
+                <div style="position:absolute; top:-20px; right:-20px; width:100px; height:100px; background:var(--primary); opacity:0.05; filter:blur(40px); border-radius:50%; pointer-events:none;"></div>
+
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom: 0.25rem;">
+                    <div style="flex: 1; padding-right: 0.5rem;">
+                        <div style="display:flex; align-items:center; gap:0.5rem; margin-bottom: 0.25rem;">
+                            <span style="font-size: 1.25rem;">${getSkillIcon(s.name)}</span>
+                            <div style="font-weight:600; color:var(--text-primary); font-size:1.05rem; letter-spacing:-0.01em;">${s.name}</div>
+                        </div>
+                        <div style="font-size:0.75rem; color:var(--text-muted); font-family:var(--font-mono, monospace); line-height: 1;">v${s.tags?.latest || '1.0.0'} • ${s.id}</div>
+                    </div>
+                </div>
+
+                <div class="skill-desc" style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5; flex-grow: 1; display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;">${s.description}</div>
+
+                <div style="margin-top:auto; padding-top:1rem; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
+                    <div style="display:flex; gap: 0.5rem; font-size: 0.75rem; color: var(--text-muted);">
+                        <span title="Downloads">⬇️ ${s.stats?.downloads || 0}</span>
+                        <span title="Stars">⭐ ${s.stats?.stars || 0}</span>
+                    </div>
+                    ${installedSkillsSet.has(s.name.toLowerCase()) || installedSkillsSet.has(s.id.toLowerCase())
+                ? `<button class="danger" id="btn-uninstall-${s.id}" onclick="event.stopPropagation(); uninstallMarketplaceSkill('${s.id}', '${s.name}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500; z-index:2; position:relative; background: var(--danger);">Uninstall</button>`
+                : `<button id="btn-install-${s.id}" onclick="event.stopPropagation(); installSkill('${s.github_url}', '${s.id}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500; z-index:2; position:relative;">Install Skill</button>`
+            }
+                </div>
+            </div>
+        `;
+    });
+
+    // Add "Load More" if pagination cursor exists
+    if (marketplaceCursor) {
+        htmlParts.push(`
+            <div style="grid-column: 1 / -1; display:flex; justify-content:center; padding: 1rem;">
+                <button id="btn-load-more-skills" onclick="loadMoreMarketplaceSkills()" style="background:var(--bg-card); color:var(--text-primary); border:1px solid var(--border-color); padding:0.75rem 2rem; border-radius:8px; cursor:pointer;" onmouseover="this.style.background='var(--bg-hover)'" onmouseout="this.style.background='var(--bg-card)'">Load More Skills</button>
+            </div>
+        `);
+    }
+
+    listEl.innerHTML = htmlParts.join('');
+}
+
+async function installSkill(githubUrl, skillId) {
+    const btn = document.getElementById(`btn-install-${skillId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Installing...';
+    }
+
+    try {
+        const res = await fetch('/api/skills/install', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ github_url: githubUrl })
+        });
+        const d = await res.json();
+
+        if (res.ok) {
+            if (d.status === 'already_installed') {
+                showToast(`Skill ${skillId} is already installed`);
+            } else {
+                showToast(`✅ Successfully installed ${skillId}`);
+                installedSkillsSet.add(skillId.toLowerCase());
+                // Refresh full installed skills array
+                fetch('/api/tools').then(r => r.json()).then(tools => {
+                    installedSkillsFull = [];
+                    tools.forEach(t => {
+                        if (!t.is_core) {
+                            installedSkillsFull.push({
+                                id: t.id || t.name,
+                                name: t.name,
+                                description: t.description,
+                                github_url: `https://clawhub.ai/api/v1/download?slug=${t.id || t.name}`,
+                                stats: { downloads: 0, stars: 0 },
+                                tags: { latest: 'installed' }
+                            });
+                        }
+                    });
+                    renderMarketplaceSkills();
+                });
+            }
+            if (btn) {
+                btn.textContent = 'Installed';
+                btn.style.background = 'var(--success)';
+            }
+        } else {
+            showToast(`⚠️ Install failed: ${d.detail || 'Unknown error'}`);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Retry Install';
+            }
+        }
+    } catch (e) {
+        showToast('⚠️ Install failed');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Retry Install';
+        }
+    }
+}
+
+async function uninstallMarketplaceSkill(skillId, skillName) {
+    const btn = document.getElementById(`btn-uninstall-${skillId}`);
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = 'Uninstalling...';
+    }
+
+    try {
+        const res = await fetch(`/api/skills/uninstall/${skillId}`, { method: 'DELETE' });
+        const d = await res.json();
+
+        if (res.ok) {
+            showToast(`✅ Successfully uninstalled ${skillName}`);
+            installedSkillsSet.delete(skillName.toLowerCase());
+            installedSkillsSet.delete(skillId.toLowerCase());
+            installedSkillsFull = installedSkillsFull.filter(s => s.id.toLowerCase() !== skillId.toLowerCase());
+            renderMarketplaceSkills();
+
+            // Optionally, refresh available skills if the worker settings modal happens to be active behind this one
+            if (document.getElementById('workerSettingsModal')?.classList.contains('active')) {
+                loadAvailableSkills('workerSkillsList', getCheckedSkills('workerSkillsList'));
+            }
+        } else {
+            showToast(`⚠️ Uninstall failed: ${d.detail || 'Unknown error'}`);
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = 'Retry Uninstall';
+            }
+        }
+    } catch (e) {
+        showToast('⚠️ Uninstall failed');
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = 'Retry Uninstall';
+        }
+    }
+}

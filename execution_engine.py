@@ -132,7 +132,17 @@ class SubprocessAdapter(ExecutionAdapter):
             command = command.replace("python ", f'"{sys.executable}" ', 1)
 
         if working_dir and working_dir.exists():
-             worker_exists = (working_dir / "worker.py").exists()
+             # Auto-sync worker.py from template on every start
+             template_worker = TEMPLATES_DIR / agent_id / "worker.py"
+             instance_worker = working_dir / "worker.py"
+             if template_worker.exists():
+                 try:
+                     shutil.copy2(str(template_worker), str(instance_worker))
+                     logger.info(f"Auto-synced worker.py from template '{agent_id}' to {working_dir}")
+                 except Exception as e:
+                     logger.warning(f"Failed to auto-sync worker.py: {e}")
+
+             worker_exists = instance_worker.exists()
              logger.info(f"Subprocess starting: command={command}, cwd={working_dir}, worker_exists={worker_exists}")
              if not worker_exists:
                  logger.error(f"CRITICAL: worker.py MISSING in {working_dir}")
@@ -622,6 +632,23 @@ class ExecutionEngine:
         return [proc.to_dict() for proc in self.active.values()]
 
     def get_logs(self, agent_id: str, tail: int = 100) -> list[str]:
+        # agent_id here is actually the instance_id
+        log_file = INSTANCES_DIR / agent_id / "logs.jsonl"
+        if log_file.exists():
+            try:
+                with open(log_file, "r", encoding="utf-8") as f:
+                    lines = f.readlines()[-tail:]
+                    parsed = []
+                    for line in lines:
+                        try:
+                            obj = json.loads(line)
+                            parsed.append(obj.get('content', ''))
+                        except:
+                            parsed.append(line.strip())
+                    return parsed
+            except Exception as e:
+                logger.error(f"Failed to read logs.jsonl for {agent_id}: {e}")
+                
         agent_proc = self.active.get(agent_id)
         return agent_proc.logs[-tail:] if agent_proc else []
 
@@ -637,8 +664,29 @@ class ExecutionEngine:
                     break
                 decoded = line.decode(errors="replace").strip()
                 if decoded:
-                    entry = f"[{log_type}] {decoded}"
+                    entry = f"{decoded}"
                     agent_proc.logs.append(entry)
+
+                    # Persistent JSONL Disk Logging
+                    try:
+                        if agent_proc.instance_id:
+                            inst_dir = INSTANCES_DIR / agent_proc.instance_id
+                            if inst_dir.exists():
+                                lower_dec = decoded.lower()
+                                tag = "error" if "error" in lower_dec or "fatal" in lower_dec or "traceback" in lower_dec else \
+                                      ("thought" if "thought" in lower_dec else \
+                                      ("action" if "action" in lower_dec or "tool" in lower_dec else "output"))
+                                      
+                                log_obj = {
+                                    "timestamp": datetime.now().isoformat(),
+                                    "stream": log_type.lower(),
+                                    "tag": tag,
+                                    "content": decoded
+                                }
+                                with open(inst_dir / "logs.jsonl", "a", encoding="utf-8") as lf:
+                                    lf.write(json.dumps(log_obj) + "\n")
+                    except Exception as disk_err:
+                        logger.error(f"Failed to write JSONL log: {disk_err}")
 
                     # Update card logs
                     current = store.get_card(card_id)

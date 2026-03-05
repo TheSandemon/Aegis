@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 
 <head>
@@ -9,8 +9,26 @@
     <link rel="icon"
         href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
     <title>Aegis - Multi-Agent Kanban</title>
-    <link rel="stylesheet" href="/static/css/aegis.css">
+    <link rel="stylesheet" href="/static/css/aegis.css?v=2">
+
+    <!-- xterm.js -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
+    <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xterm-addon-fit@0.8.0/lib/xterm-addon-fit.js"></script>
     <style>
+        #workerTerminalOutput .terminal {
+            max-height: none !important;
+            height: 100%;
+            width: 100%;
+            padding: 4px;
+        }
+
+        .xterm-viewport {
+            overflow-y: auto !important;
+            width: 100% !important;
+            height: 100% !important;
+        }
+
         /* Header — kept inline since it's structural */
         header {
             display: flex;
@@ -163,6 +181,9 @@
                 <button data-view="telemetry" onclick="navigateTo('telemetry')">📊 Telemetry</button>
                 <button data-view="integrations" onclick="navigateTo('integrations')">🔗 Integrations</button>
                 <button data-view="workspaces" onclick="navigateTo('workspaces')">💾 Workflowspaces</button>
+                <button onclick="openSkillsMarketplaceModal()">🛒 Skills</button>
+                <button onclick="if(window.onboarding) { window.onboarding.currentStep = 1; window.onboarding.open(); }"
+                    style="background: var(--primary);">🎓 Tutorial</button>
             </div>
         </div>
         <div class="header-actions">
@@ -260,9 +281,106 @@
         <div class="telemetry-view" id="integrationsView" style="display:none;">
             <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">🔗 External Integrations</h2>
             <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
-                Column integrations with external services. Link a column to GitHub Issues, Jira, Linear, or Firebase
-                Firestore when creating or editing a column.
+                Manage integration connections and link columns to external services like GitHub Issues.
             </p>
+
+            <!-- Saved Connections Section -->
+            <div
+                style="background:var(--bg-card);border:1px solid var(--border);border-radius:0.5rem;padding:1rem;margin-bottom:1.25rem;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                    <h3 style="font-size:0.95rem;margin:0;">🔌 Saved Connections</h3>
+                    <button onclick="toggleAddConnectionForm()" id="addConnectionBtn"
+                        style="font-size:0.78rem;padding:0.3rem 0.7rem;">+ Add Integration</button>
+                </div>
+
+                <!-- Connection list -->
+                <div id="connectionsList">
+                    <div style="font-size:0.8rem;color:var(--text-secondary);padding:0.5rem 0;">No connections yet.
+                        Click "Add Integration" to get started.</div>
+                </div>
+
+                <!-- Add Connection Form (hidden by default) -->
+                <div id="addConnectionForm"
+                    style="display:none;margin-top:0.75rem;padding:1rem;background:var(--bg-dark);border:1px solid var(--border);border-radius:0.375rem;">
+
+                    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
+                        <span style="font-weight:600;font-size:0.9rem;">Add GitHub Connection</span>
+                        <button class="secondary" onclick="toggleAddConnectionForm()"
+                            style="font-size:0.75rem;padding:0.2rem 0.5rem;">&times;</button>
+                    </div>
+
+                    <!-- GitHub Device Flow Login (Primary) -->
+                    <div
+                        style="text-align:center;padding:1.5rem 1rem;background:var(--bg);border:1px solid var(--border);border-radius:0.5rem;margin-bottom:1.5rem;">
+                        <button id="primaryLoginBtn" onclick="startGithubDeviceFlow()"
+                            style="background:#24292e;color:#fff;border:none;padding:0.6rem 1.2rem;font-size:0.9rem;border-radius:0.3rem;cursor:pointer;display:inline-flex;align-items:center;gap:0.5rem;font-weight:600;width:100%;justify-content:center;">
+                            <svg height="20" aria-hidden="true" viewBox="0 0 16 16" version="1.1" width="20"
+                                data-view-component="true" style="fill:currentColor;">
+                                <path
+                                    d="M8 0c4.42 0 8 3.58 8 8a8.013 8.013 0 0 1-5.45 7.59c-.4.08-.55-.17-.55-.38 0-.27.01-1.13.01-2.2 0-.75-.25-1.23-.54-1.48 1.78-.2 3.65-.88 3.65-3.95 0-.88-.31-1.59-.82-2.15.08-.2.36-1.02-.08-2.12 0 0-.67-.22-2.2.82-.64-.18-1.32-.27-2-.27-.68 0-1.36.09-2 .27-1.53-1.03-2.2-.82-2.2-.82-.44 1.1-.16 1.92-.08 2.12-.51.56-.82 1.28-.82 2.15 0 3.06 1.86 3.75 3.64 3.95-.23.2-.44.55-.51 1.07-.46.21-1.61.55-2.33-.66-.15-.24-.6-.83-1.23-.82-.67.01-.27.38.01.53.34.19.73.9.82 1.13.16.45.68 1.31 2.69.94 0 .67.01 1.3.01 1.49 0 .21-.15.45-.55.38A7.995 7.995 0 0 1 0 8c0-4.42 3.58-8 8-8Z">
+                                </path>
+                            </svg>
+                            Connect GitHub Account
+                        </button>
+
+                        <!-- Hidden Device Flow UI waiting for auth -->
+                        <div id="deviceFlowSection"
+                            style="display: none; background: #1e293b; border: 1px solid #334155; border-radius: 0.5rem; padding: 1.5rem; margin-top: 1rem;">
+                            <h4 style="margin: 0 0 1rem 0; color: #e2e8f0; font-size: 0.95rem;">Enter this code on
+                                GitHub:</h4>
+                            <div id="deviceUserCode"
+                                style="font-family: monospace; font-size: 2rem; font-weight: 700; color: #38bdf8; letter-spacing: 4px; margin-bottom: 1.5rem; background: #0f172a; padding: 1rem; border-radius: 0.25rem;">
+                                XXXX-XXXX
+                            </div>
+                            <button id="deviceActionBtn"
+                                style="background:#0284c7;color:#fff;border:none;padding:0.6rem 1.2rem;font-size:0.9rem;border-radius:0.3rem;cursor:pointer;font-weight:600;width:100%;margin-bottom:1rem;">
+                                Copy Code & Open GitHub
+                            </button>
+                            <div id="deviceFlowStatus"
+                                style="font-size: 0.85rem; color: #94a3b8; display:flex; align-items:center; justify-content:center; gap:0.5rem;">
+                                <span class="loader"
+                                    style="width:12px;height:12px;border-width:2px;display:inline-block;border-radius:50%;border-top-color:transparent;animation:spin 1s linear infinite;"></span>
+                                Waiting for authorization...
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Manual PAT Option (Secondary) -->
+                    <div style="border-top:1px solid var(--border);padding-top:1rem;">
+                        <div
+                            style="font-size:0.8rem;font-weight:600;margin-bottom:0.75rem;color:var(--text-secondary);">
+                            Or connect manually with a Classic PAT</div>
+                        <input type="hidden" id="newConnType" value="github">
+                        <div class="form-group" style="margin-bottom:0.75rem;">
+                            <label style="font-size:0.78rem;">Connection Name</label>
+                            <input type="text" id="newConnName" placeholder="e.g. Work GitHub, Personal GitHub"
+                                style="font-size:0.85rem;">
+                        </div>
+                        <div class="form-group" style="margin-bottom:0.75rem;">
+                            <label style="font-size:0.78rem;">Classic Personal Access Token</label>
+                            <input type="password" id="newConnToken" placeholder="ghp_..." style="font-size:0.85rem;">
+                            <div style="font-size:0.68rem;color:var(--text-secondary);margin-top:0.3rem;">
+                                Create a <strong>Classic PAT</strong> at <a href="https://github.com/settings/tokens"
+                                    target="_blank" style="color:var(--accent);">Settings > Developer Settings</a> with
+                                the <code>repo</code>
+                                scope.
+                            </div>
+                        </div>
+                        <div id="newConnValidation"
+                            style="display:none;font-size:0.78rem;margin-bottom:0.75rem;padding:0.5rem 0.6rem;border-radius:0.3rem;">
+                        </div>
+                        <div style="display:flex;gap:0.5rem;justify-content:flex-end;">
+                            <button class="secondary" onclick="toggleAddConnectionForm()"
+                                style="font-size:0.78rem;padding:0.3rem 0.6rem;">Cancel</button>
+                            <button onclick="addNewConnection()" id="addConnSaveBtn"
+                                style="font-size:0.78rem;padding:0.3rem 0.8rem;">Validate & Save</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Column Integrations -->
+            <h3 style="font-size:0.95rem;margin:0 0 0.5rem;">📋 Active Column Integrations</h3>
             <div id="integrationsList">
                 <div class="empty-state">
                     <div class="empty-state-icon">🔗</div>
@@ -431,9 +549,9 @@
                 <!-- Right Pane: Live Terminal + Intervention -->
                 <div id="terminalSection" style="flex:1.2;min-width:0;display:flex;flex-direction:column;">
                     <label style="margin-bottom:0.25rem;">🖥️ Live Terminal</label>
-                    <div class="terminal" id="terminalOutput"
-                        style="flex:1;min-height:200px;max-height:350px;overflow-y:auto;font-size:0.75rem;">Waiting for
-                        output...</div>
+                    <div id="terminalOutput"
+                        style="flex:1; min-height:200px; max-height:350px; overflow:hidden; border-radius: 4px; border: 1px solid var(--border); padding: 4px; background: #000;">
+                    </div>
                     <!-- Inject Context -->
                     <div id="injectSection" style="display:none;margin-top:0.5rem;">
                         <div style="display:flex;gap:0.25rem;">
@@ -476,73 +594,135 @@
                     onclick="closeModal('createWorkerModal')">&times;</button>
             </div>
             <div class="modal-body">
+                <div class="tabs">
+                    <div class="tab-list"
+                        style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:1rem; gap:1rem;">
+                        <button type="button" class="tab-btn active" id="btn-create-general"
+                            onclick="switchWorkerTab('create', 'general')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; font-weight:600; color:var(--primary); border-bottom:2px solid var(--primary);">General</button>
+                        <button type="button" class="tab-btn" id="btn-create-config"
+                            onclick="switchWorkerTab('create', 'config')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; color:var(--text-secondary);">Configuration</button>
+                        <button type="button" class="tab-btn" id="btn-create-skills"
+                            onclick="switchWorkerTab('create', 'skills')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; color:var(--text-secondary);">Skills</button>
+                    </div>
 
-                <div class="form-group">
-                    <label>Load Profile</label>
-                    <select id="profileDropdown" onchange="applyProfile(this.value)" style="font-size:0.85rem;">
-                        <option value="">— Start from scratch —</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label>Worker Name</label>
-                    <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
-                </div>
-
-                <div class="form-group">
-                    <label>Service</label>
-                    <select id="workerService" onchange="onServiceChange('create')"></select>
-                </div>
-
-                <div class="form-group">
-                    <label>🔑 API Key <span id="feedback-create-apikey"></span></label>
-                    <input type="password" id="unifiedApiKey-create" placeholder="sk-ant-..., sk-..., AIza..."
-                        oninput="handleUnifiedKeyInput(event, 'create')"
-                        onpaste="handleUnifiedKeyInput(event, 'create')">
-                    <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or Gemini
-                        key.</small>
-                </div>
-
-                <div class="form-group" id="modelGroup-create" style="margin-top:0.5rem;">
-                    <label>Model</label>
-                    <select id="workerModelSelect" onchange="onModelSelectChange('create')"></select>
-                    <input type="text" id="workerModelCustom" placeholder="e.g. custom-model-name"
-                        style="display:none; margin-top:0.5rem;">
-                </div>
-
-                <div class="form-group" style="margin-top:0.5rem;">
-                    <label>Icon &amp; Color</label>
-                    <div style="display:flex;gap:0.75rem;align-items:flex-start;">
-                        <div id="iconPreview-create" class="agent-avatar icon-preview"
-                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
-                            🤖</div>
-                        <div style="flex:1;">
-                            <div class="emoji-grid" id="emojiGrid-create"></div>
-                            <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
-                                <input type="text" id="workerIcon" placeholder="Emoji or /assets/..."
-                                    style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('create')">
-                                <button class="secondary" onclick="document.getElementById('iconUpload-create').click()"
-                                    style="padding:0;width:32px;" title="Upload Image">📁</button>
+                    <!-- GENERAL TAB -->
+                    <div class="tab-content active" id="tab-create-general">
+                        <div class="form-group">
+                            <label>Load Profile</label>
+                            <div style="display:flex;gap:0.5rem;align-items:center;">
+                                <select id="profileDropdown" onchange="applyProfile(this.value)"
+                                    style="font-size:0.85rem;flex:1;">
+                                    <option value="">— Start from scratch —</option>
+                                </select>
+                                <button class="danger" id="deleteProfileBtn"
+                                    style="padding:0.4rem 0.6rem;display:none;font-size:0.8rem;"
+                                    onclick="deleteSelectedProfile()" title="Delete this profile">🗑️</button>
                             </div>
-                            <input type="file" id="iconUpload-create" style="display:none;"
-                                onchange="uploadWorkerIcon('create')" accept="image/*">
                         </div>
-                        <div>
-                            <label style="font-size:0.75rem;display:block;margin-bottom:0.25rem;">Color</label>
-                            <input type="color" id="workerColor" value="#6366f1"
-                                style="height:48px;width:40px;padding:2px;cursor:pointer;">
+
+                        <div class="form-group">
+                            <label>Agent Type</label>
+                            <select id="workerAgentType" onchange="onAgentTypeChange()">
+                            </select>
+                            <small id="agentTypeDescription"
+                                style="color:var(--text-muted); font-size: 0.75rem;"></small>
+                        </div>
+
+                        <div class="form-group">
+                            <label>Worker Name</label>
+                            <input type="text" id="workerName" placeholder="e.g. Frontend-Coder">
+                        </div>
+
+                        <div id="standardWorkerFields">
+                            <div class="form-group">
+                                <label>Service</label>
+                                <select id="workerService" onchange="onServiceChange('create')"></select>
+                            </div>
+
+                            <div class="form-group">
+                                <label>🔑 API Key <span id="feedback-create-apikey"></span></label>
+                                <input type="password" id="unifiedApiKey-create"
+                                    placeholder="sk-ant-..., sk-..., AIza..."
+                                    oninput="handleUnifiedKeyInput(event, 'create')"
+                                    onpaste="handleUnifiedKeyInput(event, 'create')">
+                                <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or
+                                    Gemini key.</small>
+                            </div>
+
+                            <div class="form-group" id="modelGroup-create" style="margin-top:0.5rem;">
+                                <label>Model</label>
+                                <select id="workerModelSelect" onchange="onModelSelectChange('create')"></select>
+                                <input type="text" id="workerModelCustom" placeholder="e.g. custom-model-name"
+                                    style="display:none; margin-top:0.5rem;">
+                            </div>
+                        </div>
+
+                        <div id="cliAgentFields" style="display:none;">
+                            <div class="form-group">
+                                <label>🔑 <span id="cliKeyLabel">API Key</span> <span id="feedback-create-clikey"
+                                        style="font-size:0.75rem;"></span></label>
+                                <input type="password" id="cliApiKey-create" placeholder="Enter your API key">
+                                <small id="cliKeyHint" style="color:var(--text-muted); font-size: 0.75rem;"></small>
+                            </div>
                         </div>
                     </div>
-                </div>
 
-                <div id="createConfigSection" style="margin-top:0.5rem;"></div>
+                    <!-- CONFIG TAB -->
+                    <div class="tab-content" id="tab-create-config" style="display:none;">
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>Icon &amp; Color</label>
+                            <div style="display:flex;gap:0.75rem;align-items:flex-start;">
+                                <div id="iconPreview-create" class="agent-avatar icon-preview"
+                                    style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
+                                    🤖</div>
+                                <div style="flex:1;">
+                                    <div class="emoji-grid" id="emojiGrid-create"></div>
+                                    <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
+                                        <input type="text" id="workerIcon" placeholder="Emoji or /assets/..."
+                                            style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('create')">
+                                        <button class="secondary"
+                                            onclick="document.getElementById('iconUpload-create').click()"
+                                            style="padding:0;width:32px;" title="Upload Image">📁</button>
+                                    </div>
+                                    <input type="file" id="iconUpload-create" style="display:none;"
+                                        onchange="uploadWorkerIcon('create')" accept="image/*">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;display:block;margin-bottom:0.25rem;">Color</label>
+                                    <input type="color" id="workerColor" value="#6366f1"
+                                        style="height:48px;width:40px;padding:2px;cursor:pointer;">
+                                </div>
+                            </div>
+                        </div>
 
-                <div class="form-group"
-                    style="margin-top:1rem; border-top:1px solid var(--border-color); padding-top:1rem;">
-                    <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
-                        <input type="checkbox" id="saveAsProfile">
-                        <span>Save as reusable profile</span>
-                    </label>
+                        <div id="createConfigSection" style="margin-top:0.5rem;"></div>
+
+                        <div class="form-group"
+                            style="margin-top:1rem; border-top:1px solid var(--border-color); padding-top:1rem;">
+                            <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;">
+                                <input type="checkbox" id="saveAsProfile">
+                                <span>Save as reusable profile</span>
+                            </label>
+                        </div>
+                    </div>
+
+                    <!-- SKILLS TAB -->
+                    <div class="tab-content" id="tab-create-skills" style="display:none;">
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>🛠️ Equipped Skills</label>
+                            <div id="createSettingsSkillsList"
+                                style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:0.5rem; background:var(--bg-dark);">
+                                <div style="font-size:0.8rem; color:var(--text-secondary);">Loading skills...</div>
+                            </div>
+                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">⚠️
+                                Adding too
+                                many skills causes context rot and increases token costs. Choose specialized skills
+                                only.</small>
+                        </div>
+                    </div>
                 </div>
             </div>
             <div class="modal-footer">
@@ -561,86 +741,231 @@
             </div>
             <div class="modal-body">
                 <input type="hidden" id="instSettingsId">
-                <div class="form-group">
-                    <label>Worker Name</label>
-                    <input type="text" id="instSettingsName">
-                </div>
+                <div class="tabs">
+                    <div class="tab-list"
+                        style="display:flex; border-bottom:1px solid var(--border-color); margin-bottom:1rem; gap:1rem;">
+                        <button type="button" class="tab-btn active" id="btn-edit-general"
+                            onclick="switchWorkerTab('edit', 'general')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; font-weight:600; color:var(--primary); border-bottom:2px solid var(--primary);">General</button>
+                        <button type="button" class="tab-btn" id="btn-edit-config"
+                            onclick="switchWorkerTab('edit', 'config')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; color:var(--text-secondary);">Configuration</button>
+                        <button type="button" class="tab-btn" id="btn-edit-skills"
+                            onclick="switchWorkerTab('edit', 'skills')"
+                            style="background:none; border:none; padding:0.5rem 0; cursor:pointer; color:var(--text-secondary);">Skills</button>
+                    </div>
 
-                <div class="form-group">
-                    <label>Service</label>
-                    <select id="instSettingsService" onchange="onServiceChange('edit')"></select>
-                </div>
-
-                <div class="form-group">
-                    <label>🔑 API Key <span id="feedback-edit-apikey"></span></label>
-                    <input type="password" id="unifiedApiKey-edit"
-                        placeholder="Update API Key (sk-ant-..., sk-..., AIza...)"
-                        oninput="handleUnifiedKeyInput(event, 'edit')" onpaste="handleUnifiedKeyInput(event, 'edit')">
-                    <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or Gemini
-                        key.</small>
-                </div>
-
-                <div class="form-group" id="modelGroup-edit" style="margin-top:0.5rem;">
-                    <label>Model</label>
-                    <select id="instSettingsModelSelect" onchange="onModelSelectChange('edit')"></select>
-                    <input type="text" id="instSettingsModelCustom" placeholder="e.g. custom-model-name"
-                        style="display:none; margin-top:0.5rem;">
-                </div>
-
-                <div id="editConfigSection" style="margin-top:0.5rem;"></div>
-
-                <div class="form-group" style="margin-top:0.5rem;">
-                    <label>Icon &amp; Color</label>
-                    <div style="display:flex;gap:0.75rem;align-items:flex-start;">
-                        <div id="iconPreview-edit" class="agent-avatar icon-preview"
-                            style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
-                            🤖</div>
-                        <div style="flex:1;">
-                            <div class="emoji-grid" id="emojiGrid-edit"></div>
-                            <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
-                                <input type="text" id="instSettingsIcon" placeholder="Emoji or /assets/..."
-                                    style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('edit')">
-                                <button class="secondary" onclick="document.getElementById('iconUpload-edit').click()"
-                                    style="padding:0;width:32px;" title="Upload Image">📁</button>
-                            </div>
-                            <input type="file" id="iconUpload-edit" style="display:none;"
-                                onchange="uploadWorkerIcon('edit')" accept="image/*">
+                    <!-- GENERAL TAB -->
+                    <div class="tab-content active" id="tab-edit-general">
+                        <div class="form-group">
+                            <label>Worker Name</label>
+                            <input type="text" id="instSettingsName">
                         </div>
-                        <div>
-                            <label style="font-size:0.75rem;display:block;margin-bottom:0.25rem;">Color</label>
-                            <input type="color" id="instSettingsColor" value="#6366f1"
-                                style="height:48px;width:40px;padding:2px;cursor:pointer;">
+
+                        <div class="form-group">
+                            <label>Service</label>
+                            <select id="instSettingsService" onchange="onServiceChange('edit')"></select>
+                        </div>
+
+                        <div class="form-group">
+                            <label>🔑 API Key <span id="feedback-edit-apikey"></span></label>
+                            <input type="password" id="unifiedApiKey-edit"
+                                placeholder="Update API Key (sk-ant-..., sk-..., AIza...)"
+                                oninput="handleUnifiedKeyInput(event, 'edit')"
+                                onpaste="handleUnifiedKeyInput(event, 'edit')">
+                            <small style="color:var(--text-muted); font-size: 0.75rem;">Enter Anthropic, OpenAI, or
+                                Gemini
+                                key.</small>
+                        </div>
+
+                        <div class="form-group" id="modelGroup-edit" style="margin-top:0.5rem;">
+                            <label>Model</label>
+                            <select id="instSettingsModelSelect" onchange="onModelSelectChange('edit')"></select>
+                            <input type="text" id="instSettingsModelCustom" placeholder="e.g. custom-model-name"
+                                style="display:none; margin-top:0.5rem;">
+                        </div>
+
+                        <div class="form-group" style="margin-top:1rem;">
+                            <label>Enabled</label>
+                            <label class="toggle"><input type="checkbox" id="instSettingsEnabled"><span
+                                    class="toggle-slider"></span></label>
+                        </div>
+                    </div>
+
+                    <!-- CONFIG TAB -->
+                    <div class="tab-content" id="tab-edit-config" style="display:none;">
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>Icon &amp; Color</label>
+                            <div style="display:flex;gap:0.75rem;align-items:flex-start;">
+                                <div id="iconPreview-edit" class="agent-avatar icon-preview"
+                                    style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
+                                    🤖</div>
+                                <div style="flex:1;">
+                                    <div class="emoji-grid" id="emojiGrid-edit"></div>
+                                    <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
+                                        <input type="text" id="instSettingsIcon" placeholder="Emoji or /assets/..."
+                                            style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('edit')">
+                                        <button class="secondary"
+                                            onclick="document.getElementById('iconUpload-edit').click()"
+                                            style="padding:0;width:32px;" title="Upload Image">📁</button>
+                                    </div>
+                                    <input type="file" id="iconUpload-edit" style="display:none;"
+                                        onchange="uploadWorkerIcon('edit')" accept="image/*">
+                                </div>
+                                <div>
+                                    <label style="font-size:0.75rem;display:block;margin-bottom:0.25rem;">Color</label>
+                                    <input type="color" id="instSettingsColor" value="#6366f1"
+                                        style="height:48px;width:40px;padding:2px;cursor:pointer;">
+                                </div>
+                            </div>
+                        </div>
+
+                        <div id="editConfigSection" style="margin-top:0.5rem;"></div>
+                    </div>
+
+                    <!-- SKILLS TAB -->
+                    <div class="tab-content" id="tab-edit-skills" style="display:none;">
+                        <div class="form-group" style="margin-top:0.5rem;">
+                            <label>🛠️ Equipped Skills</label>
+                            <div id="instSettingsSkillsList"
+                                style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:0.5rem; background:var(--bg-dark);">
+                                <div style="font-size:0.8rem; color:var(--text-secondary);">Loading skills...</div>
+                            </div>
+                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">⚠️
+                                Adding too
+                                many skills causes context rot and increases token costs. Choose specialized skills
+                                only.</small>
                         </div>
                     </div>
                 </div>
-                <div class="form-group" style="margin-top:1rem;">
-                    <label>Enabled</label>
-                    <label class="toggle"><input type="checkbox" id="instSettingsEnabled"><span
-                            class="toggle-slider"></span></label>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; width:100%;">
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="danger" onclick="deleteWorkerInstanceFromSettings()"
+                        style="background:transparent; color:#ef4444; border:1px solid #ef4444; padding:0.4rem 0.8rem; border-radius:0.375rem;"
+                        title="Delete this worker permanently">Delete Worker</button>
+                    <button class="secondary" onclick="saveInstanceAsProfile()">Save as Profile</button>
+                </div>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="secondary" onclick="closeModal('instanceSettingsModal')">Cancel</button>
+                    <button onclick="saveInstanceSettings()">Save Settings</button>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="secondary" onclick="closeModal('instanceSettingsModal')">Cancel</button>
-                <button onclick="saveInstanceSettings()">Save Settings</button>
+        </div>
+    </div>
+
+    <!-- Skills Marketplace Modal -->
+    <div class="modal-overlay" id="skillsMarketplaceModal">
+        <div class="modal" style="max-width:850px; width:95%; height:80vh; display:flex; flex-direction:column;">
+            <div class="modal-header" style="flex-shrink:0;">
+                <h3>🛒 Skills Marketplace</h3>
+                <button class="modal-close" onclick="closeModal('skillsMarketplaceModal')">&times;</button>
+            </div>
+            <div class="modal-body"
+                style="flex-grow:1; display:flex; flex-direction:column; overflow:hidden; padding: 1rem;">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    Browse and install port-ready skills from the ClawHub repository. Installed skills can be equipped
+                    to individual workers from their configuration menu.
+                </p>
+                <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
+                    <input type="text" id="marketplaceSearch" placeholder="Search skills..."
+                        style="flex: 1; padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text-primary);"
+                        oninput="debounceSearchMarketplaceSkills()">
+                    <select id="marketplaceFilter"
+                        style="padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text-primary);"
+                        onchange="renderMarketplaceSkills()">
+                        <option value="all">All Skills</option>
+                        <option value="installed">Installed</option>
+                        <option value="not_installed">Not Installed</option>
+                    </select>
+                    <select id="marketplaceSort"
+                        style="padding: 0.5rem; border-radius: 4px; border: 1px solid var(--border); background: var(--bg-dark); color: var(--text-primary);"
+                        onchange="renderMarketplaceSkills()">
+                        <option value="name">Sort by Name</option>
+                        <option value="downloads">Sort by Downloads</option>
+                        <option value="recent">Sort by Recent</option>
+                    </select>
+                </div>
+                <div id="marketplaceList" class="marketplace-grid"
+                    style="flex-grow:1; overflow-y:auto; gap:0.5rem; padding: 0.5rem;">
+                    <div class="loading-spinner">Loading curated skills...</div>
+                </div>
             </div>
         </div>
     </div>
 
     <!-- Terminal Modal -->
     <div class="modal-overlay" id="terminalModal">
-        <div class="modal" style="max-width:800px; width:95%; height:80vh; display:flex; flex-direction:column;">
-            <div class="modal-header" style="flex-shrink:0;">
-                <h3><span id="terminalTitle">Worker Terminal</span></h3>
-                <button class="modal-close" onclick="closeTerminal()">&times;</button>
+        <div class="modal"
+            style="max-width:800px; width:95%; height:80vh; display:flex; flex-direction:column; background: #0d1117; border: 1px solid #30363d; box-shadow: 0 12px 32px rgba(0,0,0,0.6); border-radius: 8px; overflow: hidden;">
+            <div class="modal-header"
+                style="flex-shrink:0; border-bottom: 1px solid #21262d; background: #161b22; color: #c9d1d9; padding: 0.75rem 1rem; position: relative;">
+                <input type="hidden" id="activeTerminalInstanceId">
+                <h3
+                    style="margin:0; font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace; font-size: 13px; font-weight: 500;">
+                    <span id="terminalTitle">Worker Terminal</span>
+                </h3>
+                <button class="modal-close"
+                    style="color: #8b949e; position: absolute; top: 0.75rem; right: 1rem; background: none; border: none; font-size: 1.2rem; cursor: pointer;"
+                    onclick="closeTerminal()">&times;</button>
             </div>
             <div class="modal-body"
-                style="flex-grow:1; display:flex; flex-direction:column; overflow:hidden; padding:0; background:#0f172a;">
-                <pre id="workerTerminalOutput"
-                    style="flex-grow:1; margin:0; padding:1rem; overflow-y:auto; color:#10b981; font-family:monospace; font-size:0.85rem; line-height:1.4; white-space:pre-wrap; word-break:break-all;"></pre>
+                style="flex: 1 1 0%; display:flex; flex-direction:column; overflow:hidden; padding: 4px; background:#0d1117; min-height: 0;">
+                <div id="workerTerminalOutput"
+                    style="flex: 1 1 0%; margin:0; overflow:hidden; width: 100%; min-height: 0;"></div>
+            </div>
+            <!-- Terminal Chat Input Bar -->
+            <div class="modal-footer"
+                style="flex-shrink:0; background:#161b22; padding:1rem; border-top:1px solid #30363d; display:flex; gap:0.5rem; align-items:center;">
+                <input type="text" id="terminalChatInput" placeholder="Message this worker directly..."
+                    style="flex:1; background:#0d1117; border:1px solid #30363d; border-radius:4px; padding:0.6rem 1rem; color:#c9d1d9; font-size:0.9rem; font-family: 'Fira Code', 'Cascadia Code', Consolas, monospace;"
+                    onkeypress="if(event.key === 'Enter') sendTerminalMessage()">
+                <button onclick="sendTerminalMessage()"
+                    style="padding:0.6rem 1.2rem; background:#238636; border: 1px solid rgba(240, 246, 252, 0.1); color:#ffffff; border-radius:4px; font-weight:500; cursor: pointer;">Send</button>
             </div>
         </div>
     </div>
 
+    </div>
+
+    <!-- Agent Conflict Wizard Modal -->
+    <div class="modal-overlay" id="agentConflictModal">
+        <div class="modal" style="max-width:650px;">
+            <div class="modal-header">
+                <h3>⚠️ Agent Assistance Required</h3>
+                <button class="modal-close" onclick="closeModal('agentConflictModal')">&times;</button>
+            </div>
+            <div class="modal-body">
+                <p style="font-size: 0.9rem; color: var(--text-secondary); margin-bottom: 1rem;">
+                    The assigned worker encountered a fatal error (such as a Git merge conflict) that it cannot resolve
+                    autonomously.
+                    The agent has been paused and the card is marked as Blocked.
+                </p>
+                <input type="hidden" id="conflictAgentId">
+                <input type="hidden" id="conflictCardId">
+
+                <div
+                    style="background:var(--bg-dark); padding:1rem; border-radius:0.5rem; border:1px solid #ef4444; margin-bottom:1rem;">
+                    <div
+                        style="font-size:0.75rem; font-weight:bold; color:#ef4444; margin-bottom:0.5rem; text-transform:uppercase; letter-spacing:0.05em;">
+                        Fatal Error Log</div>
+                    <pre id="conflictErrorLog"
+                        style="margin:0; font-family:monospace; font-size:0.8rem; color:#fca5a5; white-space:pre-wrap; word-break:break-all;"></pre>
+                </div>
+
+                <p
+                    style="font-size: 0.85rem; color: var(--text-primary); background: #3b82f622; padding: 0.75rem; border-radius: 0.375rem; border-left: 3px solid #3b82f6;">
+                    <strong>Instructions:</strong> Please switch over to your terminal/IDE and resolve this conflict
+                    manually (e.g. `git pull`, fix conflicts, `git push`). Once resolved, click the button below to
+                    resume the worker's processing loop.
+                </p>
+            </div>
+            <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:0.5rem;">
+                <button class="secondary" onclick="closeModal('agentConflictModal')">Close for now</button>
+                <button onclick="resolveAgentConflict()" style="background:#22c55e;">I have resolved this natively —
+                    Resume Agent</button>
+            </div>
+        </div>
     </div>
 
     <!-- Column Settings Modal -->
@@ -653,7 +978,6 @@
             <div class="modal-body">
                 <input type="hidden" id="editColId">
                 <div class="form-group"><label>Column Name</label><input type="text" id="editColName"></div>
-                <div class="form-group"><label>Position</label><input type="number" id="editColPosition" min="0"></div>
                 <div class="form-group"><label>Color</label><input type="color" id="editColColor"
                         style="height:40px; padding:0.2rem; cursor:pointer;" value="#6366f1"></div>
 
@@ -671,6 +995,16 @@
                         </label>
                     </div>
                     <div id="editColRemoveIntegration" style="display:none;">
+                        <div id="editColErrorDisplay"
+                            style="display:none;background:#ef444422;border:1px solid #ef4444;border-radius:0.375rem;padding:0.6rem;margin-bottom:0.75rem;">
+                            <div style="font-size:0.8rem;font-weight:600;color:#ef4444;margin-bottom:0.25rem;">⚠️
+                                Integration Error</div>
+                            <div id="editColErrorMessage"
+                                style="font-size:0.75rem;color:#fca5a5;word-break:break-word;"></div>
+                            <button onclick="retryIntegrationSync()"
+                                style="margin-top:0.5rem;font-size:0.72rem;padding:0.2rem 0.6rem;background:#f59e0b;">↻
+                                Retry Sync</button>
+                        </div>
                         <label
                             style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;color:#ef4444;">
                             <input type="checkbox" id="editColRemoveInt" onchange="onEditRemoveIntChange()">
@@ -688,6 +1022,7 @@
                             <label>Service</label>
                             <select id="editIntegrationType" onchange="onEditIntegrationTypeChange()">
                                 <option value="">Select a service...</option>
+                                <option value="local_folder">Local Folder</option>
                                 <option value="github">GitHub Issues</option>
                                 <option value="jira">Jira</option>
                                 <option value="linear">Linear</option>
@@ -716,9 +1051,14 @@
                     </div>
                 </div>
             </div>
-            <div class="modal-footer">
-                <button class="secondary" onclick="closeModal('editColumnModal')">Cancel</button>
-                <button onclick="saveColumnSettings()">Save</button>
+            <div class="modal-footer" style="display:flex; justify-content:space-between; width:100%;">
+                <button class="danger" onclick="deleteColumnFromSettings()"
+                    style="background:transparent; color:#ef4444; border:1px solid #ef4444; padding:0.4rem 0.8rem; border-radius:0.375rem;">Delete
+                    Column</button>
+                <div style="display:flex; gap:0.5rem;">
+                    <button class="secondary" onclick="closeModal('editColumnModal')">Cancel</button>
+                    <button onclick="saveColumnSettings()">Save</button>
+                </div>
             </div>
         </div>
     </div>
@@ -734,9 +1074,23 @@
     <script src="/static/js/websocket.js?v=3"></script>
     <script src="/static/js/agents.js?v=3"></script>
     <script src="/static/js/telemetry.js?v=3"></script>
-    <script src="/static/js/integrations.js?v=1"></script>
-    <script src="/static/js/board.js?v=3"></script>
-    <script src="/static/js/mentions.js?v=1"></script>
+    <script>document.write('<scr' + 'ipt src="/static/js/integrations.js?v=' + Date.now() + '"><\/scr' + 'ipt>');</script>
+    <script>document.write('<scr' + 'ipt src="/static/js/board.js?v=' + Date.now() + '"><\/scr' + 'ipt>');</script>
+    <script src="/static/js/mentions.js?v=2"></script>
+    <script src="/static/js/onboarding.js?v=1"></script>
+    <script>
+        // Globally disable predictive text, autocomplete, and spellcheck to prevent UI relics
+        document.addEventListener('DOMContentLoaded', () => {
+            const disableAutocomplete = () => {
+                document.querySelectorAll('input[type="text"], textarea').forEach(el => {
+                    if (!el.hasAttribute('autocomplete')) el.setAttribute('autocomplete', 'off');
+                    if (!el.hasAttribute('spellcheck')) el.setAttribute('spellcheck', 'false');
+                });
+            };
+            disableAutocomplete();
+            new MutationObserver(disableAutocomplete).observe(document.body, { childList: true, subtree: true });
+        });
+    </script>
 </body>
 
 </html>

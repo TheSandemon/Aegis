@@ -132,17 +132,16 @@ body {
 }
 
 .agent-sidebar-card .mini-terminal-container {
-    padding: 2.25rem 1rem 1.5rem 1rem !important;
+    padding: 0.5rem 0.75rem !important;
     margin: 0 !important;
-    border: none !important;
-    background: transparent !important;
-    flex: 1;
+    border-top: 1px solid var(--border) !important;
+    background: #050505 !important;
+    height: 80px;
+    border-radius: 0 0 0.75rem 0.75rem;
 }
 
-.agent-sidebar-card .mini-terminal-container pre {
-    max-height: 80px !important;
-    font-size: 0.7rem !important;
-    -webkit-line-clamp: 4 !important;
+.agent-sidebar-card .mini-terminal-container .terminal {
+    height: 100% !important;
 }
 
 .agent-avatar {

@@ -230,8 +230,7 @@ function renderInstancesSidebar() {
 
         const color = inst.color || '#6366f1';
         const rgb = hexToRgb(color);
-        const serviceBadge = inst.service ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.service}</span>` : '';
-        const modelBadge = inst.model ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.model}</span>` : '';
+
 
         const iconHtml = inst.icon && (inst.icon.startsWith('http') || inst.icon.startsWith('/assets/'))
             ? `<img src="${inst.icon}" class="agent-avatar-img" style="border-color: ${color}">`
@@ -251,7 +250,7 @@ function renderInstancesSidebar() {
                 
                 <div class="agent-sidebar-header">
                     ${iconHtml}
-                    <div class="agent-info-main" style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="agent-info-main" style="display:flex;gap:0.5rem;align-items:center;overflow:hidden;">
                         <div class="agent-name">${escapeHtml(inst.instance_name)}</div>
                         <div class="agent-status-tag ${isRunning ? 'running' : ''}">
                             <div class="dot"></div>
@@ -265,9 +264,7 @@ function renderInstancesSidebar() {
                     <div id="pulse-${inst.instance_id}" style="font-size: 0.55rem; color: var(--primary); font-weight: bold;"></div>
                 </div>` : ''}
 
-                <div class="agent-sidebar-badges">
-                    ${serviceBadge}${modelBadge}
-                </div>
+
 
                 <!-- Inline Mini Terminal -->
                 <div class="mini-terminal-container" onclick="viewInstanceLogs('${inst.instance_id}')" title="Click to open full terminal">

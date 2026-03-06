@@ -97,6 +97,7 @@ body {
     position: absolute;
     top: -1.25rem;
     left: -0.5rem;
+    max-width: calc(100% - 1rem);
     background: var(--bg-card);
     border: 1px solid var(--agent-color, var(--border));
     border-radius: 2rem;
@@ -106,6 +107,16 @@ body {
     gap: 0.5rem;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
     z-index: 2;
+    overflow: hidden;
+}
+
+.agent-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
 }
 
 .agent-sidebar-badges {
@@ -160,10 +171,6 @@ body {
     flex: 1;
 }
 
-.agent-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-}
 
 .agent-status-tag {
     font-size: 0.7rem;

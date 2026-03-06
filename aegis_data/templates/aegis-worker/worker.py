@@ -3,6 +3,27 @@ import time
 import requests
 import sys
 import json
+import threading
+import queue
+
+try:
+    from rich.console import Console
+    from rich.prompt import Prompt
+    from rich.panel import Panel
+    from rich.markdown import Markdown
+    from rich.syntax import Syntax
+    console = Console(force_terminal=True, color_system="standard")
+except ImportError:
+    # Fallback if rich is not installed
+    class DummyConsole:
+        def print(self, *args, **kwargs): print(*args)
+    class DummyPrompt:
+        @classmethod
+        def ask(cls, *args, **kwargs): return input(args[0] if args else "")
+    console = DummyConsole()
+    Prompt = DummyPrompt
+    Panel = lambda x, **kw: str(x)
+    Markdown = lambda x, **kw: str(x)
 
 sys.stdout.reconfigure(encoding='utf-8')
 
@@ -72,7 +93,7 @@ def prompt_llm(system_prompt, user_text):
         m = model or "gemini-2.0-flash"
         try:
             res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={google_key}", 
-                json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json"}})
+                json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 4096}})
             
             if res.status_code != 200:
                 print(f"[{agent_name}] Google API Error {res.status_code}: {res.text[:200]}")
@@ -116,16 +137,35 @@ def prompt_llm(system_prompt, user_text):
 
 
 
-print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
-print(f"[{agent_name}] 🎯 GOAL: {goal}")
+console.print(Panel(f"🎯 [bold cyan]GOAL:[/bold cyan] {goal}", title=f"🚀 {agent_name} BOOT", border_style="blue"))
 
 # Startup delay block
 try:
     if os.environ.get("AEGIS_CONFIG_STARTUP_DELAY", "False").lower() == "true":
-        print(f"[{agent_name}] ⏳ Startup delay enabled. Waiting {pulse_interval}s...")
+        console.print(f"[{agent_name}] ⏳ Startup delay enabled. Waiting {pulse_interval}s...")
         time.sleep(pulse_interval)
 except Exception as e:
     pass
+
+# Setup non-blocking stdin reader for terminal chat so we can timeout on pulses
+chat_queue = queue.Queue()
+
+def stdin_reader():
+    for line in sys.stdin:
+        if line.strip():
+            chat_queue.put(line.strip())
+        else:
+            chat_queue.put("") # Empty string if they just press Enter
+
+reader_thread = threading.Thread(target=stdin_reader, daemon=True)
+reader_thread.start()
+
+# Store original root to revert context if card changes
+original_cwd = os.getcwd()
+
+# Track consecutive re-pulses to prevent infinite continue loops
+consecutive_repulses = 0
+MAX_CONSECUTIVE_REPULSES = 2
 
 while True:
     try:
@@ -171,6 +211,8 @@ while True:
         )
         system_prompt += ro_note
 
+    system_prompt += "\n\n⚠️ LOCKED CARDS: If you see a card marked [LOCKED], you MUST NOT edit it, update it, or delete it under any circumstances."
+
     # Warn if no GitHub integration exists
     if not github_columns:
         gh_note = (
@@ -203,8 +245,27 @@ while True:
     for c in cards:
         if c.get("assignee") == agent_name and c.get("status") in ["assigned", "running"]:
             my_card_id = c["id"]
-            my_card_column = c.get("column")
-            break
+    target_dir = original_cwd
+    if my_card_id:
+        for col in cols:
+            if col.get("name") == my_card_column and col.get("integration_type") == "local_folder":
+                creds = col.get("integration_credentials", {})
+                if isinstance(creds, str):
+                    try: creds = json.loads(creds)
+                    except: pass
+                local_path = creds.get("local_path")
+                if local_path and os.path.exists(local_path):
+                    import pathlib
+                    target_dir = str(pathlib.Path(local_path).resolve())
+                break
+                
+    if os.getcwd() != target_dir:
+        try:
+            os.chdir(target_dir)
+            if target_dir != original_cwd:
+                print(f"[{agent_name}] 📂 Switched working directory to: {target_dir}")
+        except Exception as e:
+            print(f"[{agent_name}] ⚠️ Failed to switch working directory to {target_dir}: {e}")
 
     if my_card_id:
         print(f"\n[{agent_name}] 🎯 FOCUS: Fetching smart context for Card #{my_card_id}...")
@@ -259,17 +320,50 @@ while True:
         for c in cards:
             comments = c.get("comments", [])
             last_comment = f" | Last Comment: {comments[-1]['content'][:60]}" if comments else ""
+            locked_tag = " [LOCKED]" if c.get("is_locked") else ""
             board_context += (
-                f"- [#{c['id']}] {c['title']} | Col: {c['column']} | "
+                f"- [#{c['id']}]{locked_tag} {c['title']} | Col: {c['column']} | "
                 f"Asg: {c.get('assignee', 'None')} | Priority: {c.get('priority', 'normal')}"
                 f"{last_comment}\n  Desc: {c.get('description', '')[:120]}\n"
             )
+
+    # ─── INJECT SCRATCHPAD MEMORY ───
+    if os.path.exists("scratchpad.md"):
+        try:
+            with open("scratchpad.md", "r", encoding="utf-8") as rf:
+                scratchpad_content = rf.read()
+            if scratchpad_content.strip():
+                board_context += f"\n\n--- SCRATCHPAD (Working Memory) ---\n{scratchpad_content}\n"
+        except Exception:
+            pass
+
+    # ─── INJECT TERMINAL CHAT MESSAGES ───
+    chat_messages = []
+    while not chat_queue.empty():
+        try:
+            chat_messages.append(chat_queue.get_nowait())
+        except queue.Empty:
+            break
+            
+    if chat_messages:
+        board_context += "\n\n--- NEW TERMINAL CHAT MESSAGES FROM USER ---\n"
+        for msg in chat_messages:
+            board_context += f"- {msg}\n"
+        board_context += (
+            "IMPORTANT INSTRUCTION: You have received a direct chat message from the user. "
+            "For this current pulse, your ONLY objective is to respond to the user or execute "
+            "the specific command they just requested. DO NOT proactively work on your general "
+            "goal, pick up new cards, or assign yourself to things unless the user explicitly "
+            "asked you to do so in the chat. Use the `notify` action to reply directly to the user.\n"
+        )
 
     print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
 
     # Internal ReAct Loop (Max 20 steps per pulse — agents exit early via done/wait)
     observations = []
     MAX_STEPS = 20
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 3
 
     for step in range(MAX_STEPS):
         try:
@@ -294,6 +388,8 @@ while True:
             should_break = False
 
             for action_block in res:
+                if not isinstance(action_block, dict):
+                    continue
                 res_lower = {k.lower(): v for k, v in action_block.items()}
                 action = str(res_lower.get("action", "wait")).lower()
                 args = res_lower.get("args", {})
@@ -339,6 +435,10 @@ while True:
                         else:
                             r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
                             obs = check_res(r, "update_card")
+                            if r.status_code in [403, 404]:
+                                # Phantom/Locked: Remove from local pulse context to break infinite loops
+                                cards = [c for c in cards if c.get("id") != int(cid)]
+                                obs += " (Card removed from local view)"
                 elif action == "delete_card":
                     cid = args.get("card_id")
                     if not cid:
@@ -353,6 +453,79 @@ while True:
                         else:
                             r = requests.delete(f"{api_url}/cards/{cid}", headers={"X-Aegis-Agent": "true"})
                             obs = check_res(r, "delete_card")
+                            if r.status_code in [200, 403, 404]:
+                                # If deleted successfully, locked, or already gone: prune local view to break loops
+                                cards = [c for c in cards if c.get("id") != int(cid)]
+                                obs += " (Card removed from local view)"
+                elif action == "bulk_delete_cards":
+                    cids = args.get("card_ids", [])
+                    if not isinstance(cids, list):
+                        obs = "❌ bulk_delete_cards requires an array of card_ids"
+                    elif not cids:
+                        obs = "❌ no card_ids provided"
+                    else:
+                        cids = [int(str(c).strip("# ")) for c in cids]
+                        
+                        # Pre-flight: block deletes on read-only columns
+                        blocked_ids = []
+                        valid_ids = []
+                        for cid in cids:
+                            target = next((c for c in cards if c.get("id") == cid), None)
+                            if target and target.get("column") in read_only_columns:
+                                blocked_ids.append(cid)
+                            else:
+                                valid_ids.append(cid)
+                                
+                        if blocked_ids:
+                            obs = f"❌ BLOCKED: Cards {blocked_ids} are in read-only columns."
+                            print(f"[{agent_name}] {obs}")
+                        
+                        if valid_ids:
+                            r = requests.delete(f"{api_url}/cards/bulk", json={"card_ids": valid_ids}, headers={"X-Aegis-Agent": "true"})
+                            res_data = r.json() if r.status_code < 400 else {}
+                            if r.status_code < 400 and res_data.get("success"):
+                                deleted = res_data.get("deleted", [])
+                                errs = res_data.get("errors", [])
+                                obs += f"\nBulk Delete Success: {len(deleted)} cards removed."
+                                if errs: obs += f" Errors: {errs}"
+                                cards = [c for c in cards if c.get("id") not in deleted]
+                            else:
+                                obs += f"\nBulk Delete Failed: HTTP {r.status_code} - {r.text}"
+                elif action == "bulk_update_cards":
+                    updates = args.get("updates", [])
+                    if not isinstance(updates, list):
+                        obs = "❌ bulk_update_cards requires an array of updates"
+                    elif not updates:
+                        obs = "❌ no updates provided"
+                    else:
+                        valid_updates = []
+                        blocked_ids = []
+                        for u in updates:
+                            cid = u.get("card_id")
+                            if not cid: continue
+                            cid = int(str(cid).strip("# "))
+                            u["card_id"] = cid
+                            
+                            target = next((c for c in cards if c.get("id") == cid), None)
+                            if target and target.get("column") in read_only_columns:
+                                blocked_ids.append(cid)
+                            else:
+                                valid_updates.append(u)
+                                
+                        if blocked_ids:
+                            obs = f"❌ BLOCKED Updates: Cards {blocked_ids} are in read-only columns."
+                            print(f"[{agent_name}] {obs}")
+                            
+                        if valid_updates:
+                            r = requests.patch(f"{api_url}/cards/bulk", json={"updates": valid_updates}, headers={"X-Aegis-Agent": "true"})
+                            res_data = r.json() if r.status_code < 400 else {}
+                            if r.status_code < 400 and res_data.get("success"):
+                                updated = res_data.get("updated", [])
+                                errs = res_data.get("errors", [])
+                                obs += f"\nBulk Update Success: {len(updated)} cards updated."
+                                if errs: obs += f" Errors: {errs}"
+                            else:
+                                obs += f"\nBulk Update Failed: HTTP {r.status_code} - {r.text}"
                 elif action == "post_comment":
                     cid = args.get("card_id")
                     content = args.get("content")
@@ -399,6 +572,26 @@ while True:
                             print(f"[{agent_name}] 💾 WRITE_FILE: Saved {p}")
                         except Exception as e:
                             obs = f"❌ WRITE_FILE ERROR: {e}"
+                            print(f"[{agent_name}] {obs}")
+                elif action == "search_terminal":
+                    query = args.get("query", "")
+                    limit = args.get("limit", 50)
+                    if not query:
+                        obs = "❌ search_terminal requires a 'query' argument"
+                    else:
+                        try:
+                            r = requests.get(f"{api_url}/instances/{instance_id}/search_logs", params={"query": query, "limit": limit})
+                            obs = check_res(r, "search_terminal")
+                            if r.status_code < 400:
+                                logs = r.json().get("logs", [])
+                                if not logs:
+                                    obs = f"🔍 TERMINAL SEARCH [{query}]: No matches found."
+                                else:
+                                    formatted = "\\n".join([f"[{l.get('timestamp', '')}] [{l.get('tag', '').upper()}] {l.get('content', '')}" for l in logs])
+                                    obs = f"🔍 TERMINAL SEARCH [{query}]:\\n{formatted}"
+                                print(f"[{agent_name}] 🔍 SEARCH_TERMINAL: Found {len(logs)} matches")
+                        except Exception as e:
+                            obs = f"❌ SEARCH_TERMINAL FATAL: {e}"
                             print(f"[{agent_name}] {obs}")
 
                 # --- GitHub API Tools (via Aegis proxy) ---
@@ -597,8 +790,80 @@ while True:
                 time.sleep(1)
 
         except Exception as e:
-            print(f"[{agent_name}] ❌ ERROR (Step {step+1}): {e}")
-            break
+            consecutive_errors += 1
+            error_msg = f"❌ ERROR (Step {step+1}, attempt {consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}"
+            print(f"[{agent_name}] {error_msg}")
+            observations.append(error_msg)
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                print(f"[{agent_name}] 🛑 Too many consecutive errors. Breaking out of ReAct loop.")
+                break
+            # Sleep briefly and retry instead of dying
+            time.sleep(2)
+            continue
+
+    # ─── AUTO-SAVE SCRATCHPAD (Persistent Memory) ───
+    if observations:
+        try:
+            scratchpad = ""
+            if os.path.exists("scratchpad.md"):
+                with open("scratchpad.md", "r", encoding="utf-8") as rf:
+                    scratchpad = rf.read()
+            # Append a timestamped session block
+            import datetime
+            session_block = f"\n\n## Pulse @ {datetime.datetime.now().isoformat()}\n"
+            for i, obs in enumerate(observations):
+                session_block += f"- Step {i+1}: {obs}\n"
+            # Keep scratchpad from growing unbounded (last 5000 chars)
+            scratchpad = (scratchpad + session_block)[-5000:]
+            with open("scratchpad.md", "w", encoding="utf-8") as wf:
+                wf.write(scratchpad)
+        except Exception as e:
+            print(f"[{agent_name}] ⚠️ Failed to save scratchpad: {e}")
+
+    # ─── SELF-EVALUATION: Should I keep working or sleep? ───
+    if observations and not any("DONE:" in o or "WAITING:" in o for o in observations):
+        # Hard cap: prevent infinite re-pulse loops
+        if consecutive_repulses >= MAX_CONSECUTIVE_REPULSES:
+            print(f"[{agent_name}] 🛑 Self-eval: Hit max consecutive re-pulses ({MAX_CONSECUTIVE_REPULSES}). Forcing sleep.")
+            consecutive_repulses = 0
+        else:
+            try:
+                # Build a concise summary of what was just done
+                actions_taken = "\n".join(f"- {o}" for o in observations[-8:])
+                # Re-fetch a quick card count so the eval knows the current state
+                try:
+                    current_cards = requests.get(f"{api_url}/cards").json()
+                    card_count = len(current_cards) if isinstance(current_cards, list) else "unknown"
+                except Exception:
+                    card_count = "unknown"
+
+                eval_prompt = (
+                    f"You are evaluating whether an AI worker should CONTINUE working or SLEEP.\n\n"
+                    f"WORKER GOAL: {goal}\n\n"
+                    f"ACTIONS JUST COMPLETED THIS PULSE:\n{actions_taken}\n\n"
+                    f"CURRENT BOARD STATE: {card_count} cards exist on the board.\n\n"
+                    f"RULES — You must respond SLEEP unless ALL of these are true:\n"
+                    f"1. There are SPECIFIC, CONCRETE tasks remaining that were NOT already done above.\n"
+                    f"2. The actions above did NOT already fulfill the worker's goal.\n"
+                    f"3. There are cards with status 'assigned' or 'running' that still need work.\n\n"
+                    f"If the worker just created cards, organized the board, or completed its instructions, it is DONE. Respond SLEEP.\n"
+                    f"DO NOT say continue just because the goal sounds ongoing (e.g., 'help the team'). "
+                    f"Only continue if there is an explicit, unfinished action item.\n\n"
+                    f'Respond with ONLY one of: {{"action": "continue", "reason": "..."}} or {{"action": "sleep", "reason": "..."}}'
+                )
+                eval_res = prompt_llm("You are a strict work evaluator. Default to sleep. Respond in JSON only.", eval_prompt)
+                if eval_res and isinstance(eval_res, dict) and eval_res.get("action") == "continue":
+                    consecutive_repulses += 1
+                    print(f"[{agent_name}] 🔄 Self-eval: MORE WORK — {eval_res.get('reason', '')} (re-pulse {consecutive_repulses}/{MAX_CONSECUTIVE_REPULSES})")
+                    continue  # Skip the sleep and loop back to the top
+                else:
+                    reason = eval_res.get("reason", "No pending work") if eval_res else "Eval failed"
+                    print(f"[{agent_name}] 😴 Self-eval: SLEEP — {reason}")
+                    consecutive_repulses = 0
+            except Exception:
+                consecutive_repulses = 0
+    else:
+        consecutive_repulses = 0
 
     # Send pulse websocket event so UI can show countdown
     clean_id = (instance_id or "").strip()
@@ -608,9 +873,20 @@ while True:
         except Exception:
             pass
         
-    print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")
-    time.sleep(pulse_interval)
-
+    console.print(f"\n[bold green][{agent_name}] ✅ Pulse complete.[/bold green]")
+    
     if mode == "one-shot":
-        print(f"[{agent_name}] 🏁 One-shot mode: task complete. Exiting.")
+        console.print(f"[{agent_name}] 🏁 One-shot mode: task complete. Exiting.")
+        break
+        
+    # Interactive TUI: Yield control to user instead of sleeping
+    console.print(f"[bold cyan]{agent_name}[/bold cyan] (Type a command and hit Enter, or hit Enter to pulse early)")
+    try:
+        user_input = chat_queue.get(timeout=pulse_interval)
+        if user_input and user_input.strip():
+            chat_queue.put(user_input.strip())
+    except queue.Empty:
+        pass
+    except (KeyboardInterrupt, EOFError):
+        console.print(f"\n[{agent_name}] 🛑 Interrupted by user. Exiting.")
         break

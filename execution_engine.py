@@ -602,7 +602,19 @@ class ExecutionEngine:
                     while _proc.status == "running":
                         pulse_count += 1
                         try:
-                            # Fetch board state
+                            # --- Stage 1: Fetch board state ---
+                            async def _emit(_text):
+                                _proc.logs.append(_text)
+                                if self.broadcaster:
+                                    await self.broadcaster({
+                                        "type": "agent_log",
+                                        "agent_id": _proc.agent_id,
+                                        "instance_id": _proc.instance_id,
+                                        "entry": _text + "\r\n"
+                                    })
+
+                            await _emit(f"📡 PULSE: Fetching board state (pulse #{pulse_count})...")
+
                             board_ctx = ""
                             try:
                                 cards_data = await asyncio.to_thread(_fetch_json, f"{_api}/cards")
@@ -612,10 +624,14 @@ class ExecutionEngine:
                                     board_ctx = f"\n\nCurrent Board State:\nColumns: {col_names}\nCards:\n"
                                     for c in cards_data[:15]:
                                         board_ctx += f"  - [#{c.get('id')}] {c.get('title', '?')} | Col: {c.get('column', '?')} | Assignee: {c.get('assignee', 'None')}\n"
+                                    await _emit(f"📋 Board loaded: {len(cards_data)} cards across {len(cols_data)} columns")
+                                else:
+                                    await _emit("⚠️ Could not fetch board state, proceeding with goal only")
                             except Exception as e:
                                 logger.debug(f"CLI pulse: failed to fetch board state: {e}")
+                                await _emit("⚠️ Board fetch failed, proceeding with goal only")
 
-                            # Build the prompt text
+                            # --- Stage 2: Build the prompt ---
                             prompt_text = (
                                 f"[Aegis System Pulse #{pulse_count}]\n"
                                 f"Goal: {_goals}\n"
@@ -625,7 +641,6 @@ class ExecutionEngine:
                                 prompt_text += "This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
                             prompt_text += board_ctx
 
-                            # Build the one-shot command
                             # Escape the prompt for shell usage
                             safe_prompt = prompt_text.replace('"', '\\"').replace('\n', '\\n')
 
@@ -634,23 +649,13 @@ class ExecutionEngine:
                                 if pulse_count > 1:
                                     one_shot_cmd += " --continue"
                             else:
-                                # Gemini CLI: positional prompt
                                 one_shot_cmd = f'{_cmd} "{safe_prompt}"'
 
-                            # Log pulse to the agent's terminal
-                            pulse_entry = f"📡 [Aegis Pulse #{pulse_count}] Sending goal to agent..."
-                            _proc.logs.append(pulse_entry)
-                            if self.broadcaster:
-                                await self.broadcaster({
-                                    "type": "agent_log",
-                                    "agent_id": _proc.agent_id,
-                                    "instance_id": _proc.instance_id,
-                                    "entry": pulse_entry + "\r\n"
-                                })
+                            # --- Stage 3: Spawn and stream ---
+                            await _emit(f"🧠 THINKING: Consulting LLM (pulse #{pulse_count})...")
 
                             logger.info(f"CLI pulse #{pulse_count}: spawning one-shot for '{_key}'")
 
-                            # Spawn the one-shot process
                             pulse_proc = await asyncio.create_subprocess_shell(
                                 one_shot_cmd,
                                 stdout=asyncio.subprocess.PIPE,
@@ -658,6 +663,8 @@ class ExecutionEngine:
                                 cwd=_cli_cwd,
                                 env=_env
                             )
+
+                            await _emit(f"⚡ WORKING: Agent processing task...")
 
                             # Stream output to the agent's terminal in real time
                             async def _stream_pulse_output(stream, proc_ref):
@@ -678,7 +685,6 @@ class ExecutionEngine:
                                 except Exception:
                                     pass
 
-                            # Stream both stdout and stderr
                             await asyncio.gather(
                                 _stream_pulse_output(pulse_proc.stdout, _proc),
                                 _stream_pulse_output(pulse_proc.stderr, _proc),
@@ -686,16 +692,21 @@ class ExecutionEngine:
                             )
 
                             exit_code = pulse_proc.returncode
-                            done_entry = f"✅ [Pulse #{pulse_count}] Complete (exit: {exit_code})"
-                            _proc.logs.append(done_entry)
+                            if exit_code == 0:
+                                await _emit(f"✅ Action complete — pulse #{pulse_count} finished successfully")
+                            else:
+                                await _emit(f"⚠️ Pulse #{pulse_count} exited with code {exit_code}")
+
+                            await _emit(f"💤 Waiting {_pulse}s until next pulse...")
+                            
+                            # Broadcast agent_pulse so the frontend starts the countdown timer
                             if self.broadcaster:
                                 await self.broadcaster({
-                                    "type": "agent_log",
+                                    "type": "agent_pulse",
                                     "agent_id": _proc.agent_id,
                                     "instance_id": _proc.instance_id,
-                                    "entry": done_entry + "\r\n"
+                                    "interval": _pulse
                                 })
-
                             logger.info(f"CLI pulse #{pulse_count} done for '{_key}' (exit: {exit_code})")
 
                         except Exception as e:

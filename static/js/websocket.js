@@ -235,34 +235,52 @@ function handleWebSocketMessage(data) {
             const activityEl = document.getElementById(`activity-${targetId}`);
             if (activityEl) {
                 const text = data.entry;
-                // Aegis Worker patterns
+                let isActive = false;
+
+                // Aegis Worker patterns + CLI agent shared patterns
                 if (text.includes('📡 PULSE: Fetching board state')) {
-                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board state...</span>';
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board...</span>';
+                    isActive = true;
+                } else if (text.includes('📋 Board loaded')) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📋 Board loaded</span>';
+                    isActive = true;
                 } else if (text.includes('🧠 THINKING: Consulting LLM')) {
                     activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
-                } else if (text.includes('⚡ ACTION:')) {
-                    const actionMatch = text.match(/⚡ ACTION: ([^{\n]+)/);
-                    if (actionMatch) {
-                        activityEl.innerHTML = `<span style="color: #facc15">⚡ Action: ${actionMatch[1].trim()}</span>`;
-                    }
+                    isActive = true;
+                } else if (text.includes('⚡ WORKING:') || text.includes('⚡ ACTION:')) {
+                    const actionMatch = text.match(/⚡ (?:ACTION|WORKING): ([^{\n]+)/);
+                    const label = actionMatch ? actionMatch[1].trim() : 'Working...';
+                    activityEl.innerHTML = `<span style="color: #facc15">⚡ ${label}</span>`;
+                    isActive = true;
                 } else if (text.includes('✅ Action complete') || text.includes('💤 Waiting')) {
                     activityEl.innerHTML = '<span style="color: var(--text-secondary)">💤 Sleeping</span>';
+                    isActive = false;
                 } else if (text.includes('❌ ERROR:')) {
                     activityEl.innerHTML = '<span style="color: var(--danger)">❌ Error</span>';
+                    isActive = false;
                 }
-                // CLI Agent patterns (Claude Code, Gemini CLI)
+                // CLI Agent raw output patterns (Claude Code, Gemini CLI)
                 else if (/thinking|reasoning/i.test(text)) {
                     activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
+                    isActive = true;
                 } else if (/\btool[:\s]/i.test(text) || /ReadFile|WriteFile|SearchReplace|ListDir/i.test(text)) {
                     const toolMatch = text.match(/(?:Tool[:\s]+|)(ReadFile|WriteFile|SearchReplace|ListDir|Bash|Edit|TodoRead|TodoWrite|WebSearch|Grep|Glob|LS)\b/i);
                     const toolName = toolMatch ? toolMatch[1] : 'tool';
                     activityEl.innerHTML = `<span style="color: #facc15">🔧 ${toolName}</span>`;
+                    isActive = true;
                 } else if (/\bBash\b/i.test(text)) {
                     activityEl.innerHTML = '<span style="color: #34d399">💻 Running command...</span>';
+                    isActive = true;
                 } else if (/\b(result|output)[:\s]/i.test(text) && text.length > 10) {
                     activityEl.innerHTML = '<span style="color: #60a5fa">📄 Processing result...</span>';
-                } else if (/Aegis System Pulse/i.test(text)) {
-                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Pulse received</span>';
+                    isActive = true;
+                }
+
+                // Toggle the pulsing animation class
+                if (isActive) {
+                    activityEl.classList.add('active');
+                } else {
+                    activityEl.classList.remove('active');
                 }
             }
 

@@ -1740,3 +1740,31 @@ body {
     color: #fff;
     animation: fadeIn 0.3s ease;
 }
+
+/* ─── Agent Activity Pulse Animation ──────────────────────────────────── */
+@keyframes aegisPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+@keyframes aegisDot {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+.agent-activity-indicator.active span {
+    animation: aegisPulse 1.5s ease-in-out infinite;
+}
+
+.agent-activity-indicator.active::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 4px;
+    background: currentColor;
+    border-radius: 50%;
+    animation: aegisPulse 1s ease-in-out infinite;
+    vertical-align: middle;
+}

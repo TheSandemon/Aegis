@@ -530,11 +530,12 @@ class ExecutionEngine:
             asyncio.create_task(self._wait_for_completion(agent_proc, card_id, store, adapter))
 
             # --- CLI AGENT AUTONOMOUS PULSE LOOP ---
-            # CLI agents (Claude Code, Gemini CLI) need external pulses to act
-            # autonomously, just like the built-in Aegis worker has its own
-            # internal pulse loop. We read the instance config for goals, prompt,
-            # pulse_interval, and mode, then periodically inject board-state
-            # prompts into the CLI agent's stdin.
+            # CLI agents (Claude Code, Gemini CLI) process stdin only on EOF,
+            # so we can't inject prompts into a long-running REPL. Instead, we
+            # spawn a new `cli -p "prompt"` one-shot process per pulse. Claude Code
+            # maintains conversation history per working-directory, so subsequent
+            # pulses use `--continue` to resume the conversation with full context.
+            # Each individual invocation can do full multi-step reasoning with tools.
             if merged_config.get("cli_agent"):
                 # Read config from the instance metadata
                 _cli_config = {}
@@ -551,10 +552,31 @@ class ExecutionEngine:
                 _cli_startup_delay = str(_cli_config.get("startup_delay", "false")).lower() == "true"
                 _api_url = env.get("AEGIS_API_URL", "http://localhost:42069/api")
 
-                async def _cli_pulse_loop(_key, _proc, _goals, _pulse, _startup_delay, _api):
-                    """Autonomous pulse loop for CLI agents."""
+                # Resolve the CLI binary (e.g. claude, gemini)
+                _base_command = merged_config.get("execution", {}).get("command", "")
+                if os.name == "nt":
+                    _cmd_base = _base_command.split()[0]
+                    _cmd_path = shutil.which(_cmd_base) or shutil.which(_cmd_base + ".cmd")
+                    if _cmd_path:
+                        _base_command = _base_command.replace(_cmd_base, f'"{_cmd_path}"', 1)
+
+                # Resolve working directory — use user config or instance dir
+                _work_dir = _cli_config.get("work_dir", "")
+                if _work_dir and Path(_work_dir).exists():
+                    _cli_cwd = str(Path(_work_dir).resolve())
+                elif inst_dir and inst_dir.exists():
+                    _cli_cwd = str(inst_dir)
+                else:
+                    _cli_cwd = str(Path(".").resolve())
+
+                # Determine if this is a Claude-based CLI
+                _is_claude = "claude" in _base_command.lower()
+
+                async def _cli_pulse_loop(_key, _proc, _goals, _pulse, _startup_delay,
+                                          _api, _cmd, _cwd, _env, _is_claude_cli):
+                    """Autonomous pulse loop: spawns one-shot CLI processes per pulse."""
                     import urllib.request, urllib.error
-                    boot_wait = 5.0  # Wait for CLI REPL to paint
+                    boot_wait = 5.0
                     if _startup_delay:
                         boot_wait += _pulse
                     await asyncio.sleep(boot_wait)
@@ -567,52 +589,114 @@ class ExecutionEngine:
                         except Exception:
                             return None
 
+                    robust_instruction = (
+                        "You are an autonomous AI agent operating within the Aegis system. "
+                        "Your primary objective is to continuously monitor the Aegis Kanban board for tasks and execute them to achieve your Goal. "
+                        "You will receive periodic System Pulses containing the current board state. "
+                        "When you receive a pulse, analyze the board, identify unassigned tasks relevant to your Goal, and use your tools to complete them. "
+                        "If a user speaks to you directly in this terminal, prioritize their request, even if it alters your current focus. "
+                        "Do not wait for user permission to act; use your tools to make progress independently."
+                    )
+
                     pulse_count = 0
                     while _proc.status == "running":
                         pulse_count += 1
                         try:
-                            # Fetch board state for context (run sync IO in a thread)
+                            # Fetch board state
                             board_ctx = ""
                             try:
-                                cards = await asyncio.to_thread(_fetch_json, f"{_api}/cards")
-                                cols = await asyncio.to_thread(_fetch_json, f"{_api}/columns")
-                                if cards and cols:
-                                    col_names = ", ".join(c.get("name", "?") for c in cols)
+                                cards_data = await asyncio.to_thread(_fetch_json, f"{_api}/cards")
+                                cols_data = await asyncio.to_thread(_fetch_json, f"{_api}/columns")
+                                if cards_data and cols_data:
+                                    col_names = ", ".join(c.get("name", "?") for c in cols_data)
                                     board_ctx = f"\n\nCurrent Board State:\nColumns: {col_names}\nCards:\n"
-                                    for c in cards[:15]:  # Limit to avoid huge prompts
+                                    for c in cards_data[:15]:
                                         board_ctx += f"  - [#{c.get('id')}] {c.get('title', '?')} | Col: {c.get('column', '?')} | Assignee: {c.get('assignee', 'None')}\n"
                             except Exception as e:
                                 logger.debug(f"CLI pulse: failed to fetch board state: {e}")
 
-                            robust_instruction = (
-                                "You are an autonomous AI agent operating within the Aegis system. "
-                                "Your primary objective is to continuously monitor the Aegis Kanban board for tasks and execute them to achieve your Goal. "
-                                "You will receive periodic System Pulses containing the current board state. "
-                                "When you receive a pulse, analyze the board, identify unassigned tasks relevant to your Goal, and use your tools to complete them. "
-                                "If a user speaks to you directly in this terminal, prioritize their request, even if it alters your current focus. "
-                                "Do not wait for user permission to act; use your tools to make progress independently."
+                            # Build the prompt text
+                            prompt_text = (
+                                f"[Aegis System Pulse #{pulse_count}]\n"
+                                f"Goal: {_goals}\n"
+                                f"System Instructions: {robust_instruction}\n"
                             )
-                            
-                            if pulse_count == 1:
-                                # First pulse: send the initial prompt with goals
-                                inject_text = (
-                                    f"[Aegis System Pulse #{pulse_count}]\n"
-                                    f"Goal: {_goals}\n"
-                                    f"System Instructions: {robust_instruction}\n"
-                                    f"{board_ctx}"
-                                )
-                            else:
-                                # Subsequent pulses: send a lighter check-in
-                                inject_text = (
-                                    f"[Aegis System Pulse #{pulse_count}]\n"
-                                    f"Goal: {_goals}\n"
-                                    f"System Instructions: {robust_instruction}\n"
-                                    f"This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
-                                    f"{board_ctx}"
-                                )
+                            if pulse_count > 1:
+                                prompt_text += "This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
+                            prompt_text += board_ctx
 
-                            await self.inject_stdin(_key, inject_text, newline=True)
-                            logger.info(f"CLI pulse #{pulse_count} sent to '{_key}'")
+                            # Build the one-shot command
+                            # Escape the prompt for shell usage
+                            safe_prompt = prompt_text.replace('"', '\\"').replace('\n', '\\n')
+
+                            if _is_claude_cli:
+                                one_shot_cmd = f'{_cmd} -p "{safe_prompt}"'
+                                if pulse_count > 1:
+                                    one_shot_cmd += " --continue"
+                            else:
+                                # Gemini CLI: positional prompt
+                                one_shot_cmd = f'{_cmd} "{safe_prompt}"'
+
+                            # Log pulse to the agent's terminal
+                            pulse_entry = f"📡 [Aegis Pulse #{pulse_count}] Sending goal to agent..."
+                            _proc.logs.append(pulse_entry)
+                            if self.broadcaster:
+                                await self.broadcaster({
+                                    "type": "agent_log",
+                                    "agent_id": _proc.agent_id,
+                                    "instance_id": _proc.instance_id,
+                                    "entry": pulse_entry + "\r\n"
+                                })
+
+                            logger.info(f"CLI pulse #{pulse_count}: spawning one-shot for '{_key}'")
+
+                            # Spawn the one-shot process
+                            pulse_proc = await asyncio.create_subprocess_shell(
+                                one_shot_cmd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                                cwd=_cli_cwd,
+                                env=_env
+                            )
+
+                            # Stream output to the agent's terminal in real time
+                            async def _stream_pulse_output(stream, proc_ref):
+                                try:
+                                    while True:
+                                        chunk = await stream.read(4096)
+                                        if not chunk:
+                                            break
+                                        decoded = chunk.decode(errors="replace")
+                                        proc_ref.logs.append(decoded)
+                                        if self.broadcaster:
+                                            await self.broadcaster({
+                                                "type": "agent_log",
+                                                "agent_id": proc_ref.agent_id,
+                                                "instance_id": proc_ref.instance_id,
+                                                "entry": decoded
+                                            })
+                                except Exception:
+                                    pass
+
+                            # Stream both stdout and stderr
+                            await asyncio.gather(
+                                _stream_pulse_output(pulse_proc.stdout, _proc),
+                                _stream_pulse_output(pulse_proc.stderr, _proc),
+                                pulse_proc.wait()
+                            )
+
+                            exit_code = pulse_proc.returncode
+                            done_entry = f"✅ [Pulse #{pulse_count}] Complete (exit: {exit_code})"
+                            _proc.logs.append(done_entry)
+                            if self.broadcaster:
+                                await self.broadcaster({
+                                    "type": "agent_log",
+                                    "agent_id": _proc.agent_id,
+                                    "instance_id": _proc.instance_id,
+                                    "entry": done_entry + "\r\n"
+                                })
+
+                            logger.info(f"CLI pulse #{pulse_count} done for '{_key}' (exit: {exit_code})")
 
                         except Exception as e:
                             logger.error(f"CLI pulse error for '{_key}': {e}")
@@ -622,7 +706,8 @@ class ExecutionEngine:
 
                 asyncio.create_task(_cli_pulse_loop(
                     key, agent_proc, _cli_goals,
-                    _cli_pulse, _cli_startup_delay, _api_url
+                    _cli_pulse, _cli_startup_delay, _api_url,
+                    _base_command, _cli_cwd, env, _is_claude
                 ))
 
             return agent_proc.to_dict()

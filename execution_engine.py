@@ -112,6 +112,8 @@ class SubprocessAdapter(ExecutionAdapter):
             logger.error(f"No command configured for agent '{agent_id}'")
             return None
 
+        is_cli_agent = agent_config.get("cli_agent", False)
+
         # Instance dir takes priority over config working_dir
         if instance_dir and instance_dir.exists():
             working_dir = instance_dir
@@ -131,8 +133,19 @@ class SubprocessAdapter(ExecutionAdapter):
         if command.startswith("python "):
             command = command.replace("python ", f'"{sys.executable}" ', 1)
 
-        if working_dir and working_dir.exists():
-             # Auto-sync worker.py from template on every start
+        # CLI agents: resolve npx/global binaries, skip worker.py sync
+        if is_cli_agent:
+
+            # On Windows, try to find the CLI as a .cmd script (npm global installs)
+            if os.name == "nt":
+                cmd_base = command.split()[0]
+                cmd_path = shutil.which(cmd_base) or shutil.which(cmd_base + ".cmd")
+                if cmd_path:
+                    command = command.replace(cmd_base, f'"{cmd_path}"', 1)
+
+            logger.info(f"CLI agent starting: command={command}, cwd={working_dir}")
+        elif working_dir and working_dir.exists():
+             # Auto-sync worker.py from template on every start (standard workers only)
              template_worker = TEMPLATES_DIR / agent_id / "worker.py"
              instance_worker = working_dir / "worker.py"
              if template_worker.exists():
@@ -149,9 +162,12 @@ class SubprocessAdapter(ExecutionAdapter):
         else:
              logger.warning(f"Subprocess starting with NO CWD or non-existent CWD: {working_dir}")
 
+        # CLI agents need stdin for interactive operation
+        needs_stdin = is_cli_agent or agent_config.get("execution", {}).get("interactive", False)
+
         process = await asyncio.create_subprocess_shell(
             command,
-            stdin=asyncio.subprocess.PIPE,
+            stdin=asyncio.subprocess.PIPE if needs_stdin else asyncio.subprocess.PIPE,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             cwd=str(working_dir) if working_dir and working_dir.exists() else None,
@@ -197,11 +213,11 @@ class DockerAdapter(ExecutionAdapter):
     async def create_process(self, agent_id, agent_config, card, env,
                              instance_dir=None):
         if not self._docker_available:
-            logger.warning("Docker not available — falling back to subprocess")
+            logger.warning("CRITICAL SECURITY WARNING: Docker is not available. Falling back to SubprocessAdapter! Agents will execute code directly on the host OS. Proceed with extreme caution.")
             fallback = SubprocessAdapter()
             return await fallback.create_process(agent_id, agent_config, card, env, instance_dir)
 
-        image = agent_config.get("docker_image", "")
+        image = agent_config.get("docker_image", "python:3.11-slim")
         if not image:
             logger.error(f"No docker_image configured for agent '{agent_id}'")
             return None
@@ -216,26 +232,62 @@ class DockerAdapter(ExecutionAdapter):
             mcp_workspaces = []
 
         volume_flags = []
+        if instance_dir and instance_dir.exists():
+            # Sync worker.py before mounting
+            template_worker = TEMPLATES_DIR / agent_id / "worker.py"
+            instance_worker = instance_dir / "worker.py"
+            if template_worker.exists():
+                try:
+                    import shutil
+                    shutil.copy2(str(template_worker), str(instance_worker))
+                except Exception as e:
+                    logger.warning(f"Failed to auto-sync worker.py: {e}")
+            volume_flags.extend(["-v", f"{instance_dir.resolve()}:/workspace"])
+
         for ws in mcp_workspaces:
             path = ws.get("path", "")
             if path:
-                volume_flags.extend(["-v", f"{path}:/workspace/{ws.get('name', 'ws')}:ro"])
+                volume_flags.extend(["-v", f"{path}:/workspace/mcp_{ws.get('name', 'ws')}:ro"])
+
+        env_flags = []
+        for k, v in env.items():
+            if v:
+                # Docker API requires host.docker.internal to route back to host localhost
+                if k == "AEGIS_API_URL":
+                    v = v.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+                env_flags.extend(["-e", f"{k}={v}"])
+
+        # Inject MCP Server URL so any MCP-aware agent can auto-discover Aegis tools
+        api_url = env.get("AEGIS_API_URL", "http://localhost:42069")
+        mcp_host = api_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
+        mcp_base = mcp_host.split("/api")[0].rstrip("/")
+        env_flags.extend(["-e", f"AEGIS_MCP_URL={mcp_base}/mcp/sse"])
 
         cmd = [
             "docker", "run", "--rm",
             "--name", container_name,
-            "--read-only",
-            "-e", f"AEGIS_CARD_ID={card_id}",
-            "-e", f"AEGIS_CARD_TITLE={card.get('title', '')}",
-            "-e", f"AEGIS_CARD_DESCRIPTION={card.get('description', '')}",
+            "--add-host", "host.docker.internal:host-gateway",  # Linux compat
+            *env_flags,
             *volume_flags,
-            image
+            image,
+            "python", "-u", "/workspace/worker.py" # default command
         ]
+        
+        # If agent config specifies a custom command relative to workspace
+        exec_cmd = agent_config.get("execution", {}).get("command", "")
+        if exec_cmd:
+             # Just replace python worker.py with their command
+             cmd = cmd[:-3] + exec_cmd.split()
+
+        # Enable stdin for interactive agents (claude-code, etc.)
+        needs_stdin = agent_config.get("execution", {}).get("interactive", False)
+        stdin_flag = asyncio.subprocess.PIPE if needs_stdin else asyncio.subprocess.DEVNULL
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
             stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE
+            stderr=asyncio.subprocess.PIPE,
+            stdin=stdin_flag,
         )
         self._containers[card_id] = container_name
         return process
@@ -286,10 +338,21 @@ class ExecutionEngine:
         self._running = False
 
     def _get_adapter(self, agent_config: dict) -> ExecutionAdapter:
-        isolation = agent_config.get("isolation", "subprocess")
-        if isolation == "docker":
+        try:
+            from main import CONFIG
+            global_isolation = CONFIG.get("isolation_mode", "auto")
+        except ImportError:
+            global_isolation = "auto"
+            
+        isolation = agent_config.get("isolation", global_isolation)
+        
+        if isolation == "subprocess":
+            return self._subprocess
+        elif isolation == "docker":
             return self._docker
-        return self._subprocess
+            
+        # "auto" defaults to docker, but DockerAdapter gracefully falls back
+        return self._docker
 
     @property
     def running_tasks(self) -> dict:
@@ -335,6 +398,10 @@ class ExecutionEngine:
         merged_config = {**agent_config}
         if registry_entry:
             merged_config.setdefault("execution", registry_entry.get("execution", {}))
+            # Propagate CLI agent flags from registry
+            if registry_entry.get("cli_agent"):
+                merged_config["cli_agent"] = True
+                merged_config["api_key_env"] = registry_entry.get("api_key_env", "")
 
         # Determine color
         color = agent_config.get("color", "#6366f1")
@@ -357,6 +424,31 @@ class ExecutionEngine:
                     for k, v in inst_env.items():
                         if v:  # Only set if not empty
                             env[k] = str(v)
+
+                    # For CLI agents: map user's generic api_key to the
+                    # environment variable the CLI tool expects
+                    if merged_config.get("cli_agent") and merged_config.get("api_key_env"):
+                        target_env = merged_config["api_key_env"]
+                        api_key = inst_env.get("api_key", "") or inst_env.get(target_env, "")
+                        if api_key:
+                            env[target_env] = api_key
+                            logger.info(f"Mapped API key to {target_env} for CLI agent")
+                        else:
+                            logger.warning(f"CLI agent {instance_id} has no API key for {target_env}")
+                        
+                        # Map custom API Base URL if provided
+                        api_base = inst_meta.get("config", {}).get("api_base_url", "")
+                        if api_base:
+                            if target_env == "GEMINI_API_KEY":
+                                env["GOOGLE_GEMINI_BASE_URL"] = api_base
+                                logger.info(f"Mapped custom base URL to GOOGLE_GEMINI_BASE_URL")
+                            elif target_env == "ANTHROPIC_API_KEY":
+                                env["ANTHROPIC_BASE_URL"] = api_base
+                                logger.info(f"Mapped custom base URL to ANTHROPIC_BASE_URL")
+
+                    # Also pass instance config (prompt, etc.) into merged_config
+                    inst_config = inst_meta.get("config", {})
+                    merged_config.setdefault("config", {}).update(inst_config)
             except Exception as e:
                 logger.warning(f"Failed to load instance env_vars: {e}")
 
@@ -413,6 +505,7 @@ class ExecutionEngine:
                 instance_id=instance_id, instance_name=instance_name,
                 icon=env.get("AEGIS_AGENT_ICON", "🤖")
             )
+            agent_proc.is_cli = merged_config.get("cli_agent", False)
             self.active[key] = agent_proc
 
             # Start log streaming
@@ -435,6 +528,200 @@ class ExecutionEngine:
 
             # Wait for completion in background
             asyncio.create_task(self._wait_for_completion(agent_proc, card_id, store, adapter))
+
+            # --- CLI AGENT AUTONOMOUS PULSE LOOP ---
+            # CLI agents (Claude Code, Gemini CLI) process stdin only on EOF,
+            # so we can't inject prompts into a long-running REPL. Instead, we
+            # spawn a new `cli -p "prompt"` one-shot process per pulse. Claude Code
+            # maintains conversation history per working-directory, so subsequent
+            # pulses use `--continue` to resume the conversation with full context.
+            # Each individual invocation can do full multi-step reasoning with tools.
+            if merged_config.get("cli_agent"):
+                # Read config from the instance metadata
+                _cli_config = {}
+                try:
+                    _instances = load_instances()
+                    _inst = next((i for i in _instances if i["instance_id"] == instance_id), None)
+                    if _inst:
+                        _cli_config = _inst.get("config", {})
+                except Exception:
+                    pass
+
+                _cli_goals = _cli_config.get("goals", "Process tasks from the Aegis board.")
+                _cli_pulse = int(_cli_config.get("pulse_interval", 120))
+                _cli_startup_delay = str(_cli_config.get("startup_delay", "false")).lower() == "true"
+                _api_url = env.get("AEGIS_API_URL", "http://localhost:42069/api")
+
+                # Resolve the CLI binary (e.g. claude, gemini)
+                _base_command = merged_config.get("execution", {}).get("command", "")
+                if os.name == "nt":
+                    _cmd_base = _base_command.split()[0]
+                    _cmd_path = shutil.which(_cmd_base) or shutil.which(_cmd_base + ".cmd")
+                    if _cmd_path:
+                        _base_command = _base_command.replace(_cmd_base, f'"{_cmd_path}"', 1)
+
+                # Resolve working directory — use user config or instance dir
+                _work_dir = _cli_config.get("work_dir", "")
+                if _work_dir and Path(_work_dir).exists():
+                    _cli_cwd = str(Path(_work_dir).resolve())
+                elif inst_dir and inst_dir.exists():
+                    _cli_cwd = str(inst_dir)
+                else:
+                    _cli_cwd = str(Path(".").resolve())
+
+                # Determine if this is a Claude-based CLI
+                _is_claude = "claude" in _base_command.lower()
+
+                async def _cli_pulse_loop(_key, _proc, _goals, _pulse, _startup_delay,
+                                          _api, _cmd, _cwd, _env, _is_claude_cli):
+                    """Autonomous pulse loop: spawns one-shot CLI processes per pulse."""
+                    import urllib.request, urllib.error
+                    boot_wait = 5.0
+                    if _startup_delay:
+                        boot_wait += _pulse
+                    await asyncio.sleep(boot_wait)
+
+                    def _fetch_json(url):
+                        try:
+                            req = urllib.request.Request(url, headers={"Accept": "application/json"})
+                            with urllib.request.urlopen(req, timeout=10) as resp:
+                                return json.loads(resp.read().decode())
+                        except Exception:
+                            return None
+
+                    robust_instruction = (
+                        "You are an autonomous AI agent operating within the Aegis system. "
+                        "Your primary objective is to continuously monitor the Aegis Kanban board for tasks and execute them to achieve your Goal. "
+                        "You will receive periodic System Pulses containing the current board state. "
+                        "When you receive a pulse, analyze the board, identify unassigned tasks relevant to your Goal, and use your tools to complete them. "
+                        "CRITICAL: To update the board (e.g. creating, moving, or updating cards), you MUST make HTTP REST API requests to `http://localhost:42069/api`. "
+                        "Do NOT modify the `aegis.db` SQLite database directly, as this bypasses the live UI updates. "
+                        "If a user speaks to you directly in this terminal, prioritize their request, even if it alters your current focus. "
+                        "Do not wait for user permission to act; use your tools to make progress independently."
+                    )
+
+                    pulse_count = 0
+                    while _proc.status == "running":
+                        pulse_count += 1
+                        try:
+                            # --- Stage 1: Fetch board state ---
+                            async def _emit(_text):
+                                _proc.logs.append(_text)
+                                if self.broadcaster:
+                                    await self.broadcaster({
+                                        "type": "agent_log",
+                                        "agent_id": _proc.agent_id,
+                                        "instance_id": _proc.instance_id,
+                                        "entry": _text + "\r\n"
+                                    })
+
+                            await _emit(f"📡 PULSE: Fetching board state (pulse #{pulse_count})...")
+
+                            board_ctx = ""
+                            try:
+                                cards_data = await asyncio.to_thread(_fetch_json, f"{_api}/cards")
+                                cols_data = await asyncio.to_thread(_fetch_json, f"{_api}/columns")
+                                if cards_data and cols_data:
+                                    col_names = ", ".join(c.get("name", "?") for c in cols_data)
+                                    board_ctx = f"\n\nCurrent Board State:\nColumns: {col_names}\nCards:\n"
+                                    for c in cards_data[:15]:
+                                        board_ctx += f"  - [#{c.get('id')}] {c.get('title', '?')} | Col: {c.get('column', '?')} | Assignee: {c.get('assignee', 'None')}\n"
+                                    await _emit(f"📋 Board loaded: {len(cards_data)} cards across {len(cols_data)} columns")
+                                else:
+                                    await _emit("⚠️ Could not fetch board state, proceeding with goal only")
+                            except Exception as e:
+                                logger.debug(f"CLI pulse: failed to fetch board state: {e}")
+                                await _emit("⚠️ Board fetch failed, proceeding with goal only")
+
+                            # --- Stage 2: Build the prompt ---
+                            prompt_text = (
+                                f"[Aegis System Pulse #{pulse_count}]\n"
+                                f"Goal: {_goals}\n"
+                                f"System Instructions: {robust_instruction}\n"
+                            )
+                            if pulse_count > 1:
+                                prompt_text += "This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
+                            prompt_text += board_ctx
+
+                            # Escape the prompt for shell usage
+                            safe_prompt = prompt_text.replace('"', '\\"').replace('\n', '\\n')
+
+                            if _is_claude_cli:
+                                one_shot_cmd = f'{_cmd} -p "{safe_prompt}"'
+                                if pulse_count > 1:
+                                    one_shot_cmd += " --continue"
+                            else:
+                                one_shot_cmd = f'{_cmd} "{safe_prompt}"'
+
+                            # --- Stage 3: Spawn and stream ---
+                            await _emit(f"🧠 THINKING: Consulting LLM (pulse #{pulse_count})...")
+
+                            logger.info(f"CLI pulse #{pulse_count}: spawning one-shot for '{_key}'")
+
+                            pulse_proc = await asyncio.create_subprocess_shell(
+                                one_shot_cmd,
+                                stdout=asyncio.subprocess.PIPE,
+                                stderr=asyncio.subprocess.PIPE,
+                                cwd=_cli_cwd,
+                                env=_env
+                            )
+
+                            await _emit(f"⚡ WORKING: Agent processing task...")
+
+                            # Stream output to the agent's terminal in real time
+                            async def _stream_pulse_output(stream, proc_ref):
+                                try:
+                                    while True:
+                                        chunk = await stream.read(4096)
+                                        if not chunk:
+                                            break
+                                        decoded = chunk.decode(errors="replace")
+                                        proc_ref.logs.append(decoded)
+                                        if self.broadcaster:
+                                            await self.broadcaster({
+                                                "type": "agent_log",
+                                                "agent_id": proc_ref.agent_id,
+                                                "instance_id": proc_ref.instance_id,
+                                                "entry": decoded
+                                            })
+                                except Exception:
+                                    pass
+
+                            await asyncio.gather(
+                                _stream_pulse_output(pulse_proc.stdout, _proc),
+                                _stream_pulse_output(pulse_proc.stderr, _proc),
+                                pulse_proc.wait()
+                            )
+
+                            exit_code = pulse_proc.returncode
+                            if exit_code == 0:
+                                await _emit(f"✅ Action complete — pulse #{pulse_count} finished successfully")
+                            else:
+                                await _emit(f"⚠️ Pulse #{pulse_count} exited with code {exit_code}")
+
+                            await _emit(f"💤 Waiting {_pulse}s until next pulse...")
+                            
+                            # Broadcast agent_pulse so the frontend starts the countdown timer
+                            if self.broadcaster:
+                                await self.broadcaster({
+                                    "type": "agent_pulse",
+                                    "agent_id": _proc.agent_id,
+                                    "instance_id": _proc.instance_id,
+                                    "interval": _pulse
+                                })
+                            logger.info(f"CLI pulse #{pulse_count} done for '{_key}' (exit: {exit_code})")
+
+                        except Exception as e:
+                            logger.error(f"CLI pulse error for '{_key}': {e}")
+
+                        # Sleep until next pulse
+                        await asyncio.sleep(_pulse)
+
+                asyncio.create_task(_cli_pulse_loop(
+                    key, agent_proc, _cli_goals,
+                    _cli_pulse, _cli_startup_delay, _api_url,
+                    _base_command, _cli_cwd, env, _is_claude
+                ))
 
             return agent_proc.to_dict()
 
@@ -592,29 +879,31 @@ class ExecutionEngine:
             logger.error(f"Failed to resume '{agent_id}': {e}")
             return {"error": str(e)}
 
-    async def inject_stdin(self, agent_id: str, text: str) -> dict:
-        """Write text to a running agent's stdin pipe."""
+    async def inject_stdin(self, agent_id: str, text: str, newline: bool = False) -> dict:
+        """Write text to a running agent's stdin pipe. 
+        If newline is True, appends \\n and logs the injection as a discrete event."""
         agent_proc = self.active.get(agent_id)
         if not agent_proc or agent_proc.status != "running":
             return {"error": f"Agent '{agent_id}' is not running"}
 
         try:
             if agent_proc.process.stdin:
-                agent_proc.process.stdin.write((text + "\n").encode())
+                payload = text + "\n" if newline else text
+                agent_proc.process.stdin.write(payload.encode())
                 await agent_proc.process.stdin.drain()
 
-                # Log the injection
-                entry = f"[INJECT] {text}"
-                agent_proc.logs.append(entry)
+                if newline:
+                    # Log the discrete injection
+                    entry = f"[INJECT] {text}"
+                    agent_proc.logs.append(entry)
 
-                if self.broadcaster:
-                    await self.broadcaster({
-                        "type": "log_entry",
-                        "card_id": agent_proc.card_id,
-                        "entry": entry
-                    })
-
-                logger.info(f"Injected stdin to '{agent_id}': {text[:50]}")
+                    if self.broadcaster:
+                        await self.broadcaster({
+                            "type": "log_entry",
+                            "card_id": agent_proc.card_id,
+                            "entry": entry
+                        })
+                    logger.info(f"Injected stdin to '{agent_id}': {text[:50]}")
                 return {"success": True}
             else:
                 return {"error": "Process stdin not available (pipe not open)"}
@@ -657,57 +946,70 @@ class ExecutionEngine:
     async def _stream_logs(self, agent_proc: AgentProcess, stream,
                            log_type: str, card_id: int, store):
         """Streams stdout/stderr to log buffer, card logs, and WebSocket."""
+        is_cli = getattr(agent_proc, 'is_cli', False)
         try:
             while True:
-                line = await stream.readline()
-                if not line:
-                    break
-                decoded = line.decode(errors="replace").strip()
-                if decoded:
-                    entry = f"{decoded}"
-                    agent_proc.logs.append(entry)
+                if is_cli:
+                    # CLI agents (Claude Code, Gemini CLI) use interactive TUIs
+                    # that don't emit clean newlines. Read raw byte chunks instead.
+                    chunk = await stream.read(4096)
+                    if not chunk:
+                        break
+                    decoded = chunk.decode(errors="replace")
+                else:
+                    line = await stream.readline()
+                    if not line:
+                        break
+                    decoded = line.decode(errors="replace").strip()
 
-                    # Persistent JSONL Disk Logging
-                    try:
-                        if agent_proc.instance_id:
-                            inst_dir = INSTANCES_DIR / agent_proc.instance_id
-                            if inst_dir.exists():
-                                lower_dec = decoded.lower()
-                                tag = "error" if "error" in lower_dec or "fatal" in lower_dec or "traceback" in lower_dec else \
-                                      ("thought" if "thought" in lower_dec else \
-                                      ("action" if "action" in lower_dec or "tool" in lower_dec else "output"))
-                                      
-                                log_obj = {
-                                    "timestamp": datetime.now().isoformat(),
-                                    "stream": log_type.lower(),
-                                    "tag": tag,
-                                    "content": decoded
-                                }
-                                with open(inst_dir / "logs.jsonl", "a", encoding="utf-8") as lf:
-                                    lf.write(json.dumps(log_obj) + "\n")
-                    except Exception as disk_err:
-                        logger.error(f"Failed to write JSONL log: {disk_err}")
+                if not decoded:
+                    continue
 
-                    # Update card logs
+                entry = decoded
+                agent_proc.logs.append(entry)
+
+                # Persistent JSONL Disk Logging
+                try:
+                    if agent_proc.instance_id:
+                        inst_dir = INSTANCES_DIR / agent_proc.instance_id
+                        if inst_dir.exists():
+                            lower_dec = decoded.lower()
+                            tag = "error" if "error" in lower_dec or "fatal" in lower_dec or "traceback" in lower_dec else \
+                                  ("thought" if "thought" in lower_dec else \
+                                  ("action" if "action" in lower_dec or "tool" in lower_dec else "output"))
+                                  
+                            log_obj = {
+                                "timestamp": datetime.now().isoformat(),
+                                "stream": log_type.lower(),
+                                "tag": tag,
+                                "content": decoded
+                            }
+                            with open(inst_dir / "logs.jsonl", "a", encoding="utf-8") as lf:
+                                lf.write(json.dumps(log_obj) + "\n")
+                except Exception as disk_err:
+                    logger.error(f"Failed to write JSONL log: {disk_err}")
+
+                # Update card logs (only for non-CLI to avoid flooding with raw TUI data)
+                if not is_cli:
                     current = store.get_card(card_id)
                     if current:
                         logs = current.get("logs", [])
                         logs.append(entry)
                         store.update_card(card_id, logs=json.dumps(logs))
 
-                    # Broadcast to clients
-                    if self.broadcaster:
-                        await self.broadcaster({
-                            "type": "log_entry",
-                            "card_id": card_id,
-                            "entry": entry
-                        })
-                        await self.broadcaster({
-                            "type": "agent_log",
-                            "agent_id": agent_proc.agent_id,
-                            "instance_id": agent_proc.instance_id,
-                            "entry": entry
-                        })
+                # Broadcast to clients
+                if self.broadcaster:
+                    await self.broadcaster({
+                        "type": "log_entry",
+                        "card_id": card_id,
+                        "entry": entry
+                    })
+                    await self.broadcaster({
+                        "type": "agent_log",
+                        "agent_id": agent_proc.agent_id,
+                        "instance_id": agent_proc.instance_id,
+                        "entry": entry
+                    })
 
         except Exception as e:
             logger.error(f"Log streaming error for {agent_proc.agent_id}: {e}")

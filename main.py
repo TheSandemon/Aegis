@@ -46,8 +46,13 @@ logger = logging.getLogger("aegis")
 
 # ─── Configuration ───────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
-with open(CONFIG_PATH, encoding="utf-8") as f:
-    CONFIG = json.load(f)
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        CONFIG = json.load(f)
+else:
+    CONFIG = {"port": 42069, "host": "0.0.0.0"}
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=2)
 
 # ─── Agent Registry ──────────────────────────────────────────────────────────────
 REGISTRY_PATH = Path(__file__).parent / "agent_registry.json"
@@ -563,87 +568,30 @@ store = _create_store()
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# WEBSOCKET MANAGER
 # ═══════════════════════════════════════════════════════════════════════════════════
-
-class ConnectionManager:
-    def __init__(self):
-        self.active_connections: list[WebSocket] = []
-
-    async def connect(self, websocket: WebSocket):
-        await websocket.accept()
-        self.active_connections.append(websocket)
-
-    def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
-    async def broadcast(self, message: dict):
-        dead = []
-        for connection in self.active_connections:
-            try:
-                await connection.send_json(message)
-            except Exception:
-                dead.append(connection)
-        for connection in dead:
-            self.disconnect(connection)
-
-manager = ConnectionManager()
-
-from integrations.manager import IntegrationManager
-integration_manager = IntegrationManager(store=store, broadcaster=manager.broadcast)
-
-
+# PYDANTIC MODELS (Now in models/schemas.py)
 # ═══════════════════════════════════════════════════════════════════════════════════
-# UNIFIED EXECUTION ENGINE & PROMPT BROKER
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-from execution_engine import (
-    ExecutionEngine, install_agent, AGENTS_DIR, TEMPLATES_DIR,
-    load_instances, save_instances, create_instance, delete_instance
-)
-from prompt_broker import PromptBroker
-
-engine = ExecutionEngine(
-    broadcaster=None,  # Wired after ConnectionManager
-    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1)
+from models.schemas import (
+    CardCreate, CardUpdate, InstanceCreate, InstanceUpdate, CommentCreate,
+    SkillInstallRequest, IntegrationConfig, ColumnCreate, SystemPromptUpdate,
+    PromptSubmit, BrokerRateUpdate, ColumnUpdate, BranchCreate, PRCreate, PRMerge, ConnectionCreate, DevicePollRequest
 )
 
-broker = PromptBroker(
-    prompts_per_minute=CONFIG.get("rate_limits", {}).get("prompts_per_minute", 1),
-    max_retries=CONFIG.get("rate_limits", {}).get("max_retries_on_fail", 3)
-)
-
+# ═══════════════════════════════════════════════════════════════════════════════════
+# PERSISTENCE (Now in services/db.py)
+# ═══════════════════════════════════════════════════════════════════════════════════
+from services.db import store
 
 # ═══════════════════════════════════════════════════════════════════════════════════
-# HITL — State Transition Hooks (Phase 5)
+# WEBSOCKET MANAGER (Now in websockets/manager.py)
 # ═══════════════════════════════════════════════════════════════════════════════════
+from ws.manager import manager
+from services.dependencies import integration_manager
 
-
-async def send_discord_webhook(card: dict):
-    """Fires a Discord webhook when a card enters the Review column."""
-    webhook_url = CONFIG.get("discord", {}).get("webhook_url", "")
-    if not webhook_url:
-        logger.debug("No Discord webhook configured, skipping notification")
-        return
-
-    embed = {
-        "title": f"🛡️ Aegis Review: {card['title']}",
-        "description": card.get("description", "No description")[:500],
-        "color": 0x06b6d4,
-        "fields": [
-            {"name": "Card ID", "value": str(card["id"]), "inline": True},
-            {"name": "Assignee", "value": card.get("assignee", "Unassigned"), "inline": True},
-            {"name": "Status", "value": card.get("status", "idle"), "inline": True},
-        ],
-        "footer": {"text": "Aegis Orchestrator — Awaiting human approval"}
-    }
-
-    try:
-        async with httpx.AsyncClient() as client:
-            await client.post(webhook_url, json={"embeds": [embed]})
-        logger.info(f"Discord webhook sent for card {card['id']}")
-    except Exception as e:
-        logger.error(f"Discord webhook failed: {e}")
+# ═══════════════════════════════════════════════════════════════════════════════════
+# STATE SINGLETONS
+# ═══════════════════════════════════════════════════════════════════════════════════
+from services.dependencies import integration_manager, engine, broker, send_discord_webhook
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -691,9 +639,18 @@ from mcp_server import router as mcp_router
 
 app.include_router(a2a_router)
 app.include_router(mcp_router)
+from routers import columns, cards, instances, profiles
+app.include_router(columns.router)
+app.include_router(cards.router)
+app.include_router(instances.router)
+app.include_router(profiles.router)
 
 # Wire broadcaster to execution engine
 engine.broadcaster = manager.broadcast
+
+# Mount MCP SSE server (spec-compliant Model Context Protocol)
+from mcp_sse import create_mcp_starlette_app
+app.mount("/mcp", create_mcp_starlette_app())
 
 # Serve static frontend
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -793,6 +750,16 @@ class ColumnUpdate(BaseModel):
 # API ROUTES
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+@app.get("/api/system/status")
+async def get_system_status():
+    """Return core system state, including whether this is the first run."""
+    from execution_engine import load_instances
+    from services.db import store
+    instances = load_instances()
+    cards = store.get_cards()
+    profiles = store.get_profiles()
+    is_first_run = len(instances) == 0 and len(cards) == 0 and len(profiles) == 0
+    return {"is_first_run": is_first_run}
 @app.get("/api/columns")
 async def get_columns():
     """Get all columns from the board."""
@@ -815,13 +782,24 @@ def _resolve_connection_credentials(creds: dict) -> dict:
     return resolved
 
 
-@app.post("/api/columns")
-async def create_column(col: ColumnCreate):
-    """Create a new column on the board."""
-    new_col = store.create_column(col.name, col.position, col.color)
-    if not new_col:
-        raise HTTPException(status_code=400, detail="Column already exists")
+@app.get("/api/browse-folder")
+async def browse_folder():
+    """Open a native OS folder picker dialog and return the selected path."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
 
+    def _pick_folder():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            folder = filedialog.askdirectory(title="Select Workspace Folder")
+            root.destroy()
+            return folder or ""
+        except Exception:
+            return ""
     if col.integration:
         creds = _resolve_connection_credentials(col.integration.credentials)
         col_data = {
@@ -872,6 +850,10 @@ async def delete_column(col_id: int, cascade: str = "block", force: bool = False
         return {"success": True}
     raise HTTPException(status_code=404, detail="Column not found")
 
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = await loop.run_in_executor(pool, _pick_folder)
+    return {"path": result}
 
 @app.post("/api/assets/upload")
 async def upload_asset(file: UploadFile = File(...)):
@@ -1131,7 +1113,10 @@ async def _trigger_mentioned_agents(text: str, card_id: int, author: str = "User
             if key in engine.active:
                 await engine.inject_stdin(key, f"System: Mentioned by {author} -> {text}")
 
+
 # ─── Cards CRUD ──────────────────────────────────────────────────────────────────
+
+# ─── Comments ────────────────────────────────────────────────────────────────────
 
 @app.get("/api/cards")
 async def get_cards(column: Optional[str] = None):
@@ -1705,29 +1690,6 @@ async def get_card_logs(card_id: int):
 
 # ─── Phase 5: Human Approval Gate ────────────────────────────────────────────────
 
-@app.post("/api/cards/{card_id}/approve")
-async def approve_card(card_id: int):
-    """Human approval gate — moves a card from Review to Done."""
-    card = store.get_card(card_id)
-    if not card:
-        raise HTTPException(status_code=404, detail="Card not found")
-
-    if card["column"] != "Review":
-        raise HTTPException(
-            status_code=400,
-            detail=f"Card must be in Review column to approve (currently: {card['column']})"
-        )
-
-    updated = store.update_card(card_id, column="Done", status="approved")
-    await manager.broadcast({"type": "card_updated", "card": updated})
-    
-    # Push change to external integration
-    asyncio.create_task(integration_manager.notify_card_change(updated, "card_moved"))
-
-    logger.info(f"Card {card_id} approved and moved to Done")
-    return {"success": True, "card": updated}
-
-
 # ─── Prompt Broker Stats ─────────────────────────────────────────────────────────
 
 @app.get("/api/broker/stats")
@@ -1889,24 +1851,6 @@ def _check_github_write_access(gh_integration, agent_column: str = None) -> bool
             if col_obj and col_obj.get("integration_mode") in ("write", "read_write"):
                 return True
     return False
-
-class BranchCreate(BaseModel):
-    branch_name: str
-    base: str = "main"
-    column: Optional[str] = None  # Optional column context for integration selection
-
-class PRCreate(BaseModel):
-    title: str
-    body: str = ""
-    head: str
-    base: str = "main"
-    column: Optional[str] = None  # Optional column context for integration selection
-
-class PRMerge(BaseModel):
-    pr_number: int
-    merge_method: str = "squash"
-    commit_message: str = ""
-
 
 @app.get("/api/github/branches")
 async def list_github_branches(column: Optional[str] = None):
@@ -2109,6 +2053,7 @@ async def get_agent_params():
 # INSTANCE CRUD (Factory Pattern)
 # ═══════════════════════════════════════════════════════════════════════════════════
 
+# ─── Instance Intervention (Glass Box) ───────────────────────────────────────────
 @app.post("/api/instances/create")
 async def create_instance_api(req: InstanceCreate):
     """Create a new agent instance."""
@@ -2347,24 +2292,6 @@ async def inject_instance_context(instance_id: str, req: InjectRequest):
 
 # ─── Instance Artifacts ──────────────────────────────────────────────────────────
 
-@app.get("/api/instances/{instance_id}/artifacts")
-async def list_instance_artifacts(instance_id: str):
-    """List files in an instance's working directory."""
-    from execution_engine import INSTANCES_DIR
-    inst_dir = INSTANCES_DIR / instance_id
-    if not inst_dir.exists():
-        return {"files": []}
-    files = []
-    for f in inst_dir.rglob("*"):
-        if f.is_file() and not f.name.startswith("."):
-            files.append({
-                "name": f.name,
-                "path": str(f.relative_to(inst_dir)),
-                "size": f.stat().st_size,
-                "modified": f.stat().st_mtime
-            })
-    return {"files": files}
-
 # ─── Planner: Goal Decomposition ─────────────────────────────────────────────
 
 class GoalRequest(BaseModel):
@@ -2553,35 +2480,6 @@ async def update_agent_params(agent_id: str, updates: dict):
 # ═══════════════════════════════════════════════════════════════════════════════════
 # INTEGRATION ROUTES
 # ─── Profile Management ──────────────────────────────────────────────────────────
-
-@app.get("/api/profiles")
-async def list_profiles():
-    """List all saved agent profiles."""
-    profiles = []
-    for p in PROFILES_DIR.glob("*.json"):
-        try:
-            profiles.append(json.loads(p.read_text(encoding="utf-8")))
-        except Exception:
-            pass
-    return profiles
-
-@app.post("/api/profiles")
-async def save_profile(profile: dict):
-    """Save a new agent profile."""
-    profile_id = profile.get("id") or f"profile_{secrets.token_hex(4)}"
-    profile["id"] = profile_id
-    path = PROFILES_DIR / f"{profile_id}.json"
-    path.write_text(json.dumps(profile, indent=2), encoding="utf-8")
-    return profile
-
-@app.delete("/api/profiles/{profile_id}")
-async def delete_profile(profile_id: str):
-    """Delete a saved agent profile."""
-    path = PROFILES_DIR / f"{profile_id}.json"
-    if path.exists():
-        path.unlink()
-    return {"success": True}
-
 
 # ═══════════════════════════════════════════════════════════════════════════════════
 
@@ -3083,6 +2981,11 @@ async def websocket_endpoint(websocket: WebSocket):
 
             if message.get("type") == "subscribe_card":
                 await websocket.send_json({"type": "subscribed", "card_id": message.get("card_id")})
+            elif message.get("type") == "stdin":
+                instance_id = message.get("instance_id")
+                stdin_data = message.get("data")
+                if instance_id and stdin_data:
+                    await engine.inject_stdin(instance_id, stdin_data)
 
     except WebSocketDisconnect:
         manager.disconnect(websocket)

@@ -79,7 +79,7 @@ body {
     background: #0f172a;
     border: 1px solid var(--border);
     border-radius: 0.75rem;
-    padding: 0;
+    padding: 1.5rem 0 0 0;
     display: flex;
     flex-direction: column;
     position: relative;
@@ -97,6 +97,7 @@ body {
     position: absolute;
     top: -1.25rem;
     left: -0.5rem;
+    max-width: calc(100% - 1rem);
     background: var(--bg-card);
     border: 1px solid var(--agent-color, var(--border));
     border-radius: 2rem;
@@ -106,6 +107,16 @@ body {
     gap: 0.5rem;
     box-shadow: 0 4px 10px rgba(0, 0, 0, 0.5);
     z-index: 2;
+    overflow: hidden;
+}
+
+.agent-name {
+    font-weight: 600;
+    font-size: 0.9rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 120px;
 }
 
 .agent-sidebar-badges {
@@ -132,17 +143,16 @@ body {
 }
 
 .agent-sidebar-card .mini-terminal-container {
-    padding: 2.25rem 1rem 1.5rem 1rem !important;
+    padding: 0.5rem 0.75rem !important;
     margin: 0 !important;
-    border: none !important;
-    background: transparent !important;
-    flex: 1;
+    border-top: 1px solid var(--border) !important;
+    background: #050505 !important;
+    height: 80px;
+    border-radius: 0 0 0.75rem 0.75rem;
 }
 
-.agent-sidebar-card .mini-terminal-container pre {
-    max-height: 80px !important;
-    font-size: 0.7rem !important;
-    -webkit-line-clamp: 4 !important;
+.agent-sidebar-card .mini-terminal-container .terminal {
+    height: 100% !important;
 }
 
 .agent-avatar {
@@ -161,10 +171,6 @@ body {
     flex: 1;
 }
 
-.agent-name {
-    font-weight: 600;
-    font-size: 0.9rem;
-}
 
 .agent-status-tag {
     font-size: 0.7rem;
@@ -752,10 +758,15 @@ body {
     font-family: 'Monaco', 'Menlo', monospace;
     font-size: 0.7rem;
     color: #22c55e;
-    max-height: 200px;
-    overflow-y: auto;
+    overflow: hidden;
     white-space: pre-wrap;
     word-break: break-all;
+    height: 100%;
+}
+
+.mini-terminal-container {
+    height: 60px;
+    /* Allow container to specify height and terminal to fill it */
 }
 
 /* ─── Toast ──────────────────────────────────────────────── */
@@ -783,6 +794,7 @@ body {
 /* ─── Toggle ─────────────────────────────────────────────── */
 .toggle {
     position: relative;
+    display: inline-block;
     width: 40px;
     height: 22px;
 }
@@ -1341,9 +1353,10 @@ body {
 }
 
 /* ─── Mention Popover ────────────────────────────────────── */
-.mention-popover {
-    position: absolute;
-    z-index: 1000;
+.mention-popover,
+.mention-dropdown {
+    position: fixed;
+    z-index: 100000;
     background: var(--bg-column);
     border: 1px solid var(--border-color);
     border-radius: 8px;
@@ -1586,4 +1599,172 @@ body {
         opacity: 1;
         transform: translateY(0);
     }
+}
+
+/* ─── Onboarding Wizard ──────────────────────────────────────────────── */
+
+.onboarding-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    z-index: 10000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    opacity: 0;
+    transition: opacity 0.5s ease;
+}
+
+.onboarding-overlay.active {
+    opacity: 1;
+}
+
+.wizard-card {
+    background: rgba(13, 17, 23, 0.85);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 12px;
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.8), 0 0 0 1px rgba(255, 255, 255, 0.05) inset;
+    width: 90%;
+    max-width: 500px;
+    padding: 2.5rem;
+    position: relative;
+    overflow: hidden;
+    transition: opacity 0.3s ease;
+}
+
+.wizard-card::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, var(--primary), transparent);
+}
+
+.wizard-header {
+    text-align: center;
+    margin-bottom: 2rem;
+}
+
+.wizard-icon {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    filter: drop-shadow(0 0 16px rgba(99, 102, 241, 0.4));
+}
+
+.wizard-header h2 {
+    font-size: 1.5rem;
+    font-weight: 700;
+    margin: 0 0 0.5rem 0;
+    background: linear-gradient(135deg, #fff, #a5b4fc);
+    -webkit-background-clip: text;
+    background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.wizard-header p {
+    color: var(--text-secondary);
+    font-size: 0.95rem;
+    margin: 0;
+}
+
+.wizard-body {
+    font-size: 0.95rem;
+    line-height: 1.6;
+    color: #c9d1d9;
+    margin-bottom: 2.5rem;
+}
+
+.wizard-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 2rem;
+}
+
+.wizard-progress {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    position: absolute;
+    bottom: 1rem;
+    left: 0;
+    right: 0;
+}
+
+.wizard-progress .dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.2);
+    transition: background 0.3s ease;
+}
+
+.wizard-progress .dot.active {
+    background: var(--primary);
+    box-shadow: 0 0 8px var(--primary);
+}
+
+/* ─── Spotlight Tour ─────────────────────────────────────────────────── */
+
+.spotlight-mask {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    pointer-events: none;
+    border-style: solid;
+    border-color: rgba(0, 0, 0, 0.75);
+    transition: border-width 0.4s ease;
+    z-index: 10005;
+    /* Behind tooltip, above app */
+}
+
+.tour-tooltip {
+    position: fixed;
+    background: var(--bg-card);
+    border: 1px solid var(--primary);
+    border-radius: 8px;
+    padding: 1rem;
+    width: 250px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.6), 0 0 20px rgba(99, 102, 241, 0.2);
+    z-index: 10006;
+    font-size: 0.9rem;
+    color: #fff;
+    animation: fadeIn 0.3s ease;
+}
+
+/* ─── Agent Activity Pulse Animation ──────────────────────────────────── */
+@keyframes aegisPulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.4; }
+}
+
+@keyframes aegisDot {
+    0%, 20% { content: '.'; }
+    40% { content: '..'; }
+    60%, 100% { content: '...'; }
+}
+
+.agent-activity-indicator.active span {
+    animation: aegisPulse 1.5s ease-in-out infinite;
+}
+
+.agent-activity-indicator.active::after {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    margin-left: 4px;
+    background: currentColor;
+    border-radius: 50%;
+    animation: aegisPulse 1s ease-in-out infinite;
+    vertical-align: middle;
 }

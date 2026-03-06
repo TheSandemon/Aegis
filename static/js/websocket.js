@@ -5,6 +5,141 @@
 let ws = null;
 const agentCardMap = {}; // instance_id → { card_id, color }
 
+// ─── Xterm.js Terminal Manager ────────────────────────────────────────────────
+// Global maps to hold terminal instances
+window.terminals = {
+    modal: null,               // Single Terminal instance for the modal
+    modalFit: null,            // FitAddon for modal
+    activeModalInstance: null, // Which instance is currently viewed in modal
+    card: null,                // Single Terminal instance for the card modal
+    cardFit: null,             // FitAddon for card modal
+    activeCardInstance: null,  // Which instance is currently viewed in card modal
+    minis: {},                 // instanceId -> { term: Terminal, fit: FitAddon }
+    history: {}                // instanceId -> raw log history for replaying
+};
+
+function initModalTerminal() {
+    if (window.terminals.modal) return;
+    const term = new Terminal({
+        theme: {
+            background: '#0d1117', // GitHub Dark-ish
+            foreground: '#c9d1d9',
+            cursor: '#58a6ff',
+            cursorAccent: '#0d1117',
+            selection: '#388bfd33',
+            black: '#484f58',
+            red: '#ff7b72',
+            green: '#3fb950',
+            yellow: '#d29922',
+            blue: '#58a6ff',
+            magenta: '#bc8cff',
+            cyan: '#39c5cf',
+            white: '#b1bac4',
+            brightBlack: '#6e7681',
+            brightRed: '#ffa198',
+            brightGreen: '#56d364',
+            brightYellow: '#e3b341',
+            brightBlue: '#79c0ff',
+            brightMagenta: '#d2a8ff',
+            brightCyan: '#56d4dd',
+            brightWhite: '#ffffff'
+        },
+        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+        fontSize: 14,
+        fontWeight: '500',
+        convertEol: true,
+        cursorBlink: true,
+        cursorStyle: 'block'
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+
+    // Capture keystrokes (stdin) and send to backend
+    term.onData(data => {
+        const activeId = window.terminals.activeModalInstance;
+        if (activeId && window.ws && window.ws.readyState === WebSocket.OPEN) {
+            window.ws.send(JSON.stringify({
+                type: 'stdin',
+                instance_id: activeId,
+                data: data
+            }));
+        }
+    });
+
+    window.terminals.modal = term;
+    window.terminals.modalFit = fitAddon;
+}
+
+function initCardTerminal() {
+    if (window.terminals.card) return;
+    const term = new Terminal({
+        theme: {
+            background: '#0d1117',
+            foreground: '#c9d1d9',
+            cursor: '#58a6ff',
+            selection: '#388bfd33',
+            black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4'
+        },
+        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+        fontSize: 12, // Slightly smaller for the card modal
+        convertEol: true,
+        disableStdin: true, // Card view doesn't allow interaction right now
+        cursorBlink: false
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+
+    window.terminals.card = term;
+    window.terminals.cardFit = fitAddon;
+}
+
+function getOrCreateMiniTerminal(instanceId) {
+    if (!window.terminals.minis[instanceId]) {
+        const term = new Terminal({
+            theme: {
+                background: '#0d1117',
+                foreground: '#8b949e', // Dimmer foreground for the mini view
+                black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4'
+            },
+            fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+            fontSize: 10,
+            convertEol: true,
+            disableStdin: true,
+            cursorBlink: false,
+            scrollback: 20 // Keep it incredibly light for the mini view
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        window.terminals.minis[instanceId] = { term, fit: fitAddon };
+    }
+    return window.terminals.minis[instanceId];
+}
+
+function writeToTerminal(instanceId, chunk) {
+    // Save to history
+    if (!window.terminals.history[instanceId]) window.terminals.history[instanceId] = '';
+    window.terminals.history[instanceId] += chunk;
+    if (window.terminals.history[instanceId].length > 50000) {
+        window.terminals.history[instanceId] = window.terminals.history[instanceId].slice(-50000);
+    }
+
+    // Write to modal if active
+    if (window.terminals.activeModalInstance === instanceId && window.terminals.modal) {
+        window.terminals.modal.write(chunk);
+    }
+
+    // Write to card modal if active
+    if (window.terminals.activeCardInstance === instanceId && window.terminals.card) {
+        window.terminals.card.write(chunk);
+    }
+
+    // Write to mini terminal
+    const mini = window.terminals.minis[instanceId];
+    if (mini) {
+        mini.term.write(chunk);
+    }
+}
+
 function connectWebSocket() {
     updateConnectionStatus('connecting');
     ws = new WebSocket(`ws://${location.host}/ws`);
@@ -85,56 +220,67 @@ function handleWebSocketMessage(data) {
         case 'agent_log':
             const targetId = data.instance_id || data.agent_id;
 
-            // Strip [STDOUT] [worker_name] prefix for cleaner UI display
-            const displayEntry = data.entry.replace(/^\[.*?\]\s*\[.*?\]\s*/, '');
-
-            // Try to append to full terminal if open
-            const activeTerminalId = document.getElementById('activeTerminalInstanceId')?.value;
-            if (activeTerminalId && activeTerminalId === targetId) {
-                const output = document.getElementById('workerTerminalOutput');
-                if (output) {
-                    const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
-                    output.textContent += (output.textContent ? '\n' : '') + displayEntry;
-                    if (isScrolledToBottom) {
-                        output.scrollTop = output.scrollHeight;
-                    }
-                }
+            // Write the raw payload directly to xterm so ANSI colors and progress bars render natively
+            let chunk = data.entry;
+            // Xterm expects CRLF for proper newline rendering
+            if (!chunk.includes('\r') && chunk.includes('\n')) {
+                chunk = chunk.replace(/\n/g, '\r\n');
+            } else if (!chunk.includes('\n') && !chunk.includes('\r')) {
+                chunk += '\r\n'; // basic fallback line
             }
 
-            // Append to Mini Terminal on Worker Card
-            const miniTerm = document.getElementById(`mini-term-${targetId}`);
-            if (miniTerm) {
-                // If log is just starting, clear placeholder
-                if (miniTerm.textContent === 'Waiting for logs...') miniTerm.textContent = '';
-
-                miniTerm.textContent += (miniTerm.textContent ? '\n' : '') + displayEntry;
-
-                // Keep only the last ~4 lines in DOM to prevent bloating
-                const lines = miniTerm.textContent.split('\n');
-                if (lines.length > 5) {
-                    miniTerm.textContent = lines.slice(-5).join('\n');
-                }
-                // Scroll to bottom
-                miniTerm.scrollTop = miniTerm.scrollHeight;
-            }
+            writeToTerminal(targetId, chunk);
 
             // Extract and update agent activity
             const activityEl = document.getElementById(`activity-${targetId}`);
             if (activityEl) {
                 const text = data.entry;
+                let isActive = false;
+
+                // Aegis Worker patterns + CLI agent shared patterns
                 if (text.includes('📡 PULSE: Fetching board state')) {
-                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board state...</span>';
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board...</span>';
+                    isActive = true;
+                } else if (text.includes('📋 Board loaded')) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📋 Board loaded</span>';
+                    isActive = true;
                 } else if (text.includes('🧠 THINKING: Consulting LLM')) {
                     activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
-                } else if (text.includes('⚡ ACTION:')) {
-                    const actionMatch = text.match(/⚡ ACTION: ([^{\n]+)/);
-                    if (actionMatch) {
-                        activityEl.innerHTML = `<span style="color: #facc15">⚡ Action: ${actionMatch[1].trim()}</span>`;
-                    }
+                    isActive = true;
+                } else if (text.includes('⚡ WORKING:') || text.includes('⚡ ACTION:')) {
+                    const actionMatch = text.match(/⚡ (?:ACTION|WORKING): ([^{\n]+)/);
+                    const label = actionMatch ? actionMatch[1].trim() : 'Working...';
+                    activityEl.innerHTML = `<span style="color: #facc15">⚡ ${label}</span>`;
+                    isActive = true;
                 } else if (text.includes('✅ Action complete') || text.includes('💤 Waiting')) {
                     activityEl.innerHTML = '<span style="color: var(--text-secondary)">💤 Sleeping</span>';
+                    isActive = false;
                 } else if (text.includes('❌ ERROR:')) {
                     activityEl.innerHTML = '<span style="color: var(--danger)">❌ Error</span>';
+                    isActive = false;
+                }
+                // CLI Agent raw output patterns (Claude Code, Gemini CLI)
+                else if (/thinking|reasoning/i.test(text)) {
+                    activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
+                    isActive = true;
+                } else if (/\btool[:\s]/i.test(text) || /ReadFile|WriteFile|SearchReplace|ListDir/i.test(text)) {
+                    const toolMatch = text.match(/(?:Tool[:\s]+|)(ReadFile|WriteFile|SearchReplace|ListDir|Bash|Edit|TodoRead|TodoWrite|WebSearch|Grep|Glob|LS)\b/i);
+                    const toolName = toolMatch ? toolMatch[1] : 'tool';
+                    activityEl.innerHTML = `<span style="color: #facc15">🔧 ${toolName}</span>`;
+                    isActive = true;
+                } else if (/\bBash\b/i.test(text)) {
+                    activityEl.innerHTML = '<span style="color: #34d399">💻 Running command...</span>';
+                    isActive = true;
+                } else if (/\b(result|output)[:\s]/i.test(text) && text.length > 10) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📄 Processing result...</span>';
+                    isActive = true;
+                }
+
+                // Toggle the pulsing animation class
+                if (isActive) {
+                    activityEl.classList.add('active');
+                } else {
+                    activityEl.classList.remove('active');
                 }
             }
 

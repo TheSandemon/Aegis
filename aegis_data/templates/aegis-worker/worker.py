@@ -6,6 +6,25 @@ import json
 import threading
 import queue
 
+try:
+    from rich.console import Console
+    from rich.prompt import Prompt
+    from rich.panel import Panel
+    from rich.markdown import Markdown
+    from rich.syntax import Syntax
+    console = Console(force_terminal=True, color_system="standard")
+except ImportError:
+    # Fallback if rich is not installed
+    class DummyConsole:
+        def print(self, *args, **kwargs): print(*args)
+    class DummyPrompt:
+        @classmethod
+        def ask(cls, *args, **kwargs): return input(args[0] if args else "")
+    console = DummyConsole()
+    Prompt = DummyPrompt
+    Panel = lambda x, **kw: str(x)
+    Markdown = lambda x, **kw: str(x)
+
 sys.stdout.reconfigure(encoding='utf-8')
 
 api_url = os.environ.get("AEGIS_API_URL", "http://localhost:42069/api")
@@ -118,30 +137,35 @@ def prompt_llm(system_prompt, user_text):
 
 
 
-print(f"[{agent_name}] 🚀 BOOT: Sandboxed Autonomous Agent")
-print(f"[{agent_name}] 🎯 GOAL: {goal}")
+console.print(Panel(f"🎯 [bold cyan]GOAL:[/bold cyan] {goal}", title=f"🚀 {agent_name} BOOT", border_style="blue"))
 
 # Startup delay block
 try:
     if os.environ.get("AEGIS_CONFIG_STARTUP_DELAY", "False").lower() == "true":
-        print(f"[{agent_name}] ⏳ Startup delay enabled. Waiting {pulse_interval}s...")
+        console.print(f"[{agent_name}] ⏳ Startup delay enabled. Waiting {pulse_interval}s...")
         time.sleep(pulse_interval)
 except Exception as e:
     pass
 
-# Setup non-blocking stdin reader for terminal chat
+# Setup non-blocking stdin reader for terminal chat so we can timeout on pulses
 chat_queue = queue.Queue()
 
 def stdin_reader():
     for line in sys.stdin:
         if line.strip():
             chat_queue.put(line.strip())
+        else:
+            chat_queue.put("") # Empty string if they just press Enter
 
 reader_thread = threading.Thread(target=stdin_reader, daemon=True)
 reader_thread.start()
 
 # Store original root to revert context if card changes
 original_cwd = os.getcwd()
+
+# Track consecutive re-pulses to prevent infinite continue loops
+consecutive_repulses = 0
+MAX_CONSECUTIVE_REPULSES = 2
 
 while True:
     try:
@@ -338,6 +362,8 @@ while True:
     # Internal ReAct Loop (Max 20 steps per pulse — agents exit early via done/wait)
     observations = []
     MAX_STEPS = 20
+    consecutive_errors = 0
+    MAX_CONSECUTIVE_ERRORS = 3
 
     for step in range(MAX_STEPS):
         try:
@@ -764,8 +790,80 @@ while True:
                 time.sleep(1)
 
         except Exception as e:
-            print(f"[{agent_name}] ❌ ERROR (Step {step+1}): {e}")
-            break
+            consecutive_errors += 1
+            error_msg = f"❌ ERROR (Step {step+1}, attempt {consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}"
+            print(f"[{agent_name}] {error_msg}")
+            observations.append(error_msg)
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                print(f"[{agent_name}] 🛑 Too many consecutive errors. Breaking out of ReAct loop.")
+                break
+            # Sleep briefly and retry instead of dying
+            time.sleep(2)
+            continue
+
+    # ─── AUTO-SAVE SCRATCHPAD (Persistent Memory) ───
+    if observations:
+        try:
+            scratchpad = ""
+            if os.path.exists("scratchpad.md"):
+                with open("scratchpad.md", "r", encoding="utf-8") as rf:
+                    scratchpad = rf.read()
+            # Append a timestamped session block
+            import datetime
+            session_block = f"\n\n## Pulse @ {datetime.datetime.now().isoformat()}\n"
+            for i, obs in enumerate(observations):
+                session_block += f"- Step {i+1}: {obs}\n"
+            # Keep scratchpad from growing unbounded (last 5000 chars)
+            scratchpad = (scratchpad + session_block)[-5000:]
+            with open("scratchpad.md", "w", encoding="utf-8") as wf:
+                wf.write(scratchpad)
+        except Exception as e:
+            print(f"[{agent_name}] ⚠️ Failed to save scratchpad: {e}")
+
+    # ─── SELF-EVALUATION: Should I keep working or sleep? ───
+    if observations and not any("DONE:" in o or "WAITING:" in o for o in observations):
+        # Hard cap: prevent infinite re-pulse loops
+        if consecutive_repulses >= MAX_CONSECUTIVE_REPULSES:
+            print(f"[{agent_name}] 🛑 Self-eval: Hit max consecutive re-pulses ({MAX_CONSECUTIVE_REPULSES}). Forcing sleep.")
+            consecutive_repulses = 0
+        else:
+            try:
+                # Build a concise summary of what was just done
+                actions_taken = "\n".join(f"- {o}" for o in observations[-8:])
+                # Re-fetch a quick card count so the eval knows the current state
+                try:
+                    current_cards = requests.get(f"{api_url}/cards").json()
+                    card_count = len(current_cards) if isinstance(current_cards, list) else "unknown"
+                except Exception:
+                    card_count = "unknown"
+
+                eval_prompt = (
+                    f"You are evaluating whether an AI worker should CONTINUE working or SLEEP.\n\n"
+                    f"WORKER GOAL: {goal}\n\n"
+                    f"ACTIONS JUST COMPLETED THIS PULSE:\n{actions_taken}\n\n"
+                    f"CURRENT BOARD STATE: {card_count} cards exist on the board.\n\n"
+                    f"RULES — You must respond SLEEP unless ALL of these are true:\n"
+                    f"1. There are SPECIFIC, CONCRETE tasks remaining that were NOT already done above.\n"
+                    f"2. The actions above did NOT already fulfill the worker's goal.\n"
+                    f"3. There are cards with status 'assigned' or 'running' that still need work.\n\n"
+                    f"If the worker just created cards, organized the board, or completed its instructions, it is DONE. Respond SLEEP.\n"
+                    f"DO NOT say continue just because the goal sounds ongoing (e.g., 'help the team'). "
+                    f"Only continue if there is an explicit, unfinished action item.\n\n"
+                    f'Respond with ONLY one of: {{"action": "continue", "reason": "..."}} or {{"action": "sleep", "reason": "..."}}'
+                )
+                eval_res = prompt_llm("You are a strict work evaluator. Default to sleep. Respond in JSON only.", eval_prompt)
+                if eval_res and isinstance(eval_res, dict) and eval_res.get("action") == "continue":
+                    consecutive_repulses += 1
+                    print(f"[{agent_name}] 🔄 Self-eval: MORE WORK — {eval_res.get('reason', '')} (re-pulse {consecutive_repulses}/{MAX_CONSECUTIVE_REPULSES})")
+                    continue  # Skip the sleep and loop back to the top
+                else:
+                    reason = eval_res.get("reason", "No pending work") if eval_res else "Eval failed"
+                    print(f"[{agent_name}] 😴 Self-eval: SLEEP — {reason}")
+                    consecutive_repulses = 0
+            except Exception:
+                consecutive_repulses = 0
+    else:
+        consecutive_repulses = 0
 
     # Send pulse websocket event so UI can show countdown
     clean_id = (instance_id or "").strip()
@@ -775,9 +873,20 @@ while True:
         except Exception:
             pass
         
-    print(f"[{agent_name}] ✅ Pulse complete. Sleeping {pulse_interval}s...")
-    time.sleep(pulse_interval)
-
+    console.print(f"\n[bold green][{agent_name}] ✅ Pulse complete.[/bold green]")
+    
     if mode == "one-shot":
-        print(f"[{agent_name}] 🏁 One-shot mode: task complete. Exiting.")
+        console.print(f"[{agent_name}] 🏁 One-shot mode: task complete. Exiting.")
+        break
+        
+    # Interactive TUI: Yield control to user instead of sleeping
+    console.print(f"[bold cyan]{agent_name}[/bold cyan] (Type a command and hit Enter, or hit Enter to pulse early)")
+    try:
+        user_input = chat_queue.get(timeout=pulse_interval)
+        if user_input and user_input.strip():
+            chat_queue.put(user_input.strip())
+    except queue.Empty:
+        pass
+    except (KeyboardInterrupt, EOFError):
+        console.print(f"\n[{agent_name}] 🛑 Interrupted by user. Exiting.")
         break

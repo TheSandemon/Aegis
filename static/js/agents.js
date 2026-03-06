@@ -230,8 +230,7 @@ function renderInstancesSidebar() {
 
         const color = inst.color || '#6366f1';
         const rgb = hexToRgb(color);
-        const serviceBadge = inst.service ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.service}</span>` : '';
-        const modelBadge = inst.model ? `<span style="font-size:0.6rem;background:var(--bg-dark);padding:0.1rem 0.3rem;border-radius:3px;color:var(--text-secondary)">${inst.model}</span>` : '';
+
 
         const iconHtml = inst.icon && (inst.icon.startsWith('http') || inst.icon.startsWith('/assets/'))
             ? `<img src="${inst.icon}" class="agent-avatar-img" style="border-color: ${color}">`
@@ -251,7 +250,7 @@ function renderInstancesSidebar() {
                 
                 <div class="agent-sidebar-header">
                     ${iconHtml}
-                    <div class="agent-info-main" style="display:flex;gap:0.5rem;align-items:center;">
+                    <div class="agent-info-main" style="display:flex;gap:0.5rem;align-items:center;overflow:hidden;">
                         <div class="agent-name">${escapeHtml(inst.instance_name)}</div>
                         <div class="agent-status-tag ${isRunning ? 'running' : ''}">
                             <div class="dot"></div>
@@ -265,13 +264,11 @@ function renderInstancesSidebar() {
                     <div id="pulse-${inst.instance_id}" style="font-size: 0.55rem; color: var(--primary); font-weight: bold;"></div>
                 </div>` : ''}
 
-                <div class="agent-sidebar-badges">
-                    ${serviceBadge}${modelBadge}
-                </div>
+
 
                 <!-- Inline Mini Terminal -->
                 <div class="mini-terminal-container" onclick="viewInstanceLogs('${inst.instance_id}')" title="Click to open full terminal">
-                    <pre id="mini-term-${inst.instance_id}" style="margin: 0; font-family: monospace; font-size: 0.65rem; color: #10b981; white-space: pre-wrap; word-break: break-all; max-height: 40px; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical;">${inst.recent_logs ? escapeHtml(inst.recent_logs) : (isRunning ? 'Waiting for logs...' : 'Stopped')}</pre>
+                    <div id="mini-term-${inst.instance_id}" style="width: 100%; height: 100%;"></div>
                 </div>
                 
                 <div class="agent-sidebar-actions">
@@ -281,6 +278,26 @@ function renderInstancesSidebar() {
                 </div>
             </div>`;
     }).join('');
+
+    // Reattach mini xterm terminals after DOM update
+    setTimeout(() => {
+        instancesData.forEach(inst => {
+            const el = document.getElementById(`mini-term-${inst.instance_id}`);
+            if (el) {
+                const mini = getOrCreateMiniTerminal(inst.instance_id);
+                if (!el.querySelector('.xterm')) {
+                    el.innerHTML = ''; // clear any old canvas
+                    mini.term.open(el);
+                }
+                mini.fit.fit();
+
+                // If it's a new terminal without history but backend sent recent_logs, seed it
+                if (!window.terminals.history[inst.instance_id] && inst.recent_logs) {
+                    writeToTerminal(inst.instance_id, inst.recent_logs.replace(/\n/g, '\r\n'));
+                }
+            }
+        });
+    }, 0);
 }
 
 function hexToRgb(hex) {
@@ -300,11 +317,13 @@ function handleAgentDragStart(e, id) {
 }
 
 function handleAgentDragOver(e) {
+    if (!draggedAgentId) return; // Prevent board cards from triggering
     e.preventDefault();
     e.dataTransfer.dropEffect = 'move';
 }
 
 function handleAgentDragEnter(e) {
+    if (!draggedAgentId) return; // Prevent board cards from triggering
     e.preventDefault();
     const card = e.target.closest('.agent-sidebar-card');
     if (card && card.dataset.instanceId !== draggedAgentId) {
@@ -315,6 +334,7 @@ function handleAgentDragEnter(e) {
 }
 
 function handleAgentDragLeave(e) {
+    if (!draggedAgentId) return;
     const card = e.target.closest('.agent-sidebar-card');
     // only remove transform if leaving the card entirely
     if (card && !card.contains(e.relatedTarget)) {
@@ -324,6 +344,7 @@ function handleAgentDragLeave(e) {
 }
 
 function handleAgentDragEnd(e) {
+    draggedAgentId = null;
     e.target.style.opacity = '1';
     document.querySelectorAll('.agent-sidebar-card').forEach(c => {
         c.style.transform = '';
@@ -332,12 +353,15 @@ function handleAgentDragEnd(e) {
 }
 
 async function handleAgentDrop(e, targetId) {
+    if (!draggedAgentId) return; // Prevent board cards from dropping
     e.preventDefault();
+
+    const sourceId = draggedAgentId;
     handleAgentDragEnd(e);
 
-    if (!draggedAgentId || draggedAgentId === targetId) return;
+    if (sourceId === targetId) return;
 
-    const fromIndex = instancesData.findIndex(i => i.instance_id === draggedAgentId);
+    const fromIndex = instancesData.findIndex(i => i.instance_id === sourceId);
     const toIndex = instancesData.findIndex(i => i.instance_id === targetId);
     if (fromIndex < 0 || toIndex < 0) return;
 
@@ -402,51 +426,117 @@ async function viewInstanceLogs(instanceId) {
     const displayName = inst?.instance_name || instanceId;
     document.getElementById('terminalModal').classList.add('active');
     document.getElementById('terminalTitle').textContent = `Terminal — ${displayName}`;
-    const output = document.getElementById('workerTerminalOutput');
-    output.textContent = 'Connecting to terminal...';
+
+    // Force a fit after CSS animation/layout completes
+    setTimeout(() => {
+        if (window.terminals.modalFit) {
+            try { window.terminals.modalFit.fit(); } catch (e) { }
+        }
+    }, 150);
 
     // Store the active instance ID for the chat function
     const activeIdInput = document.getElementById('activeTerminalInstanceId');
     if (activeIdInput) activeIdInput.value = instanceId;
 
-    // Clear any existing poll
-    if (terminalPollInterval) clearInterval(terminalPollInterval);
+    // Set active terminal before opening it so logs start routing correctly
+    window.terminals.activeModalInstance = instanceId;
 
-    const fetchLogs = async () => {
+    // Initialize the modal terminal if we haven't
+    initModalTerminal();
+
+    // Mount xterm to the container only if not already mounted
+    const outputEl = document.getElementById('workerTerminalOutput');
+    if (!outputEl.querySelector('.xterm')) {
+        outputEl.innerHTML = '';
+        window.terminals.modal.open(outputEl);
+    }
+
+    // Setup a ResizeObserver to ensure the terminal always fills the container
+    // especially during modal animations or window resizes.
+    if (!window.terminals.modalResizeObserver) {
+        window.terminals.modalResizeObserver = new ResizeObserver(() => {
+            if (window.terminals.modalFit) {
+                clearTimeout(window._termModFitStr);
+                window._termModFitStr = setTimeout(() => {
+                    try { window.terminals.modalFit.fit(); } catch (e) { }
+                }, 50);
+            }
+        });
+        window.terminals.modalResizeObserver.observe(outputEl);
+    }
+
+    // Clear and reset state instead of remounting
+    window.terminals.modal.clear();
+
+    // Replay history if we have it
+    if (window.terminals.history[instanceId]) {
+        window.terminals.modal.write(window.terminals.history[instanceId]);
+    } else {
+        // Fallback to fetch from backend 
         try {
             const res = await fetch(`/api/instances/${instanceId}/logs?tail=200`);
-            if (!res.ok) throw new Error('Failed to fetch');
-            const d = await res.json();
-            const logs = d.logs || [];
-
-            // Check if scroll is at bottom before update
-            const isScrolledToBottom = output.scrollHeight - output.clientHeight <= output.scrollTop + 1;
-
-            const cleanLogs = logs.map(l => l.replace(/^\[.*?\]\s*\[.*?\]\s*/, ''));
-            output.textContent = cleanLogs.length > 0 ? cleanLogs.join('\n') : 'No output yet.';
-
-            // Auto-scroll if it was previously at bottom
-            if (isScrolledToBottom) {
-                output.scrollTop = output.scrollHeight;
+            if (res.ok) {
+                const d = await res.json();
+                const logs = d.logs || [];
+                const block = logs.join('\r\n');
+                window.terminals.history[instanceId] = block;
+                window.terminals.modal.write(block);
             }
         } catch (e) {
-            console.error('Terminal poll error:', e);
+            console.error('Initial log fetch failed:', e);
         }
-    };
+    }
 
-    // Initial fetch to populate history
-    await fetchLogs();
-    // Scroll to bottom immediately on open
-    output.scrollTop = output.scrollHeight;
-    // Live appending is handled entirely by websocket.js
-
+    // (The ResizeObserver now handles fitting automatically)
+    // Add a delayed fallback to catch the end of modal CSS animations
+    setTimeout(() => {
+        if (window.terminals.modalFit) {
+            try { window.terminals.modalFit.fit(); } catch (e) { }
+        }
+    }, 300);
 }
 
 function closeTerminal() {
     document.getElementById('terminalModal').classList.remove('active');
-    if (terminalPollInterval) {
-        clearInterval(terminalPollInterval);
-        terminalPollInterval = null;
+    window.terminals.activeModalInstance = null;
+}
+
+async function sendTerminalMessage() {
+    const input = document.getElementById('terminalChatInput');
+    const instanceId = document.getElementById('activeTerminalInstanceId')?.value;
+    const message = input.value.trim();
+
+    if (!message || !instanceId) return;
+
+    input.disabled = true;
+    const originalPlaceholder = input.placeholder;
+    input.placeholder = "Sending...";
+
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message })
+        });
+
+        if (res.ok) {
+            input.value = '';
+            showToast('Message sent to agent');
+            // Optimistically add user message to the terminal view
+            if (window.terminals.modal) {
+                window.terminals.modal.writeln(`\r\n\x1b[38;5;12m👤 USER: ${message}\x1b[0m`);
+            }
+        } else {
+            const d = await res.json();
+            showToast(`⚠️ Failed to send: ${d.detail || 'Unknown error'}`);
+        }
+    } catch (e) {
+        console.error("Chat send error:", e);
+        showToast('⚠️ Failed to send message');
+    } finally {
+        input.disabled = false;
+        input.placeholder = originalPlaceholder;
+        input.focus();
     }
 }
 
@@ -706,44 +796,86 @@ function renderConfigSchema(templateId, containerId, savedConfig = {}) {
 
     for (const [key, def] of Object.entries(schema)) {
         const saved = savedConfig[key] !== undefined ? savedConfig[key] : def.default;
+        const desc = def.description ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem;">${escapeHtml(def.description)}</div>` : '';
+
         html += `<div class="form-group" style="margin-bottom:0.5rem;">`;
-        html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
 
         switch (def.type) {
+            case 'boolean':
+                const checked = (saved === true || saved === 'true') ? 'checked' : '';
+                html += `<div style="display:flex;align-items:center;justify-content:space-between;">`;
+                html += `<label style="font-size:0.85rem;margin-bottom:0;">${def.label || key}</label>`;
+                html += `<label class="toggle"><input type="checkbox" class="config-input" data-config-key="${key}" data-type="boolean" ${checked}><span class="toggle-slider"></span></label>`;
+                html += `</div>`;
+                html += desc;
+                break;
+            case 'folder':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
+                html += `<div style="display:flex;gap:0.25rem;">`;
+                html += `<input type="text" class="config-input" data-config-key="${key}" value="${escapeHtml(String(saved))}" style="font-size:0.8rem;flex:1;" id="folder-${containerId}-${key}">`;
+                html += `<button type="button" class="secondary" style="font-size:0.75rem;padding:0.25rem 0.5rem;white-space:nowrap;" onclick="browseFolderFor('folder-${containerId}-${key}')">📂 Browse</button>`;
+                html += `</div>`;
+                html += desc;
+                break;
             case 'textarea':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<textarea class="config-input" data-config-key="${key}" data-mention="true" rows="2" style="font-size:0.8rem;">${escapeHtml(String(saved))}</textarea>`;
+                html += desc;
                 break;
             case 'range':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<div style="display:flex;align-items:center;gap:0.5rem;">`;
                 html += `<input type="range" class="config-input" data-config-key="${key}" min="${def.min}" max="${def.max}" step="${def.step}" value="${saved}" oninput="this.nextElementSibling.textContent=this.value" style="flex:1;">`;
                 html += `<span style="font-size:0.8rem;min-width:2rem;">${saved}</span>`;
                 html += `</div>`;
+                html += desc;
                 break;
             case 'number':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<input type="number" class="config-input" data-config-key="${key}" value="${saved}" style="font-size:0.8rem;">`;
+                html += desc;
                 break;
             case 'select':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<select class="config-input" data-config-key="${key}" style="font-size:0.8rem;">`;
                 (def.options || []).forEach(opt => {
                     html += `<option value="${opt}" ${opt === saved ? 'selected' : ''}>${opt}</option>`;
                 });
                 html += `</select>`;
+                html += desc;
                 break;
             case 'multiselect':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 const selectedArr = Array.isArray(saved) ? saved : [];
                 html += `<div class="config-input" data-config-key="${key}" data-type="multiselect" style="display:flex;flex-wrap:wrap;gap:0.25rem;">`;
                 (def.options || []).forEach(opt => {
-                    const checked = selectedArr.includes(opt) ? 'checked' : '';
-                    html += `<label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;"><input type="checkbox" value="${opt}" ${checked}> ${opt}</label>`;
+                    const mchecked = selectedArr.includes(opt) ? 'checked' : '';
+                    html += `<label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;"><input type="checkbox" value="${opt}" ${mchecked}> ${opt}</label>`;
                 });
                 html += `</div>`;
+                html += desc;
                 break;
             default:
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<input type="text" class="config-input" data-config-key="${key}" value="${escapeHtml(String(saved))}" style="font-size:0.8rem;">`;
+                html += desc;
         }
         html += `</div>`;
     }
     container.innerHTML = html;
+}
+
+async function browseFolderFor(inputId) {
+    try {
+        const res = await fetch('/api/browse-folder');
+        const data = await res.json();
+        if (data.path) {
+            document.getElementById(inputId).value = data.path;
+        }
+    } catch (e) {
+        console.error('Folder browse error:', e);
+        showToast('⚠️ Could not open folder picker');
+    }
 }
 
 function collectConfigValues(containerId) {
@@ -753,7 +885,9 @@ function collectConfigValues(containerId) {
     container.querySelectorAll('.config-input').forEach(el => {
         const key = el.dataset.configKey;
         if (!key) return;
-        if (el.dataset.type === 'multiselect') {
+        if (el.dataset.type === 'boolean') {
+            config[key] = el.checked;
+        } else if (el.dataset.type === 'multiselect') {
             config[key] = [...el.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value);
         } else if (el.type === 'range' || el.type === 'number') {
             config[key] = Number(el.value);
@@ -808,7 +942,14 @@ async function openCreateWorkerModal() {
     // Reset tabs to general
     switchWorkerTab('create', 'general');
 
-    const templateId = 'aegis-worker'; // We just have one universal worker type now
+    // Populate Agent Type dropdown from registry
+    const agentTypeSelect = document.getElementById('workerAgentType');
+    if (agentTypeSelect) {
+        agentTypeSelect.innerHTML = registryData.map(agent =>
+            `<option value="${agent.id}" ${agent.id === 'aegis-worker' ? 'selected' : ''}>${agent.icon || '🤖'} ${agent.name}</option>`
+        ).join('');
+    }
+
     document.getElementById('unifiedApiKey-create').value = '';
     document.getElementById('feedback-create-apikey').innerHTML = '';
 
@@ -824,40 +965,109 @@ async function openCreateWorkerModal() {
     initEmojiGrid('emojiGrid-create', 'create');
     updateIconPreview('create');
 
+    // Toggle form based on agent type
+    onAgentTypeChange();
+
     // Load available skills
     await loadAvailableSkills('createSettingsSkillsList');
 
-    // Render config schema for the default worker
-    renderConfigSchema(templateId, 'createConfigSection');
+    // Render config schema for the selected template
+    const selectedTemplate = agentTypeSelect?.value || 'aegis-worker';
+    renderConfigSchema(selectedTemplate, 'createConfigSection');
+}
+
+function onAgentTypeChange() {
+    const agentTypeSelect = document.getElementById('workerAgentType');
+    const selectedId = agentTypeSelect?.value || 'aegis-worker';
+    const template = registryData.find(a => a.id === selectedId);
+    const isCliAgent = template?.cli_agent || false;
+
+    // Update description
+    const desc = document.getElementById('agentTypeDescription');
+    if (desc) desc.textContent = template?.description || '';
+
+    // Toggle form sections
+    const standardFields = document.getElementById('standardWorkerFields');
+    const cliFields = document.getElementById('cliAgentFields');
+    if (standardFields) standardFields.style.display = isCliAgent ? 'none' : 'block';
+    if (cliFields) cliFields.style.display = isCliAgent ? 'block' : 'none';
+
+    if (isCliAgent) {
+        // Update CLI key label and hint
+        const keyEnvName = template.api_key_env || 'API_KEY';
+        const keyLabel = document.getElementById('cliKeyLabel');
+        const keyHint = document.getElementById('cliKeyHint');
+        if (keyLabel) {
+            if (selectedId === 'claude-code') {
+                keyLabel.textContent = 'Anthropic API Key';
+                if (keyHint) keyHint.textContent = 'Your Anthropic API key (sk-ant-...). Required for Claude Code.';
+            } else if (selectedId === 'gemini-cli') {
+                keyLabel.textContent = 'Gemini API Key';
+                if (keyHint) keyHint.textContent = 'Your Gemini API key or Google Cloud key. Required for Gemini CLI.';
+            } else {
+                keyLabel.textContent = keyEnvName.replace(/_/g, ' ');
+                if (keyHint) keyHint.textContent = `Environment variable: ${keyEnvName}`;
+            }
+        }
+
+        // Set icon to match the CLI agent
+        document.getElementById('workerIcon').value = template.icon || '🤖';
+        updateIconPreview('create');
+    }
+
+    // Re-render config schema for the new template
+    renderConfigSchema(selectedId, 'createConfigSection');
+
+    // Hide skills tab for CLI agents (they don't use Aegis skills)
+    const skillsTab = document.getElementById('btn-create-skills');
+    if (skillsTab) skillsTab.style.display = isCliAgent ? 'none' : '';
 }
 
 async function createWorkerInstance() {
-    const templateId = 'aegis-worker';
+    const agentTypeSelect = document.getElementById('workerAgentType');
+    const templateId = agentTypeSelect?.value || 'aegis-worker';
+    const template = registryData.find(a => a.id === templateId);
+    const isCliAgent = template?.cli_agent || false;
     const instanceName = document.getElementById('workerName').value.trim();
-    const service = document.getElementById('workerService').value;
 
-    let model = document.getElementById('workerModelSelect').value;
-    if (model === 'custom' || !model) {
-        model = document.getElementById('workerModelCustom').value.trim();
+    let service = '';
+    let model = '';
+    const env_vars = {};
+
+    if (isCliAgent) {
+        // CLI agent: use the CLI-specific API key field
+        const cliKey = document.getElementById('cliApiKey-create').value.trim();
+        if (cliKey) {
+            // Store under generic 'api_key' — engine maps it to the right env var
+            env_vars['api_key'] = cliKey;
+        }
+        service = templateId; // e.g. 'claude-code' or 'gemini-cli'
+    } else {
+        // Standard worker: use the service/model selectors
+        service = document.getElementById('workerService').value;
+        model = document.getElementById('workerModelSelect').value;
+        if (model === 'custom' || !model) {
+            model = document.getElementById('workerModelCustom').value.trim();
+        }
+        const apiKey = document.getElementById('unifiedApiKey-create').value.trim();
+        if (apiKey && SERVICE_MODELS[service]) {
+            env_vars[SERVICE_MODELS[service].key_env] = apiKey;
+        }
     }
 
     if (!templateId) { showToast('Select an agent type'); return; }
     if (!instanceName) { showToast('Enter a worker name'); return; }
 
-    const apiKey = document.getElementById('unifiedApiKey-create').value.trim();
-    const env_vars = {};
-    if (apiKey && SERVICE_MODELS[service]) {
-        env_vars[SERVICE_MODELS[service].key_env] = apiKey;
-    }
-
     // Gather config schema values
     const config = collectConfigValues('createConfigSection');
 
-    // Gather skills
-    const skillsBoxes = document.querySelectorAll('#createSettingsSkillsList input[type="checkbox"]:checked');
-    config.skills = Array.from(skillsBoxes).map(cb => cb.value);
+    // Gather skills (only for standard workers)
+    if (!isCliAgent) {
+        const skillsBoxes = document.querySelectorAll('#createSettingsSkillsList input[type="checkbox"]:checked');
+        config.skills = Array.from(skillsBoxes).map(cb => cb.value);
+    }
 
-    const icon = document.getElementById('workerIcon').value || '🤖';
+    const icon = document.getElementById('workerIcon').value || (template?.icon || '🤖');
     const color = document.getElementById('workerColor').value || '#6366f1';
     const saveProfile = document.getElementById('saveAsProfile').checked;
 
@@ -873,13 +1083,12 @@ async function createWorkerInstance() {
     };
 
     if (saveProfile) {
-        const template = registryData.find(a => a.id === templateId);
         await fetch('/api/profiles', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 name: instanceName,
-                template_id: template.id,
+                template_id: templateId,
                 icon: icon,
                 color: color,
                 service: service,

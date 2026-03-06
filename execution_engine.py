@@ -594,6 +594,8 @@ class ExecutionEngine:
                         "Your primary objective is to continuously monitor the Aegis Kanban board for tasks and execute them to achieve your Goal. "
                         "You will receive periodic System Pulses containing the current board state. "
                         "When you receive a pulse, analyze the board, identify unassigned tasks relevant to your Goal, and use your tools to complete them. "
+                        "CRITICAL: To update the board (e.g. creating, moving, or updating cards), you MUST make HTTP REST API requests to `http://localhost:42069/api`. "
+                        "Do NOT modify the `aegis.db` SQLite database directly, as this bypasses the live UI updates. "
                         "If a user speaks to you directly in this terminal, prioritize their request, even if it alters your current focus. "
                         "Do not wait for user permission to act; use your tools to make progress independently."
                     )

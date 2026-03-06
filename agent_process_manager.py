@@ -113,6 +113,7 @@ class AgentProcessManager:
         try:
             process = await asyncio.create_subprocess_shell(
                 command,
+                stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 cwd=str(working_dir) if working_dir.exists() else None,
@@ -174,6 +175,20 @@ class AgentProcessManager:
             logger.error(f"Failed to stop agent '{agent_id}': {e}")
             return {"error": str(e), "status": "error"}
 
+    async def send_input(self, agent_id: str, text: str) -> bool:
+        """Sends arbitrary text to the agent's standard input."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc or agent_proc.status != "running" or not agent_proc.process.stdin:
+            return False
+            
+        try:
+            agent_proc.process.stdin.write((text + "\n").encode("utf-8"))
+            await agent_proc.process.stdin.drain()
+            return True
+        except Exception as e:
+            logger.error(f"Failed to send input to agent '{agent_id}': {e}")
+            return False
+
     def get_status(self, agent_id: str) -> Optional[dict]:
         """Get the current status of an agent."""
         agent_proc = self.active.get(agent_id)
@@ -213,6 +228,16 @@ class AgentProcessManager:
                             "agent_id": agent_proc.agent_id,
                             "entry": entry
                         })
+                        
+                        # Detect critical agent errors / git conflicts
+                        error_signals = ["❌ ERROR", "CONFLICT", "Merge failed", "fatal: "]
+                        if any(sig in decoded for sig in error_signals):
+                            await self.broadcaster({
+                                "type": "agent_conflict",
+                                "agent_id": agent_proc.agent_id,
+                                "card_id": agent_proc.card_id,
+                                "error": decoded
+                            })
         except Exception as e:
             logger.error(f"Log streaming error for {agent_proc.agent_id}: {e}")
 

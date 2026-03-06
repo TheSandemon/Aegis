@@ -540,6 +540,47 @@ async function sendTerminalMessage() {
     }
 }
 
+async function sendTerminalMessage() {
+    const input = document.getElementById('terminalChatInput');
+    const instanceId = document.getElementById('activeTerminalInstanceId')?.value;
+    const message = input.value.trim();
+
+    if (!message || !instanceId) return;
+
+    input.disabled = true;
+    const originalPlaceholder = input.placeholder;
+    input.placeholder = "Sending...";
+
+    try {
+        const res = await fetch(`/api/instances/${instanceId}/chat`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message: message })
+        });
+
+        if (res.ok) {
+            input.value = '';
+            showToast('Message sent to agent');
+            // Optimistically add user message to the terminal view
+            const output = document.getElementById('workerTerminalOutput');
+            if (output) {
+                output.textContent += (output.textContent ? '\n' : '') + `👤 USER: ${message}`;
+                output.scrollTop = output.scrollHeight;
+            }
+        } else {
+            const d = await res.json();
+            showToast(`⚠️ Failed to send: ${d.detail || 'Unknown error'}`);
+        }
+    } catch (e) {
+        console.error("Chat send error:", e);
+        showToast('⚠️ Failed to send message');
+    } finally {
+        input.disabled = false;
+        input.placeholder = originalPlaceholder;
+        input.focus();
+    }
+}
+
 // ─── Pulse Countdown Logic ────────────────────────────────────────────────
 let pulseTimers = {};
 

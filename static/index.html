@@ -1,13 +1,13 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <meta name="description"
-        content="Aegis — Multi-Agent Kanban Orchestrator with real-time agent monitoring, DAG workflows, and telemetry.">
+        content="Aegis � Multi-Agent Kanban Orchestrator with real-time agent monitoring, DAG workflows, and telemetry.">
     <link rel="icon"
-        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+        href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>???</text></svg>">
     <title>Aegis - Multi-Agent Kanban</title>
     <link rel="stylesheet" href="/static/css/aegis.css?v=2">
 
@@ -29,7 +29,7 @@
             height: 100% !important;
         }
 
-        /* Header — kept inline since it's structural */
+        /* Header � kept inline since it's structural */
         header {
             display: flex;
             justify-content: space-between;
@@ -171,30 +171,30 @@
 <body>
     <header>
         <div class="header-left">
-            <h1>🛡️ <span>Aegis</span></h1>
+            <h1>??? <span>Aegis</span></h1>
             <div class="connection-status">
                 <div class="status-dot" id="wsStatus"></div>
                 <span id="wsStatusText">Connecting...</span>
             </div>
             <div class="view-nav">
-                <button class="active" data-view="board" onclick="navigateTo('board')">📋 Board</button>
-                <button data-view="telemetry" onclick="navigateTo('telemetry')">📊 Telemetry</button>
-                <button data-view="integrations" onclick="navigateTo('integrations')">🔗 Integrations</button>
-                <button data-view="workspaces" onclick="navigateTo('workspaces')">💾 Workflowspaces</button>
-                <button onclick="openSkillsMarketplaceModal()">🛒 Skills</button>
+                <button class="active" data-view="board" onclick="navigateTo('board')">?? Board</button>
+                <button data-view="telemetry" onclick="navigateTo('telemetry')">?? Telemetry</button>
+                <button data-view="integrations" onclick="navigateTo('integrations')">?? Integrations</button>
+                <button data-view="workspaces" onclick="navigateTo('workspaces')">?? Workflowspaces</button>
+                <button onclick="openSkillsMarketplaceModal()">?? Skills</button>
                 <button onclick="if(window.onboarding) { window.onboarding.currentStep = 1; window.onboarding.open(); }"
-                    style="background: var(--primary);">🎓 Tutorial</button>
+                    style="background: var(--primary);">?? Tutorial</button>
             </div>
         </div>
         <div class="header-actions">
             <div class="search-wrapper">
                 <input type="text" class="header-search" id="searchInput" placeholder="Search... (/)"
                     oninput="filterCards()">
-                <button class="search-clear" id="searchClear" onclick="clearSearch()">×</button>
+                <button class="search-clear" id="searchClear" onclick="clearSearch()">�</button>
             </div>
             <button class="secondary" onclick="openNewColumnModal()">+ Add Column</button>
             <button onclick="openNewCardModal()">+ New Card <span class="shortcut-hint">(N)</span></button>
-            <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">🔄</button>
+            <button class="secondary" onclick="loadCards(); showToast('Refreshing...')" title="Refresh (R)">??</button>
         </div>
     </header>
 
@@ -207,7 +207,7 @@
             </div>
             <div id="agentCardsList">
                 <div class="empty-state" style="padding:2rem 1rem;">
-                    <div class="empty-state-icon" style="font-size:2rem;">🏗️</div>
+                    <div class="empty-state-icon" style="font-size:2rem;">???</div>
                     <div class="empty-state-text" style="font-size:0.8rem;">No workers yet.<br>Create one from an
                         installed template.</div>
                 </div>
@@ -217,9 +217,9 @@
                 style="margin: 1.5rem 1rem 0; border-top: 1px solid var(--border-color); padding-top: 1rem;">
                 <summary
                     style="cursor:pointer; font-weight:600; font-size:0.85rem; color:var(--text-secondary); display:flex; align-items:center; gap:0.5rem; user-select:none;">
-                    🚦 Prompt Broker
+                    ?? Prompt Broker
                     <span id="brokerStatusBadge"
-                        style="font-size:0.6rem; padding:1px 6px; border-radius:8px; background:#22c55e22; color:#22c55e; font-weight:700; margin-left:auto;">●
+                        style="font-size:0.6rem; padding:1px 6px; border-radius:8px; background:#22c55e22; color:#22c55e; font-weight:700; margin-left:auto;">?
                         ACTIVE</span>
                 </summary>
                 <div id="brokerStats"
@@ -234,7 +234,7 @@
                     </div>
                     <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                         <span>In Progress:</span>
-                        <span id="brokerInProgress" style="color:var(--text-primary); font-size:0.75rem;">—</span>
+                        <span id="brokerInProgress" style="color:var(--text-primary); font-size:0.75rem;">�</span>
                     </div>
                     <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
                         <span>Processed:</span>
@@ -252,7 +252,7 @@
                         Min safe pulse: <span id="brokerMinPulse">60</span>s
                     </div>
                     <button id="brokerPauseBtn" onclick="toggleBrokerPause()"
-                        style="width:100%; font-size:0.75rem; padding:0.3rem 0.5rem; margin-top:0.25rem;">⏸
+                        style="width:100%; font-size:0.75rem; padding:0.3rem 0.5rem; margin-top:0.25rem;">?
                         Pause</button>
                 </div>
             </details>
@@ -266,12 +266,12 @@
 
         <!-- Telemetry View -->
         <div class="telemetry-view" id="telemetryView">
-            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">📊 Telemetry Dashboard</h2>
+            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">?? Telemetry Dashboard</h2>
             <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">Real-time LLM usage, agent
                 activity, and cost metrics.</p>
             <div id="telemetryContent">
                 <div class="empty-state">
-                    <div class="empty-state-icon">📊</div>
+                    <div class="empty-state-icon">??</div>
                     <div class="empty-state-text">Loading telemetry...</div>
                 </div>
             </div>
@@ -279,7 +279,7 @@
 
         <!-- Integrations View -->
         <div class="telemetry-view" id="integrationsView" style="display:none;">
-            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">🔗 External Integrations</h2>
+            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">?? External Integrations</h2>
             <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
                 Manage integration connections and link columns to external services like GitHub Issues.
             </p>
@@ -288,7 +288,7 @@
             <div
                 style="background:var(--bg-card);border:1px solid var(--border);border-radius:0.5rem;padding:1rem;margin-bottom:1.25rem;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
-                    <h3 style="font-size:0.95rem;margin:0;">🔌 Saved Connections</h3>
+                    <h3 style="font-size:0.95rem;margin:0;">?? Saved Connections</h3>
                     <button onclick="toggleAddConnectionForm()" id="addConnectionBtn"
                         style="font-size:0.78rem;padding:0.3rem 0.7rem;">+ Add Integration</button>
                 </div>
@@ -380,10 +380,10 @@
             </div>
 
             <!-- Active Column Integrations -->
-            <h3 style="font-size:0.95rem;margin:0 0 0.5rem;">📋 Active Column Integrations</h3>
+            <h3 style="font-size:0.95rem;margin:0 0 0.5rem;">?? Active Column Integrations</h3>
             <div id="integrationsList">
                 <div class="empty-state">
-                    <div class="empty-state-icon">🔗</div>
+                    <div class="empty-state-icon">??</div>
                     <div class="empty-state-text">Loading integrations...</div>
                 </div>
             </div>
@@ -391,28 +391,28 @@
 
         <!-- Workflowspaces View -->
         <div class="telemetry-view" id="workspacesView" style="display:none;">
-            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">💾 Workflowspaces</h2>
+            <h2 style="font-size:1.1rem; margin-bottom:0.5rem;">?? Workflowspaces</h2>
             <p style="font-size:0.8rem; color:var(--text-secondary); margin-bottom:1rem;">
-                Save your complete workflow — board layout, cards, and agents — as a named snapshot. Load or merge at
+                Save your complete workflow � board layout, cards, and agents � as a named snapshot. Load or merge at
                 any time to switch projects or restore a state.
             </p>
             <!-- Save current board -->
             <div style="display:flex;gap:0.5rem;align-items:center;margin-bottom:1.25rem;flex-wrap:wrap;">
-                <input type="text" id="workspaceSaveName" placeholder="Workflowspace name…"
+                <input type="text" id="workspaceSaveName" placeholder="Workflowspace name�"
                     style="flex:1;min-width:160px;max-width:280px;font-size:0.85rem;padding:0.4rem 0.6rem;">
                 <button onclick="saveWorkspace()"
                     style="font-size:0.82rem;padding:0.4rem 0.9rem;background:var(--accent);">
-                    💾 Save Workflowspace
+                    ?? Save Workflowspace
                 </button>
                 <button onclick="exportCurrentBoard()"
                     style="font-size:0.82rem;padding:0.4rem 0.9rem;background:var(--bg-card);border:1px solid var(--border);">
-                    ⬆ Export JSON
+                    ? Export JSON
                 </button>
             </div>
             <!-- Saved workflowspaces list -->
             <div id="workspacesList">
                 <div class="empty-state">
-                    <div class="empty-state-icon">💾</div>
+                    <div class="empty-state-icon">??</div>
                     <div class="empty-state-text">Loading workflowspaces...</div>
                 </div>
             </div>
@@ -437,7 +437,7 @@
                 <div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;">
                     <label style="display:flex;align-items:center;gap:0.5rem;cursor:pointer;font-size:0.85rem;">
                         <input type="checkbox" id="enableIntegration" onchange="toggleIntegrationSection()">
-                        <span>🔗 Link to External Service</span>
+                        <span>?? Link to External Service</span>
                     </label>
                 </div>
 
@@ -456,8 +456,8 @@
                     <div class="form-group">
                         <label>Sync Mode</label>
                         <select id="integrationMode">
-                            <option value="read">Read only (pull from service → Aegis)</option>
-                            <option value="write">Write only (push Aegis changes → service)</option>
+                            <option value="read">Read only (pull from service ? Aegis)</option>
+                            <option value="write">Write only (push Aegis changes ? service)</option>
                             <option value="read_write">Read + Write (bidirectional)</option>
                         </select>
                     </div>
@@ -468,7 +468,7 @@
                         <input type="number" id="integrationSyncInterval" value="60000" min="5000" step="1000">
                     </div>
                     <div class="form-group">
-                        <label>Webhook secret <span style="font-size:0.75rem;color:var(--text-secondary)">(optional —
+                        <label>Webhook secret <span style="font-size:0.75rem;color:var(--text-secondary)">(optional �
                                 for HMAC signature verification)</span></label>
                         <input type="password" id="integrationWebhookSecret"
                             placeholder="Leave blank if not using webhooks">
@@ -509,11 +509,11 @@
         </div>
     </div>
 
-    <!-- Card Detail Modal — Glass Box Control Panel -->
+    <!-- Card Detail Modal � Glass Box Control Panel -->
     <div class="modal-overlay" id="cardDetailModal">
         <div class="modal" style="max-width:900px;width:95%;">
             <div class="modal-header">
-                <h3>🔍 Glass Box</h3><button class="modal-close"
+                <h3>?? Glass Box</h3><button class="modal-close"
                     onclick="closeModal('cardDetailModal')">&times;</button>
             </div>
             <div class="modal-body" style="display:flex;gap:1rem;min-height:400px;">
@@ -541,21 +541,21 @@
                     </div>
                     <!-- Artifacts Panel -->
                     <div id="artifactsSection" style="display:none;">
-                        <label>📂 Artifacts</label>
+                        <label>?? Artifacts</label>
                         <div id="artifactsList"
                             style="max-height:120px;overflow-y:auto;font-size:0.8rem;margin-top:0.25rem;"></div>
                     </div>
                 </div>
                 <!-- Right Pane: Live Terminal + Intervention -->
                 <div id="terminalSection" style="flex:1.2;min-width:0;display:flex;flex-direction:column;">
-                    <label style="margin-bottom:0.25rem;">🖥️ Live Terminal</label>
+                    <label style="margin-bottom:0.25rem;">??? Live Terminal</label>
                     <div id="terminalOutput"
                         style="flex:1; min-height:200px; max-height:350px; overflow:hidden; border-radius: 4px; border: 1px solid var(--border); padding: 4px; background: #000;">
                     </div>
                     <!-- Inject Context -->
                     <div id="injectSection" style="display:none;margin-top:0.5rem;">
                         <div style="display:flex;gap:0.25rem;">
-                            <input type="text" id="injectInput" placeholder="💉 Inject context..."
+                            <input type="text" id="injectInput" placeholder="?? Inject context..."
                                 style="flex:1;font-size:0.8rem;">
                             <button onclick="injectContext()"
                                 style="font-size:0.75rem;padding:0.25rem 0.5rem;">Send</button>
@@ -565,14 +565,14 @@
                     <div id="interventionBar"
                         style="display:none;margin-top:0.5rem;display:flex;gap:0.5rem;flex-wrap:wrap;">
                         <button id="pauseBtn" onclick="pauseAgent()"
-                            style="font-size:0.75rem;padding:0.25rem 0.5rem;background:#f59e0b;">⏸ Pause</button>
+                            style="font-size:0.75rem;padding:0.25rem 0.5rem;background:#f59e0b;">? Pause</button>
                         <button id="resumeBtn" onclick="resumeAgent()"
-                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">▶
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">?
                             Resume</button>
                         <button id="stopAgentBtn" class="danger" onclick="stopCurrentAgent()"
-                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;">⏹ Stop</button>
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;">? Stop</button>
                         <button id="approveBtn" onclick="approveCurrentCard()"
-                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">✓
+                            style="display:none;font-size:0.75rem;padding:0.25rem 0.5rem;background:#22c55e;">?
                             Approve</button>
                     </div>
                 </div>
@@ -590,7 +590,7 @@
     <div class="modal-overlay" id="createWorkerModal">
         <div class="modal" style="max-width:550px;">
             <div class="modal-header">
-                <h3>🏗️ Create Worker</h3><button class="modal-close"
+                <h3>??? Create Worker</h3><button class="modal-close"
                     onclick="closeModal('createWorkerModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -615,11 +615,11 @@
                             <div style="display:flex;gap:0.5rem;align-items:center;">
                                 <select id="profileDropdown" onchange="applyProfile(this.value)"
                                     style="font-size:0.85rem;flex:1;">
-                                    <option value="">— Start from scratch —</option>
+                                    <option value="">� Start from scratch �</option>
                                 </select>
                                 <button class="danger" id="deleteProfileBtn"
                                     style="padding:0.4rem 0.6rem;display:none;font-size:0.8rem;"
-                                    onclick="deleteSelectedProfile()" title="Delete this profile">🗑️</button>
+                                    onclick="deleteSelectedProfile()" title="Delete this profile">???</button>
                             </div>
                         </div>
 
@@ -643,7 +643,7 @@
                             </div>
 
                             <div class="form-group">
-                                <label>🔑 API Key <span id="feedback-create-apikey"></span></label>
+                                <label>?? API Key <span id="feedback-create-apikey"></span></label>
                                 <input type="password" id="unifiedApiKey-create"
                                     placeholder="sk-ant-..., sk-..., AIza..."
                                     oninput="handleUnifiedKeyInput(event, 'create')"
@@ -662,7 +662,7 @@
 
                         <div id="cliAgentFields" style="display:none;">
                             <div class="form-group">
-                                <label>🔑 <span id="cliKeyLabel">API Key</span> <span id="feedback-create-clikey"
+                                <label>?? <span id="cliKeyLabel">API Key</span> <span id="feedback-create-clikey"
                                         style="font-size:0.75rem;"></span></label>
                                 <input type="password" id="cliApiKey-create" placeholder="Enter your API key">
                                 <small id="cliKeyHint" style="color:var(--text-muted); font-size: 0.75rem;"></small>
@@ -677,7 +677,7 @@
                             <div style="display:flex;gap:0.75rem;align-items:flex-start;">
                                 <div id="iconPreview-create" class="agent-avatar icon-preview"
                                     style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
-                                    🤖</div>
+                                    ??</div>
                                 <div style="flex:1;">
                                     <div class="emoji-grid" id="emojiGrid-create"></div>
                                     <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
@@ -685,7 +685,7 @@
                                             style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('create')">
                                         <button class="secondary"
                                             onclick="document.getElementById('iconUpload-create').click()"
-                                            style="padding:0;width:32px;" title="Upload Image">📁</button>
+                                            style="padding:0;width:32px;" title="Upload Image">??</button>
                                     </div>
                                     <input type="file" id="iconUpload-create" style="display:none;"
                                         onchange="uploadWorkerIcon('create')" accept="image/*">
@@ -712,12 +712,12 @@
                     <!-- SKILLS TAB -->
                     <div class="tab-content" id="tab-create-skills" style="display:none;">
                         <div class="form-group" style="margin-top:0.5rem;">
-                            <label>🛠️ Equipped Skills</label>
+                            <label>??? Equipped Skills</label>
                             <div id="createSettingsSkillsList"
                                 style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:0.5rem; background:var(--bg-dark);">
                                 <div style="font-size:0.8rem; color:var(--text-secondary);">Loading skills...</div>
                             </div>
-                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">⚠️
+                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">??
                                 Adding too
                                 many skills causes context rot and increases token costs. Choose specialized skills
                                 only.</small>
@@ -736,7 +736,7 @@
     <div class="modal-overlay" id="instanceSettingsModal">
         <div class="modal" style="max-width:550px;">
             <div class="modal-header">
-                <h3>⚙️ <span id="instSettingsTitle">Worker Settings</span></h3>
+                <h3>?? <span id="instSettingsTitle">Worker Settings</span></h3>
                 <button class="modal-close" onclick="closeModal('instanceSettingsModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -768,7 +768,7 @@
                         </div>
 
                         <div class="form-group">
-                            <label>🔑 API Key <span id="feedback-edit-apikey"></span></label>
+                            <label>?? API Key <span id="feedback-edit-apikey"></span></label>
                             <input type="password" id="unifiedApiKey-edit"
                                 placeholder="Update API Key (sk-ant-..., sk-..., AIza...)"
                                 oninput="handleUnifiedKeyInput(event, 'edit')"
@@ -799,7 +799,7 @@
                             <div style="display:flex;gap:0.75rem;align-items:flex-start;">
                                 <div id="iconPreview-edit" class="agent-avatar icon-preview"
                                     style="font-size:1.5rem;width:48px;height:48px;flex-shrink:0;cursor:default;display:flex;align-items:center;justify-content:center;">
-                                    🤖</div>
+                                    ??</div>
                                 <div style="flex:1;">
                                     <div class="emoji-grid" id="emojiGrid-edit"></div>
                                     <div style="display:flex;gap:0.25rem;margin-top:0.35rem;">
@@ -807,7 +807,7 @@
                                             style="flex:1;font-size:0.8rem;" oninput="updateIconPreview('edit')">
                                         <button class="secondary"
                                             onclick="document.getElementById('iconUpload-edit').click()"
-                                            style="padding:0;width:32px;" title="Upload Image">📁</button>
+                                            style="padding:0;width:32px;" title="Upload Image">??</button>
                                     </div>
                                     <input type="file" id="iconUpload-edit" style="display:none;"
                                         onchange="uploadWorkerIcon('edit')" accept="image/*">
@@ -826,12 +826,12 @@
                     <!-- SKILLS TAB -->
                     <div class="tab-content" id="tab-edit-skills" style="display:none;">
                         <div class="form-group" style="margin-top:0.5rem;">
-                            <label>🛠️ Equipped Skills</label>
+                            <label>??? Equipped Skills</label>
                             <div id="instSettingsSkillsList"
                                 style="max-height:400px; overflow-y:auto; border:1px solid var(--border); border-radius:4px; padding:0.5rem; background:var(--bg-dark);">
                                 <div style="font-size:0.8rem; color:var(--text-secondary);">Loading skills...</div>
                             </div>
-                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">⚠️
+                            <small style="color:#ef4444; font-size:0.75rem; margin-top:0.25rem; display:block;">??
                                 Adding too
                                 many skills causes context rot and increases token costs. Choose specialized skills
                                 only.</small>
@@ -858,7 +858,7 @@
     <div class="modal-overlay" id="skillsMarketplaceModal">
         <div class="modal" style="max-width:850px; width:95%; height:80vh; display:flex; flex-direction:column;">
             <div class="modal-header" style="flex-shrink:0;">
-                <h3>🛒 Skills Marketplace</h3>
+                <h3>?? Skills Marketplace</h3>
                 <button class="modal-close" onclick="closeModal('skillsMarketplaceModal')">&times;</button>
             </div>
             <div class="modal-body"
@@ -923,6 +923,15 @@
                 <button onclick="sendTerminalMessage()"
                     style="padding:0.6rem 1.2rem; background:#238636; border: 1px solid rgba(240, 246, 252, 0.1); color:#ffffff; border-radius:4px; font-weight:500; cursor: pointer;">Send</button>
             </div>
+            <!-- Terminal Chat Input Bar -->
+            <div class="modal-footer"
+                style="flex-shrink:0; background:var(--bg-card); padding:1rem; border-top:1px solid var(--border); display:flex; gap:0.5rem; align-items:center;">
+                <input type="text" id="terminalChatInput" placeholder="Message this worker directly..."
+                    style="flex:1; background:var(--bg-dark); border:1px solid var(--border); border-radius:0.375rem; padding:0.6rem 1rem; color:var(--text-primary); font-size:0.9rem;"
+                    onkeypress="if(event.key === 'Enter') sendTerminalMessage()">
+                <button onclick="sendTerminalMessage()"
+                    style="padding:0.6rem 1.2rem; background:var(--accent); color:white; border-radius:0.375rem; font-weight:600;">Send</button>
+            </div>
         </div>
     </div>
 
@@ -932,7 +941,7 @@
     <div class="modal-overlay" id="agentConflictModal">
         <div class="modal" style="max-width:650px;">
             <div class="modal-header">
-                <h3>⚠️ Agent Assistance Required</h3>
+                <h3>?? Agent Assistance Required</h3>
                 <button class="modal-close" onclick="closeModal('agentConflictModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -962,7 +971,7 @@
             </div>
             <div class="modal-footer" style="display:flex; justify-content:flex-end; gap:0.5rem;">
                 <button class="secondary" onclick="closeModal('agentConflictModal')">Close for now</button>
-                <button onclick="resolveAgentConflict()" style="background:#22c55e;">I have resolved this natively —
+                <button onclick="resolveAgentConflict()" style="background:#22c55e;">I have resolved this natively �
                     Resume Agent</button>
             </div>
         </div>
@@ -972,7 +981,7 @@
     <div class="modal-overlay" id="editColumnModal">
         <div class="modal" style="max-width:460px;">
             <div class="modal-header">
-                <h3>⚙️ Column Settings</h3><button class="modal-close"
+                <h3>?? Column Settings</h3><button class="modal-close"
                     onclick="closeModal('editColumnModal')">&times;</button>
             </div>
             <div class="modal-body">
@@ -984,7 +993,7 @@
                 <!-- Integration section -->
                 <div style="margin-top:1rem;border-top:1px solid var(--border);padding-top:1rem;">
                     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.5rem;">
-                        <label style="margin:0;font-weight:600;">🔗 Integration</label>
+                        <label style="margin:0;font-weight:600;">?? Integration</label>
                         <div id="editColIntegrationStatus" style="font-size:0.8rem;color:var(--text-secondary);"></div>
                     </div>
                     <div id="editColAddIntegrationRow" style="display:none;">
@@ -997,12 +1006,12 @@
                     <div id="editColRemoveIntegration" style="display:none;">
                         <div id="editColErrorDisplay"
                             style="display:none;background:#ef444422;border:1px solid #ef4444;border-radius:0.375rem;padding:0.6rem;margin-bottom:0.75rem;">
-                            <div style="font-size:0.8rem;font-weight:600;color:#ef4444;margin-bottom:0.25rem;">⚠️
+                            <div style="font-size:0.8rem;font-weight:600;color:#ef4444;margin-bottom:0.25rem;">??
                                 Integration Error</div>
                             <div id="editColErrorMessage"
                                 style="font-size:0.75rem;color:#fca5a5;word-break:break-word;"></div>
                             <button onclick="retryIntegrationSync()"
-                                style="margin-top:0.5rem;font-size:0.72rem;padding:0.2rem 0.6rem;background:#f59e0b;">↻
+                                style="margin-top:0.5rem;font-size:0.72rem;padding:0.2rem 0.6rem;background:#f59e0b;">?
                                 Retry Sync</button>
                         </div>
                         <label
@@ -1032,8 +1041,8 @@
                         <div class="form-group">
                             <label>Sync Mode</label>
                             <select id="editIntegrationMode">
-                                <option value="read">Read only (pull from service → Aegis)</option>
-                                <option value="write">Write only (push Aegis changes → service)</option>
+                                <option value="read">Read only (pull from service ? Aegis)</option>
+                                <option value="write">Write only (push Aegis changes ? service)</option>
                                 <option value="read_write">Read + Write (bidirectional)</option>
                             </select>
                         </div>

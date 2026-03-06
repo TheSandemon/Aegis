@@ -46,8 +46,13 @@ logger = logging.getLogger("aegis")
 
 # ─── Configuration ───────────────────────────────────────────────────────────────
 CONFIG_PATH = Path(__file__).parent / "aegis.config.json"
-with open(CONFIG_PATH, encoding="utf-8") as f:
-    CONFIG = json.load(f)
+if CONFIG_PATH.exists():
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        CONFIG = json.load(f)
+else:
+    CONFIG = {"port": 42069, "host": "0.0.0.0"}
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
+        json.dump(CONFIG, f, indent=2)
 
 # ─── Agent Registry ──────────────────────────────────────────────────────────────
 REGISTRY_PATH = Path(__file__).parent / "agent_registry.json"

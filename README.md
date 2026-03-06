@@ -80,6 +80,14 @@ Aegis is a high-performance, real-time orchestration platform for managing, moni
 
 ## 🚀 Quick Start
 
+### 🌟 New: Setup Wizard Experience
+
+Upon first launch, Aegis will present a **first-time setup wizard** to guide you through:
+
+1. Entering your preferred LLM API keys.
+2. Generating the built-in worker templates.
+3. Automatically installing CLI tools like Claude Code and Gemini CLI.
+
 ### Windows
 
 ```bash
@@ -102,7 +110,7 @@ python setup_templates.py    # Generate worker codebases
 python main.py               # Start at http://localhost:8080
 ```
 
-**Requirements**: Python 3.10+, Git (for worker git tools).
+**Requirements**: Python 3.10+, Node.js (for Claude/Gemini CLI agents), Git (for worker git tools).
 
 ---
 
@@ -274,11 +282,18 @@ Factory-pattern architecture for managing agent process lifecycles.
 - `create_process(agent_id, config, card, env)` → `AgentProcess`
 - `kill_process(agent_proc)`
 
-**`SubprocessAdapter`** — Default. Runs agents as bare-metal Python subprocesses:
+**`SubprocessAdapter`** — Default. Runs continuous agents as bare-metal Python subprocesses:
 
 - Sets up environment variables (`AEGIS_API_URL`, `INSTANCE_ID`, API keys)
 - Redirects `stdout`/`stderr` to pipes for log capture
 - Graceful termination with `SIGTERM` → `SIGKILL` fallback
+
+**`CLI Agents (Claude Code / Gemini CLI)`** — Repeated One-Shot Sawn Architecture:
+
+- CLI agents like `claude` and `gemini` are executed via a specialized async pulse loop.
+- Instead of keeping a long-running process with piped stdin (which suffers from EOF buffering issues), Aegis spawns a new process every pulse interval (e.g., `claude -p "prompt" --continue --dangerously-skip-permissions`).
+- The agent independently reads the board state (passed in the prompt), executes multi-step tooling autonomously, modifies the board via the Aegis REST API, and exits.
+- Aegis captures standard output to provide **Rich Terminal Logging** (`📡 PULSE`, `🧠 THINKING`, `⚡ WORKING`) and syncs it precisely with the **Activity Indicator UI** (pulsing CSS animations and countdown timers) on the frontend.
 
 **`DockerAdapter`** — Optional. Runs agents in isolated Docker containers:
 
@@ -409,7 +424,6 @@ PULSE LOOP (repeats every pulse_interval seconds):
 | `AEGIS_SERVICE` | LLM service to use |
 | `AEGIS_MODEL` | Model ID |
 | `AEGIS_PULSE_INTERVAL` | Seconds between pulses |
-| `AEGIS_MODE` | `continuous` or `one-shot` |
 
 ### Supported LLM Services
 
@@ -758,10 +772,10 @@ The dashboard connects to `/ws` for real-time updates. All events are JSON:
 | `column_deleted` | `{column_id}` | Column removed |
 | `agent_started` | `{agent_id, instance_id, card_id}` | Worker process spawned |
 | `agent_stopped` | `{agent_id, instance_id}` | Worker process terminated |
-| `agent_log` | `{instance_id, line}` | New log line from worker |
+| `agent_log` | `{instance_id, line}` | New log line from worker (powers Activity indicators) |
 | `agent_activity` | `{instance_id, status}` | Activity phase change |
 | `agent_bubble` | `{instance_id, text, mood}` | Thought bubble (💡⚠️🛑📢) |
-| `pulse` | `{instance_id, interval}` | Worker heartbeat for countdown |
+| `agent_pulse` | `{instance_id, interval}` | Worker heartbeat for countdown |
 | `integration_status` | `{column_id, status, error}` | Sync success/failure |
 | `broker_stats` | `{queue_depth, ...}` | Broker state update |
 | `intervention` | `{instance_id, text}` | Glass box stdin injection |

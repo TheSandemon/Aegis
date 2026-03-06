@@ -135,14 +135,6 @@ class SubprocessAdapter(ExecutionAdapter):
 
         # CLI agents: resolve npx/global binaries, skip worker.py sync
         if is_cli_agent:
-            # For CLI agents, append the prompt from config as an argument
-            prompt = agent_config.get("config", {}).get("prompt", "")
-            if prompt:
-                # Claude Code uses -p flag for prompts, Gemini CLI uses positional
-                if "claude" in command:
-                    command += f' -p "{prompt}"'
-                else:
-                    command += f' "{prompt}"'
 
             # On Windows, try to find the CLI as a .cmd script (npm global installs)
             if os.name == "nt":
@@ -555,13 +547,11 @@ class ExecutionEngine:
                     pass
 
                 _cli_goals = _cli_config.get("goals", "Process tasks from the Aegis board.")
-                _cli_prompt = _cli_config.get("prompt", "Check the board for tasks and start working.")
                 _cli_pulse = int(_cli_config.get("pulse_interval", 120))
-                _cli_mode = _cli_config.get("mode", "continuous")
                 _cli_startup_delay = str(_cli_config.get("startup_delay", "false")).lower() == "true"
                 _api_url = env.get("AEGIS_API_URL", "http://localhost:42069/api")
 
-                async def _cli_pulse_loop(_key, _proc, _goals, _prompt, _pulse, _mode, _startup_delay, _api):
+                async def _cli_pulse_loop(_key, _proc, _goals, _pulse, _startup_delay, _api):
                     """Autonomous pulse loop for CLI agents."""
                     import urllib.request, urllib.error
                     boot_wait = 5.0  # Wait for CLI REPL to paint
@@ -594,12 +584,21 @@ class ExecutionEngine:
                             except Exception as e:
                                 logger.debug(f"CLI pulse: failed to fetch board state: {e}")
 
+                            robust_instruction = (
+                                "You are an autonomous AI agent operating within the Aegis system. "
+                                "Your primary objective is to continuously monitor the Aegis Kanban board for tasks and execute them to achieve your Goal. "
+                                "You will receive periodic System Pulses containing the current board state. "
+                                "When you receive a pulse, analyze the board, identify unassigned tasks relevant to your Goal, and use your tools to complete them. "
+                                "If a user speaks to you directly in this terminal, prioritize their request, even if it alters your current focus. "
+                                "Do not wait for user permission to act; use your tools to make progress independently."
+                            )
+                            
                             if pulse_count == 1:
                                 # First pulse: send the initial prompt with goals
                                 inject_text = (
                                     f"[Aegis System Pulse #{pulse_count}]\n"
                                     f"Goal: {_goals}\n"
-                                    f"Instructions: {_prompt}"
+                                    f"System Instructions: {robust_instruction}\n"
                                     f"{board_ctx}"
                                 )
                             else:
@@ -607,8 +606,8 @@ class ExecutionEngine:
                                 inject_text = (
                                     f"[Aegis System Pulse #{pulse_count}]\n"
                                     f"Goal: {_goals}\n"
-                                    f"This is your autonomous pulse. Review the current board state, "
-                                    f"pick up any unassigned tasks, and continue working on your goal."
+                                    f"System Instructions: {robust_instruction}\n"
+                                    f"This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
                                     f"{board_ctx}"
                                 )
 
@@ -618,15 +617,12 @@ class ExecutionEngine:
                         except Exception as e:
                             logger.error(f"CLI pulse error for '{_key}': {e}")
 
-                        if _mode == "one-shot":
-                            break
-
                         # Sleep until next pulse
                         await asyncio.sleep(_pulse)
 
                 asyncio.create_task(_cli_pulse_loop(
-                    key, agent_proc, _cli_goals, _cli_prompt,
-                    _cli_pulse, _cli_mode, _cli_startup_delay, _api_url
+                    key, agent_proc, _cli_goals,
+                    _cli_pulse, _cli_startup_delay, _api_url
                 ))
 
             return agent_proc.to_dict()

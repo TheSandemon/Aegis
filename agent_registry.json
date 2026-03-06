@@ -20,22 +20,6 @@
                 "label": "Agent Goals",
                 "default": "Process tasks and help the team."
             },
-            "prompt": {
-                "type": "textarea",
-                "label": "Initial System Prompt Override",
-                "default": "",
-                "description": "Optional custom system prompt. Leave blank to use the default Aegis system prompt."
-            },
-            "mode": {
-                "type": "select",
-                "label": "Execution Mode",
-                "options": [
-                    "continuous",
-                    "one-shot"
-                ],
-                "default": "continuous",
-                "description": "Continuous: loops indefinitely each pulse. One-shot: runs once then exits."
-            },
             "pulse_interval": {
                 "type": "number",
                 "label": "Pulse Interval (Seconds)",
@@ -86,21 +70,6 @@
                 "type": "textarea",
                 "label": "Agent Goals",
                 "default": "Process tasks from the Aegis board and help the team."
-            },
-            "prompt": {
-                "type": "textarea",
-                "label": "Initial System Prompt",
-                "default": "You are connected to an Aegis Kanban board. Check the board for tasks, pick one up, and start working on it."
-            },
-            "mode": {
-                "type": "select",
-                "label": "Execution Mode",
-                "options": [
-                    "continuous",
-                    "one-shot"
-                ],
-                "default": "continuous",
-                "description": "Continuous: re-pulses autonomously each interval. One-shot: runs the initial prompt and waits for manual input."
             },
             "pulse_interval": {
                 "type": "number",
@@ -153,21 +122,6 @@
                 "type": "textarea",
                 "label": "Agent Goals",
                 "default": "Process tasks from the Aegis board and help the team."
-            },
-            "prompt": {
-                "type": "textarea",
-                "label": "Initial System Prompt",
-                "default": "You are connected to an Aegis Kanban board. Check the board for tasks, pick one up, and start working on it."
-            },
-            "mode": {
-                "type": "select",
-                "label": "Execution Mode",
-                "options": [
-                    "continuous",
-                    "one-shot"
-                ],
-                "default": "continuous",
-                "description": "Continuous: re-pulses autonomously each interval. One-shot: runs the initial prompt and waits for manual input."
             },
             "pulse_interval": {
                 "type": "number",

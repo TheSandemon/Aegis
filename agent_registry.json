@@ -20,6 +20,12 @@
                 "label": "Agent Goals",
                 "default": "Process tasks and help the team."
             },
+            "prompt": {
+                "type": "textarea",
+                "label": "Initial System Prompt Override",
+                "default": "",
+                "description": "Optional custom system prompt. Leave blank to use the default Aegis system prompt."
+            },
             "mode": {
                 "type": "select",
                 "label": "Execution Mode",
@@ -36,8 +42,8 @@
                 "default": 60
             },
             "work_dir": {
-                "type": "text",
-                "label": "Workspace Path (Local or URL)",
+                "type": "folder",
+                "label": "Workspace Path",
                 "default": "./"
             },
             "startup_delay": {
@@ -45,6 +51,146 @@
                 "label": "Delay First Action",
                 "default": false,
                 "description": "Wait one pulse interval before taking the first action."
+            },
+            "api_base_url": {
+                "type": "text",
+                "label": "Custom API Base URL (Optional)",
+                "default": "",
+                "description": "Override the default LLM API endpoint."
+            }
+        }
+    },
+    {
+        "id": "claude-code",
+        "name": "Claude Code",
+        "version": "1.0.0",
+        "description": "Anthropic's agentic coding CLI. Requires an Anthropic API key and Node.js 18+.",
+        "icon": "\ud83d\udfe0",
+        "cli_agent": true,
+        "api_key_env": "ANTHROPIC_API_KEY",
+        "installation": {
+            "method": "npm_global",
+            "setup_commands": [
+                "npm install -g @anthropic-ai/claude-code"
+            ]
+        },
+        "execution": {
+            "command": "claude --dangerously-skip-permissions",
+            "interactive": true,
+            "env_vars_required": [
+                "ANTHROPIC_API_KEY"
+            ]
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "Process tasks from the Aegis board and help the team."
+            },
+            "prompt": {
+                "type": "textarea",
+                "label": "Initial System Prompt",
+                "default": "You are connected to an Aegis Kanban board. Check the board for tasks, pick one up, and start working on it."
+            },
+            "mode": {
+                "type": "select",
+                "label": "Execution Mode",
+                "options": [
+                    "continuous",
+                    "one-shot"
+                ],
+                "default": "continuous",
+                "description": "Continuous: re-pulses autonomously each interval. One-shot: runs the initial prompt and waits for manual input."
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 120,
+                "description": "How often to send a board-state update into the CLI agent's terminal. This is the autonomous heartbeat."
+            },
+            "work_dir": {
+                "type": "folder",
+                "label": "Workspace Path",
+                "default": "./"
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before sending the initial prompt."
+            },
+            "api_base_url": {
+                "type": "text",
+                "label": "Custom API Base URL (Optional)",
+                "default": "",
+                "description": "Override the default Anthropic API endpoint to use custom providers like Minimax."
+            }
+        }
+    },
+    {
+        "id": "gemini-cli",
+        "name": "Gemini CLI",
+        "version": "1.0.0",
+        "description": "Google's agentic coding CLI. Accepts a Gemini API key or Google Cloud key. Requires Node.js 18+.",
+        "icon": "\ud83d\udd35",
+        "cli_agent": true,
+        "api_key_env": "GEMINI_API_KEY",
+        "installation": {
+            "method": "npm_global",
+            "setup_commands": [
+                "npm install -g @google/gemini-cli"
+            ]
+        },
+        "execution": {
+            "command": "gemini",
+            "interactive": true,
+            "env_vars_required": [
+                "GEMINI_API_KEY"
+            ]
+        },
+        "config_schema": {
+            "goals": {
+                "type": "textarea",
+                "label": "Agent Goals",
+                "default": "Process tasks from the Aegis board and help the team."
+            },
+            "prompt": {
+                "type": "textarea",
+                "label": "Initial System Prompt",
+                "default": "You are connected to an Aegis Kanban board. Check the board for tasks, pick one up, and start working on it."
+            },
+            "mode": {
+                "type": "select",
+                "label": "Execution Mode",
+                "options": [
+                    "continuous",
+                    "one-shot"
+                ],
+                "default": "continuous",
+                "description": "Continuous: re-pulses autonomously each interval. One-shot: runs the initial prompt and waits for manual input."
+            },
+            "pulse_interval": {
+                "type": "number",
+                "label": "Pulse Interval (Seconds)",
+                "default": 120,
+                "description": "How often to send a board-state update into the CLI agent's terminal. This is the autonomous heartbeat."
+            },
+            "work_dir": {
+                "type": "folder",
+                "label": "Workspace Path",
+                "default": "./"
+            },
+            "startup_delay": {
+                "type": "boolean",
+                "label": "Delay First Action",
+                "default": false,
+                "description": "Wait one pulse interval before sending the initial prompt."
+            },
+            "api_base_url": {
+                "type": "text",
+                "label": "Custom API Base URL (Optional)",
+                "default": "",
+                "description": "Override the default Gemini API endpoint to use custom providers."
             }
         }
     }

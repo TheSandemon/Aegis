@@ -253,6 +253,30 @@ async def get_system_status():
     is_first_run = len(instances) == 0 and len(cards) == 0 and len(profiles) == 0
     return {"is_first_run": is_first_run}
 
+@app.get("/api/browse-folder")
+async def browse_folder():
+    """Open a native OS folder picker dialog and return the selected path."""
+    import asyncio
+    from concurrent.futures import ThreadPoolExecutor
+
+    def _pick_folder():
+        try:
+            import tkinter as tk
+            from tkinter import filedialog
+            root = tk.Tk()
+            root.withdraw()
+            root.attributes("-topmost", True)
+            folder = filedialog.askdirectory(title="Select Workspace Folder")
+            root.destroy()
+            return folder or ""
+        except Exception:
+            return ""
+
+    loop = asyncio.get_event_loop()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        result = await loop.run_in_executor(pool, _pick_folder)
+    return {"path": result}
+
 @app.post("/api/assets/upload")
 async def upload_asset(file: UploadFile = File(...)):
     """Upload a custom icon or asset."""

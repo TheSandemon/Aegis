@@ -758,44 +758,86 @@ function renderConfigSchema(templateId, containerId, savedConfig = {}) {
 
     for (const [key, def] of Object.entries(schema)) {
         const saved = savedConfig[key] !== undefined ? savedConfig[key] : def.default;
+        const desc = def.description ? `<div style="font-size:0.7rem;color:var(--text-secondary);margin-top:0.15rem;">${escapeHtml(def.description)}</div>` : '';
+
         html += `<div class="form-group" style="margin-bottom:0.5rem;">`;
-        html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
 
         switch (def.type) {
+            case 'boolean':
+                const checked = (saved === true || saved === 'true') ? 'checked' : '';
+                html += `<div style="display:flex;align-items:center;justify-content:space-between;">`;
+                html += `<label style="font-size:0.85rem;margin-bottom:0;">${def.label || key}</label>`;
+                html += `<label class="toggle"><input type="checkbox" class="config-input" data-config-key="${key}" data-type="boolean" ${checked}><span class="toggle-slider"></span></label>`;
+                html += `</div>`;
+                html += desc;
+                break;
+            case 'folder':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
+                html += `<div style="display:flex;gap:0.25rem;">`;
+                html += `<input type="text" class="config-input" data-config-key="${key}" value="${escapeHtml(String(saved))}" style="font-size:0.8rem;flex:1;" id="folder-${containerId}-${key}">`;
+                html += `<button type="button" class="secondary" style="font-size:0.75rem;padding:0.25rem 0.5rem;white-space:nowrap;" onclick="browseFolderFor('folder-${containerId}-${key}')">📂 Browse</button>`;
+                html += `</div>`;
+                html += desc;
+                break;
             case 'textarea':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<textarea class="config-input" data-config-key="${key}" data-mention="true" rows="2" style="font-size:0.8rem;">${escapeHtml(String(saved))}</textarea>`;
+                html += desc;
                 break;
             case 'range':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<div style="display:flex;align-items:center;gap:0.5rem;">`;
                 html += `<input type="range" class="config-input" data-config-key="${key}" min="${def.min}" max="${def.max}" step="${def.step}" value="${saved}" oninput="this.nextElementSibling.textContent=this.value" style="flex:1;">`;
                 html += `<span style="font-size:0.8rem;min-width:2rem;">${saved}</span>`;
                 html += `</div>`;
+                html += desc;
                 break;
             case 'number':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<input type="number" class="config-input" data-config-key="${key}" value="${saved}" style="font-size:0.8rem;">`;
+                html += desc;
                 break;
             case 'select':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<select class="config-input" data-config-key="${key}" style="font-size:0.8rem;">`;
                 (def.options || []).forEach(opt => {
                     html += `<option value="${opt}" ${opt === saved ? 'selected' : ''}>${opt}</option>`;
                 });
                 html += `</select>`;
+                html += desc;
                 break;
             case 'multiselect':
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 const selectedArr = Array.isArray(saved) ? saved : [];
                 html += `<div class="config-input" data-config-key="${key}" data-type="multiselect" style="display:flex;flex-wrap:wrap;gap:0.25rem;">`;
                 (def.options || []).forEach(opt => {
-                    const checked = selectedArr.includes(opt) ? 'checked' : '';
-                    html += `<label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;"><input type="checkbox" value="${opt}" ${checked}> ${opt}</label>`;
+                    const mchecked = selectedArr.includes(opt) ? 'checked' : '';
+                    html += `<label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;"><input type="checkbox" value="${opt}" ${mchecked}> ${opt}</label>`;
                 });
                 html += `</div>`;
+                html += desc;
                 break;
             default:
+                html += `<label style="font-size:0.85rem;">${def.label || key}</label>`;
                 html += `<input type="text" class="config-input" data-config-key="${key}" value="${escapeHtml(String(saved))}" style="font-size:0.8rem;">`;
+                html += desc;
         }
         html += `</div>`;
     }
     container.innerHTML = html;
+}
+
+async function browseFolderFor(inputId) {
+    try {
+        const res = await fetch('/api/browse-folder');
+        const data = await res.json();
+        if (data.path) {
+            document.getElementById(inputId).value = data.path;
+        }
+    } catch (e) {
+        console.error('Folder browse error:', e);
+        showToast('⚠️ Could not open folder picker');
+    }
 }
 
 function collectConfigValues(containerId) {
@@ -805,7 +847,9 @@ function collectConfigValues(containerId) {
     container.querySelectorAll('.config-input').forEach(el => {
         const key = el.dataset.configKey;
         if (!key) return;
-        if (el.dataset.type === 'multiselect') {
+        if (el.dataset.type === 'boolean') {
+            config[key] = el.checked;
+        } else if (el.dataset.type === 'multiselect') {
             config[key] = [...el.querySelectorAll('input[type=checkbox]:checked')].map(cb => cb.value);
         } else if (el.type === 'range' || el.type === 'number') {
             config[key] = Number(el.value);

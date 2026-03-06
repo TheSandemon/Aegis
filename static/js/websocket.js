@@ -5,6 +5,141 @@
 let ws = null;
 const agentCardMap = {}; // instance_id → { card_id, color }
 
+// ─── Xterm.js Terminal Manager ────────────────────────────────────────────────
+// Global maps to hold terminal instances
+window.terminals = {
+    modal: null,               // Single Terminal instance for the modal
+    modalFit: null,            // FitAddon for modal
+    activeModalInstance: null, // Which instance is currently viewed in modal
+    card: null,                // Single Terminal instance for the card modal
+    cardFit: null,             // FitAddon for card modal
+    activeCardInstance: null,  // Which instance is currently viewed in card modal
+    minis: {},                 // instanceId -> { term: Terminal, fit: FitAddon }
+    history: {}                // instanceId -> raw log history for replaying
+};
+
+function initModalTerminal() {
+    if (window.terminals.modal) return;
+    const term = new Terminal({
+        theme: {
+            background: '#0d1117', // GitHub Dark-ish
+            foreground: '#c9d1d9',
+            cursor: '#58a6ff',
+            cursorAccent: '#0d1117',
+            selection: '#388bfd33',
+            black: '#484f58',
+            red: '#ff7b72',
+            green: '#3fb950',
+            yellow: '#d29922',
+            blue: '#58a6ff',
+            magenta: '#bc8cff',
+            cyan: '#39c5cf',
+            white: '#b1bac4',
+            brightBlack: '#6e7681',
+            brightRed: '#ffa198',
+            brightGreen: '#56d364',
+            brightYellow: '#e3b341',
+            brightBlue: '#79c0ff',
+            brightMagenta: '#d2a8ff',
+            brightCyan: '#56d4dd',
+            brightWhite: '#ffffff'
+        },
+        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+        fontSize: 14,
+        fontWeight: '500',
+        convertEol: true,
+        cursorBlink: true,
+        cursorStyle: 'block'
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+
+    // Capture keystrokes (stdin) and send to backend
+    term.onData(data => {
+        const activeId = window.terminals.activeModalInstance;
+        if (activeId && window.ws && window.ws.readyState === WebSocket.OPEN) {
+            window.ws.send(JSON.stringify({
+                type: 'stdin',
+                instance_id: activeId,
+                data: data
+            }));
+        }
+    });
+
+    window.terminals.modal = term;
+    window.terminals.modalFit = fitAddon;
+}
+
+function initCardTerminal() {
+    if (window.terminals.card) return;
+    const term = new Terminal({
+        theme: {
+            background: '#0d1117',
+            foreground: '#c9d1d9',
+            cursor: '#58a6ff',
+            selection: '#388bfd33',
+            black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4'
+        },
+        fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+        fontSize: 12, // Slightly smaller for the card modal
+        convertEol: true,
+        disableStdin: true, // Card view doesn't allow interaction right now
+        cursorBlink: false
+    });
+    const fitAddon = new FitAddon.FitAddon();
+    term.loadAddon(fitAddon);
+
+    window.terminals.card = term;
+    window.terminals.cardFit = fitAddon;
+}
+
+function getOrCreateMiniTerminal(instanceId) {
+    if (!window.terminals.minis[instanceId]) {
+        const term = new Terminal({
+            theme: {
+                background: '#0d1117',
+                foreground: '#8b949e', // Dimmer foreground for the mini view
+                black: '#484f58', red: '#ff7b72', green: '#3fb950', yellow: '#d29922', blue: '#58a6ff', magenta: '#bc8cff', cyan: '#39c5cf', white: '#b1bac4'
+            },
+            fontFamily: "'Fira Code', 'Cascadia Code', Consolas, 'Courier New', monospace",
+            fontSize: 10,
+            convertEol: true,
+            disableStdin: true,
+            cursorBlink: false,
+            scrollback: 20 // Keep it incredibly light for the mini view
+        });
+        const fitAddon = new FitAddon.FitAddon();
+        term.loadAddon(fitAddon);
+        window.terminals.minis[instanceId] = { term, fit: fitAddon };
+    }
+    return window.terminals.minis[instanceId];
+}
+
+function writeToTerminal(instanceId, chunk) {
+    // Save to history
+    if (!window.terminals.history[instanceId]) window.terminals.history[instanceId] = '';
+    window.terminals.history[instanceId] += chunk;
+    if (window.terminals.history[instanceId].length > 50000) {
+        window.terminals.history[instanceId] = window.terminals.history[instanceId].slice(-50000);
+    }
+
+    // Write to modal if active
+    if (window.terminals.activeModalInstance === instanceId && window.terminals.modal) {
+        window.terminals.modal.write(chunk);
+    }
+
+    // Write to card modal if active
+    if (window.terminals.activeCardInstance === instanceId && window.terminals.card) {
+        window.terminals.card.write(chunk);
+    }
+
+    // Write to mini terminal
+    const mini = window.terminals.minis[instanceId];
+    if (mini) {
+        mini.term.write(chunk);
+    }
+}
+
 function connectWebSocket() {
     updateConnectionStatus('connecting');
     ws = new WebSocket(`ws://${location.host}/ws`);
@@ -83,19 +218,24 @@ function handleWebSocketMessage(data) {
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             break;
         case 'agent_log':
-            const logEl = document.getElementById(`logs-${data.agent_id}`);
-            if (logEl) {
-                const entry = document.createElement('div');
-                entry.textContent = data.entry;
-                logEl.appendChild(entry);
-                logEl.scrollTop = logEl.scrollHeight;
+            const targetId = data.instance_id || data.agent_id;
+
+            // Write the raw payload directly to xterm so ANSI colors and progress bars render natively
+            let chunk = data.entry;
+            // Xterm expects CRLF for proper newline rendering
+            if (!chunk.includes('\r') && chunk.includes('\n')) {
+                chunk = chunk.replace(/\n/g, '\r\n');
+            } else if (!chunk.includes('\n') && !chunk.includes('\r')) {
+                chunk += '\r\n'; // basic fallback line
             }
 
+            writeToTerminal(targetId, chunk);
+
             // Extract and update agent activity
-            const targetId = data.instance_id || data.agent_id;
             const activityEl = document.getElementById(`activity-${targetId}`);
             if (activityEl) {
                 const text = data.entry;
+                // Aegis Worker patterns
                 if (text.includes('📡 PULSE: Fetching board state')) {
                     activityEl.innerHTML = '<span style="color: #60a5fa">📡 Fetching board state...</span>';
                 } else if (text.includes('🧠 THINKING: Consulting LLM')) {
@@ -110,6 +250,20 @@ function handleWebSocketMessage(data) {
                 } else if (text.includes('❌ ERROR:')) {
                     activityEl.innerHTML = '<span style="color: var(--danger)">❌ Error</span>';
                 }
+                // CLI Agent patterns (Claude Code, Gemini CLI)
+                else if (/thinking|reasoning/i.test(text)) {
+                    activityEl.innerHTML = '<span style="color: #c084fc">🧠 Thinking...</span>';
+                } else if (/\btool[:\s]/i.test(text) || /ReadFile|WriteFile|SearchReplace|ListDir/i.test(text)) {
+                    const toolMatch = text.match(/(?:Tool[:\s]+|)(ReadFile|WriteFile|SearchReplace|ListDir|Bash|Edit|TodoRead|TodoWrite|WebSearch|Grep|Glob|LS)\b/i);
+                    const toolName = toolMatch ? toolMatch[1] : 'tool';
+                    activityEl.innerHTML = `<span style="color: #facc15">🔧 ${toolName}</span>`;
+                } else if (/\bBash\b/i.test(text)) {
+                    activityEl.innerHTML = '<span style="color: #34d399">💻 Running command...</span>';
+                } else if (/\b(result|output)[:\s]/i.test(text) && text.length > 10) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📄 Processing result...</span>';
+                } else if (/Aegis System Pulse/i.test(text)) {
+                    activityEl.innerHTML = '<span style="color: #60a5fa">📡 Pulse received</span>';
+                }
             }
 
             // Agent-card highlight: glow the card while agent is actively logging
@@ -117,7 +271,7 @@ function handleWebSocketMessage(data) {
                 const mapping = agentCardMap[data.instance_id];
                 if (mapping) {
                     const isActive = data.entry.includes('THOUGHT') || data.entry.includes('ACTION') ||
-                                     data.entry.includes('THINKING') || data.entry.includes('PULSE');
+                        data.entry.includes('THINKING') || data.entry.includes('PULSE');
                     if (isActive) setCardAgentHighlight(mapping.card_id, mapping.color, true);
                 }
             }
@@ -125,23 +279,29 @@ function handleWebSocketMessage(data) {
             // Speech Bubbles: Show thought on THOUGHT, ERROR, ATTENTION, or explicit NOTIFY logs
             if (data.entry && typeof showAgentBubble === 'function') {
                 const id = data.instance_id || data.agent_id;
-                const thoughtMatch   = data.entry.match(/💡 THOUGHT: (.+)/);
-                const errorMatch     = data.entry.match(/🛑 ERROR: (.+)/);
+                const thoughtMatch = data.entry.match(/💡 THOUGHT: (.+)/);
+                const errorMatch = data.entry.match(/🛑 ERROR: (.+)/);
                 const attentionMatch = data.entry.match(/⚠️ ATTENTION: (.+)/);
-                const notifyMatch    = data.entry.match(/📢 NOTIFY: (.+)/);
-                const warnNotify     = data.entry.match(/⚠️ NOTIFY: (.+)/);
-                const errNotify      = data.entry.match(/🛑 NOTIFY: (.+)/);
+                const notifyMatch = data.entry.match(/📢 NOTIFY: (.+)/);
+                const warnNotify = data.entry.match(/⚠️ NOTIFY: (.+)/);
+                const errNotify = data.entry.match(/🛑 NOTIFY: (.+)/);
 
-                if (thoughtMatch)   showAgentBubble(id, thoughtMatch[1], 'thought');
-                if (errorMatch)     showAgentBubble(id, errorMatch[1], 'error');
+                if (thoughtMatch) showAgentBubble(id, thoughtMatch[1], 'thought');
+                if (errorMatch) showAgentBubble(id, errorMatch[1], 'error');
                 if (attentionMatch) showAgentBubble(id, attentionMatch[1], 'attention');
-                if (notifyMatch)    showAgentBubble(id, notifyMatch[1], 'notify');
-                if (warnNotify)     showAgentBubble(id, warnNotify[1], 'attention');
-                if (errNotify)      showAgentBubble(id, errNotify[1], 'error');
+                if (notifyMatch) showAgentBubble(id, notifyMatch[1], 'notify');
+                if (warnNotify) showAgentBubble(id, warnNotify[1], 'attention');
+                if (errNotify) showAgentBubble(id, errNotify[1], 'error');
             }
             break;
         case 'log_entry':
             appendLogEntry(data.card_id, data.entry);
+            break;
+        case 'agent_conflict':
+            showToast(`⚠️ Agent ${data.agent_id} encountered a fatal error/conflict!`, 'error');
+            if (typeof triggerConflictWizard === 'function') {
+                triggerConflictWizard(data);
+            }
             break;
         case 'agent_paused':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();

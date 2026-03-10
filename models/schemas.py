@@ -33,6 +33,7 @@ class InstanceCreate(BaseModel):
     skills: Optional[list[str]] = []
     icon: Optional[str] = None
     color: Optional[str] = None
+    character_type: Optional[str] = "robot"
 
 class InstanceUpdate(BaseModel):
     instance_name: Optional[str] = None
@@ -45,6 +46,7 @@ class InstanceUpdate(BaseModel):
     icon: Optional[str] = None
     color: Optional[str] = None
     priority: Optional[str] = None
+    character_type: Optional[str] = None
 
 class CommentCreate(BaseModel):
     author: str
@@ -66,6 +68,9 @@ class ColumnCreate(BaseModel):
     position: Optional[int] = 0
     color: Optional[str] = None
     integration: Optional[IntegrationConfig] = None
+    function: Optional[str] = ""
+    exit_pass: Optional[str] = ""
+    exit_fail: Optional[str] = ""
 
 class SystemPromptUpdate(BaseModel):
     prompt: str
@@ -85,6 +90,9 @@ class ColumnUpdate(BaseModel):
     is_locked: Optional[bool] = None
     integration: Optional[IntegrationConfig] = None
     remove_integration: bool = False
+    function: Optional[str] = None
+    exit_pass: Optional[str] = None
+    exit_fail: Optional[str] = None
 class PulseRequest(BaseModel):
     interval: float
 
@@ -113,3 +121,15 @@ class ConnectionCreate(BaseModel):
 
 class DevicePollRequest(BaseModel):
     device_code: str
+
+
+class CoStarConfig(BaseModel):
+    """Configuration for CoStar AI super admin assistant."""
+    enabled: bool = False
+    api_key: str = ""
+    model: str = "claude-sonnet-4-6"
+    service: str = "anthropic"
+    rate_limit: int = 10  # prompts per minute
+    max_retries: int = 3
+    auto_memory_compress: bool = True
+    memory_compress_threshold: float = 0.5

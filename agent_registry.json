@@ -41,6 +41,45 @@
                 "label": "Custom API Base URL (Optional)",
                 "default": "",
                 "description": "Override the default LLM API endpoint."
+            },
+            "character_type": {
+                "type": "select",
+                "label": "Character",
+                "default": "robot",
+                "options": [
+                    {
+                        "value": "robot",
+                        "label": "\ud83e\udd16 Robot"
+                    },
+                    {
+                        "value": "cat",
+                        "label": "\ud83d\udc31 Cat"
+                    },
+                    {
+                        "value": "dog",
+                        "label": "\ud83d\udc36 Dog"
+                    },
+                    {
+                        "value": "bear",
+                        "label": "\ud83d\udc3b Bear"
+                    },
+                    {
+                        "value": "bunny",
+                        "label": "\ud83d\udc30 Bunny"
+                    },
+                    {
+                        "value": "fox",
+                        "label": "\ud83e\udd8a Fox"
+                    },
+                    {
+                        "value": "owl",
+                        "label": "\ud83e\udd89 Owl"
+                    },
+                    {
+                        "value": "penguin",
+                        "label": "\ud83d\udc27 Penguin"
+                    }
+                ]
             }
         }
     },
@@ -59,11 +98,9 @@
             ]
         },
         "execution": {
-            "command": "claude --dangerously-skip-permissions",
-            "interactive": true,
-            "env_vars_required": [
-                "ANTHROPIC_API_KEY"
-            ]
+            "working_dir": "./agents/claude-code",
+            "command": "python -u worker.py",
+            "env_vars_required": []
         },
         "config_schema": {
             "goals": {
@@ -93,6 +130,45 @@
                 "label": "Custom API Base URL (Optional)",
                 "default": "",
                 "description": "Override the default Anthropic API endpoint to use custom providers like Minimax."
+            },
+            "character_type": {
+                "type": "select",
+                "label": "Character",
+                "default": "robot",
+                "options": [
+                    {
+                        "value": "robot",
+                        "label": "\ud83e\udd16 Robot"
+                    },
+                    {
+                        "value": "cat",
+                        "label": "\ud83d\udc31 Cat"
+                    },
+                    {
+                        "value": "dog",
+                        "label": "\ud83d\udc36 Dog"
+                    },
+                    {
+                        "value": "bear",
+                        "label": "\ud83d\udc3b Bear"
+                    },
+                    {
+                        "value": "bunny",
+                        "label": "\ud83d\udc30 Bunny"
+                    },
+                    {
+                        "value": "fox",
+                        "label": "\ud83e\udd8a Fox"
+                    },
+                    {
+                        "value": "owl",
+                        "label": "\ud83e\udd89 Owl"
+                    },
+                    {
+                        "value": "penguin",
+                        "label": "\ud83d\udc27 Penguin"
+                    }
+                ]
             }
         }
     },
@@ -111,11 +187,9 @@
             ]
         },
         "execution": {
-            "command": "gemini",
-            "interactive": true,
-            "env_vars_required": [
-                "GEMINI_API_KEY"
-            ]
+            "working_dir": "./agents/gemini-cli",
+            "command": "python -u worker.py",
+            "env_vars_required": []
         },
         "config_schema": {
             "goals": {
@@ -145,6 +219,45 @@
                 "label": "Custom API Base URL (Optional)",
                 "default": "",
                 "description": "Override the default Gemini API endpoint to use custom providers."
+            },
+            "character_type": {
+                "type": "select",
+                "label": "Character",
+                "default": "robot",
+                "options": [
+                    {
+                        "value": "robot",
+                        "label": "\ud83e\udd16 Robot"
+                    },
+                    {
+                        "value": "cat",
+                        "label": "\ud83d\udc31 Cat"
+                    },
+                    {
+                        "value": "dog",
+                        "label": "\ud83d\udc36 Dog"
+                    },
+                    {
+                        "value": "bear",
+                        "label": "\ud83d\udc3b Bear"
+                    },
+                    {
+                        "value": "bunny",
+                        "label": "\ud83d\udc30 Bunny"
+                    },
+                    {
+                        "value": "fox",
+                        "label": "\ud83e\udd8a Fox"
+                    },
+                    {
+                        "value": "owl",
+                        "label": "\ud83e\udd89 Owl"
+                    },
+                    {
+                        "value": "penguin",
+                        "label": "\ud83d\udc27 Penguin"
+                    }
+                ]
             }
         }
     }

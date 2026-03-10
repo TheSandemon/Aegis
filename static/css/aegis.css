@@ -44,6 +44,7 @@ body {
 .app-container {
     display: flex;
     flex: 1;
+    min-width: 0;
     height: calc(100vh - 56px);
     overflow: hidden;
 }
@@ -148,11 +149,62 @@ body {
     border-top: 1px solid var(--border) !important;
     background: #050505 !important;
     height: 80px;
-    border-radius: 0 0 0.75rem 0.75rem;
+    border-radius: 0;
 }
 
 .agent-sidebar-card .mini-terminal-container .terminal {
     height: 100% !important;
+}
+
+.mini-chat-container {
+    display: flex;
+    align-items: flex-end;
+    gap: 0.25rem;
+    padding: 0.35rem 0.5rem;
+    background: #0a0a0a;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0 0 0.75rem 0.75rem;
+}
+
+.mini-chat-input {
+    flex: 1;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.1);
+    border-radius: 0.4rem;
+    color: var(--text-primary);
+    font-size: 0.7rem;
+    padding: 0.3rem 0.5rem;
+    resize: none;
+    overflow: hidden;
+    line-height: 1.3;
+    font-family: inherit;
+    outline: none;
+    transition: border-color 0.2s;
+}
+
+.mini-chat-input:focus {
+    border-color: var(--agent-color, var(--primary));
+}
+
+.mini-chat-input::placeholder {
+    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.65rem;
+}
+
+.mini-chat-send {
+    background: none;
+    border: none;
+    color: var(--agent-color, var(--primary));
+    font-size: 0.85rem;
+    cursor: pointer;
+    padding: 0.15rem 0.3rem;
+    border-radius: 0.3rem;
+    transition: background 0.2s;
+    line-height: 1;
+}
+
+.mini-chat-send:hover {
+    background: rgba(255, 255, 255, 0.1);
 }
 
 .agent-avatar {
@@ -253,22 +305,190 @@ body {
     }
 }
 
+/* ═══════════════════════════════════════════════════════════
+   Walking Agent Characters
+   ═══════════════════════════════════════════════════════════ */
+
+.agent-character {
+    position: fixed;
+    width: 48px;
+    height: 56px;
+    z-index: 1000;
+    pointer-events: none;
+    transition: transform 0.1s linear;
+    filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4));
+}
+
+.agent-character svg {
+    width: 100%;
+    height: 100%;
+}
+
+/* Character body parts for animation */
+.agent-character .char-body {
+    transform-origin: center bottom;
+}
+
+.agent-character .char-arm {
+    transform-origin: top center;
+}
+
+.agent-character .char-leg {
+    transform-origin: top center;
+}
+
+/* Character types - SVG definitions embedded */
+.agent-character.char-robot { --char-color: #6b7280; --char-accent: #3b82f6; }
+.agent-character.char-cat { --char-color: #f97316; --char-accent: #fed7aa; }
+.agent-character.char-dog { --char-color: #a16207; --char-accent: #fde047; }
+.agent-character.char-bear { --char-color: #78350f; --char-accent: #fdba74; }
+.agent-character.char-bunny { --char-color: #ec4899; --char-accent: #fbcfe8; }
+.agent-character.char-fox { --char-color: #ea580c; --char-accent: #ffedd5; }
+.agent-character.char-owl { --char-color: #475569; --char-accent: #fbbf24; }
+.agent-character.char-penguin { --char-color: #1e293b; --char-accent: #e2e8f0; }
+.agent-character.char-star { --char-color: #a855f7; --char-accent: #fde047; }
+
+/* Movement animations */
+@keyframes walk-hop {
+    0%, 100% { transform: translateY(0) scale(1, 1); }
+    25% { transform: translateY(-12px) scale(0.95, 1.05); }
+    50% { transform: translateY(-20px) scale(1.05, 0.95); }
+    75% { transform: translateY(-12px) scale(0.95, 1.05); }
+}
+
+@keyframes walk-waddle {
+    0%, 100% { transform: translateX(0) rotate(-5deg); }
+    25% { transform: translateX(4px) rotate(5deg); }
+    50% { transform: translateX(0) rotate(5deg); }
+    75% { transform: translateX(-4px) rotate(-5deg); }
+}
+
+@keyframes walk-sprint {
+    0%, 100% { transform: translateX(0) scaleX(1); }
+    25% { transform: translateX(8px) scaleX(0.9); }
+    50% { transform: translateX(16px) scaleX(1.1); }
+    75% { transform: translateX(8px) scaleX(0.9); }
+}
+
+@keyframes walk-float {
+    0%, 100% { transform: translateY(0) translateX(0); opacity: 1; }
+    25% { transform: translateY(-8px) translateX(4px); opacity: 0.9; }
+    50% { transform: translateY(-16px) translateX(0); opacity: 0.85; }
+    75% { transform: translateY(-8px) translateX(-4px); opacity: 0.9; }
+}
+
+@keyframes walk-skip {
+    0%, 100% { transform: translateY(0) rotate(-8deg); }
+    20% { transform: translateY(-16px) rotate(0deg); }
+    40% { transform: translateY(0) rotate(8deg); }
+    60% { transform: translateY(-12px) rotate(0deg); }
+    80% { transform: translateY(0) rotate(-4deg); }
+}
+
+@keyframes walk-moonwalk {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(-6px) translateY(-4px); }
+    50% { transform: translateX(-12px) translateY(0); }
+    75% { transform: translateX(-6px) translateY(-4px); }
+}
+
+@keyframes walk-teleport {
+    0% { opacity: 1; transform: scale(1); }
+    20% { opacity: 0; transform: scale(0.3); }
+    50% { opacity: 0; transform: translateY(-20px) scale(0.3); }
+    80% { opacity: 0; transform: scale(1.2); }
+    100% { opacity: 1; transform: scale(1); }
+}
+
+/* Working/idle animations */
+@keyframes work-think {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-4px); }
+}
+
+@keyframes work-type {
+    0%, 100% { transform: translateY(0); }
+    25% { transform: translateY(-2px) rotate(2deg); }
+    75% { transform: translateY(-2px) rotate(-2deg); }
+}
+
+@keyframes work-look {
+    0%, 100% { transform: translateX(0); }
+    25% { transform: translateX(3px); }
+    75% { transform: translateX(-3px); }
+}
+
+@keyframes work-bounce {
+    0%, 100% { transform: translateY(0) scale(1); }
+    50% { transform: translateY(-6px) scale(1.05, 0.95); }
+}
+
+/* Arm and leg animations */
+@keyframes arm-wave {
+    0%, 100% { transform: rotate(-15deg); }
+    50% { transform: rotate(15deg); }
+}
+
+@keyframes leg-walk {
+    0%, 100% { transform: rotate(-20deg); }
+    50% { transform: rotate(20deg); }
+}
+
+/* Apply movement styles */
+.agent-character.moving-hop { animation: walk-hop 0.4s ease-in-out infinite; }
+.agent-character.moving-waddle { animation: walk-waddle 0.3s ease-in-out infinite; }
+.agent-character.moving-sprint { animation: walk-sprint 0.2s linear infinite; }
+.agent-character.moving-float { animation: walk-float 0.6s ease-in-out infinite; }
+.agent-character.moving-skip { animation: walk-skip 0.35s ease-in-out infinite; }
+.agent-character.moving-moonwalk { animation: walk-moonwalk 0.5s linear infinite; }
+.agent-character.moving-teleport { animation: walk-teleport 0.3s ease-in-out; }
+
+/* Working states */
+.agent-character.working-think { animation: work-think 1s ease-in-out infinite; }
+.agent-character.working-type { animation: work-type 0.3s ease-in-out infinite; }
+.agent-character.working-look { animation: work-look 0.8s ease-in-out infinite; }
+.agent-character.working-bounce { animation: work-bounce 0.5s ease-in-out infinite; }
+
+/* CoStar character special styles */
+.costar-character {
+    position: fixed;
+    width: 56px;
+    height: 64px;
+    z-index: 1001;
+    pointer-events: none;
+    filter: drop-shadow(0 4px 8px rgba(168, 85, 247, 0.5));
+}
+
+/* Character visibility */
+.agent-character.hidden { display: none; }
+
+/* Board overlay for characters */
+.board-character-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 999;
+}
+
 /* ─── Board ──────────────────────────────────────────────── */
 .board {
     display: flex;
     gap: 1rem;
     padding: 1rem;
-    flex: 1;
-    overflow-x: auto;
+    min-width: max-content;
+    height: max-content;
+    min-height: 100%;
     background: var(--bg-dark);
 }
 
 .column {
     background: var(--bg-column);
     border-radius: 0.5rem;
-    min-width: 260px;
-    max-width: 300px;
-    flex: 1;
+    width: 280px;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
     position: relative;
@@ -1352,6 +1572,125 @@ body {
     font-size: 0.8em;
 }
 
+/* ─── Notification Center ───────────────────────────────── */
+.notif-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    background: #ef4444;
+    color: #fff;
+    font-size: 0.6rem;
+    font-weight: 700;
+    min-width: 16px;
+    height: 16px;
+    border-radius: 999px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 3px;
+    line-height: 1;
+    box-shadow: 0 0 6px rgba(239, 68, 68, 0.5);
+    animation: pulse 2s infinite;
+}
+
+.notif-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    width: 360px;
+    max-height: 480px;
+    background: var(--bg-column);
+    border: 1px solid var(--border);
+    border-radius: 0.5rem;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
+    z-index: 10000;
+    display: none;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+.notif-panel.open {
+    display: flex;
+}
+
+.notif-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.6rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    background: var(--bg-dark);
+}
+
+.notif-list {
+    overflow-y: auto;
+    flex: 1;
+    max-height: 420px;
+}
+
+.notif-empty {
+    padding: 2rem 1rem;
+    text-align: center;
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+}
+
+.notif-item {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    transition: background 0.15s;
+    cursor: default;
+}
+
+.notif-item:hover {
+    background: var(--bg-dark);
+}
+
+.notif-item:last-child {
+    border-bottom: none;
+}
+
+.notif-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.2rem;
+}
+
+.notif-agent {
+    font-weight: 600;
+    font-size: 0.78rem;
+    color: var(--text-primary);
+}
+
+.notif-time {
+    font-size: 0.68rem;
+    color: var(--text-secondary);
+}
+
+.notif-body {
+    font-size: 0.78rem;
+    color: var(--text-secondary);
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.notif-thought {
+    border-left: 3px solid #818cf8;
+}
+
+.notif-error {
+    border-left: 3px solid #ef4444;
+}
+
+.notif-attention {
+    border-left: 3px solid #f59e0b;
+}
+
+.notif-notify {
+    border-left: 3px solid #22c55e;
+}
+
 /* ─── Mention Popover ────────────────────────────────────── */
 .mention-popover,
 .mention-dropdown {
@@ -1487,6 +1826,21 @@ body {
 .emoji-btn:hover {
     background: var(--bg-hover, rgba(255, 255, 255, 0.08));
     border-color: var(--border);
+}
+
+.char-pick-btn {
+    transition: border-color 0.1s, transform 0.1s;
+}
+.char-pick-btn:hover {
+    transform: scale(1.1);
+}
+.char-pick-btn.selected {
+    border-color: var(--primary) !important;
+    box-shadow: 0 0 8px var(--primary);
+}
+.char-pick-btn svg {
+    width: 100%;
+    height: 100%;
 }
 
 .icon-preview {
@@ -1743,14 +2097,32 @@ body {
 
 /* ─── Agent Activity Pulse Animation ──────────────────────────────────── */
 @keyframes aegisPulse {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.4; }
+
+    0%,
+    100% {
+        opacity: 1;
+    }
+
+    50% {
+        opacity: 0.4;
+    }
 }
 
 @keyframes aegisDot {
-    0%, 20% { content: '.'; }
-    40% { content: '..'; }
-    60%, 100% { content: '...'; }
+
+    0%,
+    20% {
+        content: '.';
+    }
+
+    40% {
+        content: '..';
+    }
+
+    60%,
+    100% {
+        content: '...';
+    }
 }
 
 .agent-activity-indicator.active span {
@@ -1767,4 +2139,265 @@ body {
     border-radius: 50%;
     animation: aegisPulse 1s ease-in-out infinite;
     vertical-align: middle;
+}
+
+/* ─── CoStar AI Chat Widget ──────────────────────────────────────────── */
+.costar-fab {
+    position: fixed;
+    bottom: 24px;
+    right: 24px;
+    width: 56px;
+    height: 56px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: white;
+    border: none;
+    font-size: 1.5rem;
+    cursor: pointer;
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.4);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.2s, box-shadow 0.2s;
+}
+
+.costar-fab:hover {
+    transform: scale(1.05);
+    box-shadow: 0 6px 20px rgba(99, 102, 241, 0.6);
+}
+
+.costar-badge {
+    position: absolute;
+    top: -2px;
+    right: -2px;
+    background: #ef4444;
+    color: white;
+    font-size: 0.65rem;
+    font-weight: bold;
+    min-width: 18px;
+    height: 18px;
+    border-radius: 9px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 2px solid var(--bg-dark);
+}
+
+.costar-chat-widget {
+    position: fixed;
+    bottom: 90px;
+    right: 24px;
+    width: 380px;
+    height: 550px;
+    max-height: calc(100vh - 120px);
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8);
+    z-index: 9998;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    transform: translateY(20px);
+    opacity: 0;
+    pointer-events: none;
+    transition: transform 0.3s cubic-bezier(0.16, 1, 0.3, 1), opacity 0.3s;
+}
+
+.costar-chat-widget.active {
+    transform: translateY(0);
+    opacity: 1;
+    pointer-events: all;
+}
+
+.costar-chat-header {
+    padding: 12px 16px;
+    background: var(--bg-column);
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.costar-chat-feed {
+    flex: 1;
+    padding: 16px;
+    overflow-y: auto;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.costar-message {
+    display: flex;
+    flex-direction: column;
+    max-width: 85%;
+    animation: fadeIn 0.3s ease;
+}
+
+.costar-message.user {
+    align-self: flex-end;
+}
+
+.costar-message.bot {
+    align-self: flex-start;
+}
+
+.costar-msg-content {
+    padding: 10px 14px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    line-height: 1.4;
+    word-break: break-word;
+}
+
+.costar-message.user .costar-msg-content {
+    background: var(--accent);
+    color: white;
+    border-bottom-right-radius: 2px;
+}
+
+.costar-message.bot .costar-msg-content {
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    color: var(--text-primary);
+    border-bottom-left-radius: 2px;
+}
+
+.costar-msg-content p {
+    margin-bottom: 0.5rem;
+}
+
+.costar-msg-content p:last-child {
+    margin-bottom: 0;
+}
+
+.costar-msg-content pre {
+    background: #000;
+    padding: 8px;
+    border-radius: 4px;
+    overflow-x: auto;
+    margin-top: 0.5rem;
+    font-size: 0.75rem;
+}
+
+.costar-msg-content code {
+    background: rgba(0, 0, 0, 0.3);
+    padding: 2px 4px;
+    border-radius: 3px;
+    font-family: monospace;
+}
+
+.costar-thinking {
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    font-style: italic;
+    margin-top: 4px;
+    margin-left: 4px;
+}
+
+.costar-chat-input-area {
+    padding: 12px;
+    background: var(--bg-column);
+    border-top: 1px solid var(--border);
+    display: flex;
+    gap: 8px;
+    align-items: flex-end;
+    flex-shrink: 0;
+}
+
+.costar-chat-input-area textarea {
+    flex: 1;
+    background: var(--bg-dark);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 10px 12px;
+    color: var(--text-primary);
+    font-family: inherit;
+    font-size: 0.85rem;
+    resize: none;
+    min-height: 40px;
+    max-height: 120px;
+    outline: none;
+}
+
+.costar-chat-input-area textarea:focus {
+    border-color: var(--accent);
+}
+
+.costar-send-btn {
+    background: var(--accent);
+    color: white;
+    border: none;
+    border-radius: 8px;
+    width: 40px;
+    height: 40px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    flex-shrink: 0;
+    transition: background 0.2s;
+}
+
+.costar-send-btn:hover {
+    background: var(--accent-hover);
+}
+
+.costar-send-btn:disabled {
+    background: var(--bg-dark);
+    color: var(--text-secondary);
+    cursor: not-allowed;
+    border: 1px solid var(--border);
+}
+
+/* ─── CoStar Toggle Switch ──────────────────────────────────────────── */
+.costar-switch {
+    position: relative;
+    display: inline-block;
+    width: 50px;
+    height: 26px;
+}
+
+.costar-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.costar-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-column);
+    border: 1px solid var(--border);
+    transition: .3s;
+    border-radius: 26px;
+}
+
+.costar-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 2px;
+    bottom: 2px;
+    background-color: white;
+    transition: .3s;
+    border-radius: 50%;
+}
+
+.costar-switch input:checked+.costar-slider {
+    background-color: var(--primary);
+    border-color: var(--primary);
+}
+
+.costar-switch input:checked+.costar-slider:before {
+    transform: translateX(24px);
 }

@@ -207,6 +207,29 @@ class AgentProcessManager:
             return []
         return agent_proc.logs[-tail:]
 
+    # ========== Presence Tracking ==========
+
+    async def update_presence(self, agent_id: str, card_id: Optional[int], activity: str) -> dict:
+        """Update agent presence (card working on, activity status) and broadcast via WebSocket."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc:
+            return {"error": f"Agent '{agent_id}' not found", "status": "not_found"}
+
+        # Update presence
+        agent_proc.card_id = card_id
+        presence_data = {
+            "type": "agent_presence",
+            "agent_id": agent_id,
+            "card_id": card_id,
+            "activity": activity,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if self.broadcaster:
+            await self.broadcaster(presence_data)
+
+        return {"status": "updated", "presence": presence_data}
+
     # ========== Non-Blocking Log Streaming ==========
 
     async def _stream_logs(self, agent_proc: AgentProcess, stream, log_type: str):

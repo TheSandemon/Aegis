@@ -40,6 +40,20 @@ mode = os.environ.get("AEGIS_CONFIG_MODE", "continuous")  # "continuous" | "one-
 # Unique token used to fetch live configs
 instance_id = os.environ.get("AEGIS_INSTANCE_ID", "")
 
+# ─── Presence Reporting Helper ─────────────────────────────────────────────────
+def _report_presence(card_id: int = None, activity: str = "idle"):
+    """Report agent presence (card working on, activity status) for character animation."""
+    if not instance_id:
+        return
+    try:
+        requests.patch(
+            f"{api_url}/agents/{instance_id}/presence",
+            json={"card_id": card_id, "activity": activity},
+            timeout=3
+        )
+    except Exception:
+        pass  # Silently fail - presence is non-critical
+
 service = os.environ.get("AEGIS_SERVICE", "")
 model = os.environ.get("AEGIS_MODEL", "")
 
@@ -66,78 +80,611 @@ try:
 except Exception:
     pass
 
-def prompt_llm(system_prompt, user_text):
-    """Call the LLM with a system prompt and user text.
-    
-    Returns:
-        dict or list: The parsed JSON response from the LLM.
-    """
-    def parse_json(text):
-        try:
-            return json.loads(text)
-        except json.JSONDecodeError:
-            # Try to strip markdown code blocks if the LLM hallucinated them
-            if text.startswith("```json"): text = text[7:]
-            elif text.startswith("```"): text = text[3:]
-            if text.endswith("```"): text = text[:-3]
-            try: return json.loads(text.strip())
-            except Exception:
-                return None
 
-    if service == "openai" and openai_key:
-        m = model or "gpt-4o-mini"
-        res = requests.post("https://api.openai.com/v1/chat/completions", headers={"Authorization": f"Bearer {openai_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
-        content = res.json()["choices"][0]["message"]["content"]
-        return parse_json(content)
+# ─── AEGIS TOOL DEFINITIONS (native function-calling schema) ──────────────────
+AEGIS_TOOLS = [
+    {
+        "name": "create_card",
+        "description": "Create a new card on the Kanban board.",
+        "parameters": {"type": "object", "properties": {
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "column": {"type": "string", "description": "Must be an existing column name."},
+            "assignee": {"type": "string"},
+            "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+            "card_group": {"type": "string"},
+            "card_tags": {"type": "array", "items": {"type": "string"}}
+        }, "required": ["title", "column"]}
+    },
+    {
+        "name": "update_card",
+        "description": "Update an existing card (move it, change priority, assignee, description, etc.).",
+        "parameters": {"type": "object", "properties": {
+            "card_id": {"type": "integer"},
+            "title": {"type": "string"},
+            "description": {"type": "string"},
+            "column": {"type": "string"},
+            "assignee": {"type": "string"},
+            "status": {"type": "string"},
+            "priority": {"type": "string", "enum": ["low", "normal", "high"]},
+            "card_group": {"type": "string"},
+            "card_tags": {"type": "array", "items": {"type": "string"}}
+        }, "required": ["card_id"]}
+    },
+    {
+        "name": "delete_card",
+        "description": "Delete a card from the board.",
+        "parameters": {"type": "object", "properties": {
+            "card_id": {"type": "integer"}
+        }, "required": ["card_id"]}
+    },
+    {
+        "name": "post_comment",
+        "description": "Post a comment on a card.",
+        "parameters": {"type": "object", "properties": {
+            "card_id": {"type": "integer"},
+            "content": {"type": "string"}
+        }, "required": ["card_id", "content"]}
+    },
+    {
+        "name": "bulk_update_cards",
+        "description": "Update multiple cards at once (preferred for batch moves).",
+        "parameters": {"type": "object", "properties": {
+            "updates": {"type": "array", "items": {
+                "type": "object", "properties": {
+                    "card_id": {"type": "integer"},
+                    "column": {"type": "string"},
+                    "assignee": {"type": "string"},
+                    "priority": {"type": "string"}
+                }, "required": ["card_id"]
+            }}
+        }, "required": ["updates"]}
+    },
+    {
+        "name": "bulk_delete_cards",
+        "description": "Delete multiple cards at once.",
+        "parameters": {"type": "object", "properties": {
+            "card_ids": {"type": "array", "items": {"type": "integer"}}
+        }, "required": ["card_ids"]}
+    },
+    {
+        "name": "create_column",
+        "description": "Create a new column on the board.",
+        "parameters": {"type": "object", "properties": {
+            "name": {"type": "string"},
+            "position": {"type": "integer"}
+        }, "required": ["name"]}
+    },
+    {
+        "name": "delete_column",
+        "description": "Delete a column from the board.",
+        "parameters": {"type": "object", "properties": {
+            "column_id": {"type": "integer"}
+        }, "required": ["column_id"]}
+    },
+    {
+        "name": "notify",
+        "description": "Send a notification message bubble to the user.",
+        "parameters": {"type": "object", "properties": {
+            "message": {"type": "string"},
+            "mood": {"type": "string", "enum": ["info", "warning", "error"]}
+        }, "required": ["message"]}
+    },
+    {
+        "name": "list_dir",
+        "description": "List files and folders in a directory. Use '.' for current directory.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}
+        }, "required": ["path"]}
+    },
+    {
+        "name": "read_file",
+        "description": "Read the contents of a file. Returns the first 4000 characters. Use search_file for targeted lookups in large files.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"}
+        }, "required": ["path"]}
+    },
+    {
+        "name": "search_file",
+        "description": "Search for a keyword or pattern within a file. Returns matching lines with line numbers.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"},
+            "query": {"type": "string"}
+        }, "required": ["path", "query"]}
+    },
+    {
+        "name": "write_file",
+        "description": "Write (or overwrite) a file with the given content.",
+        "parameters": {"type": "object", "properties": {
+            "path": {"type": "string"},
+            "content": {"type": "string"}
+        }, "required": ["path", "content"]}
+    },
+    {
+        "name": "git_commit",
+        "description": "Stage and commit files with a message.",
+        "parameters": {"type": "object", "properties": {
+            "message": {"type": "string"},
+            "files": {"type": "array", "items": {"type": "string"}}
+        }, "required": ["message"]}
+    },
+    {
+        "name": "git_push",
+        "description": "Push committed changes to a remote.",
+        "parameters": {"type": "object", "properties": {
+            "remote": {"type": "string"},
+            "branch": {"type": "string"}
+        }, "required": []}
+    },
+    {
+        "name": "done",
+        "description": "Signal that all work for this pulse is complete. Always call this when finished.",
+        "parameters": {"type": "object", "properties": {
+            "reason": {"type": "string", "description": "Summary of what was accomplished."}
+        }, "required": ["reason"]}
+    },
+    {
+        "name": "wait",
+        "description": "Signal that work is blocked and the agent should sleep until the next pulse.",
+        "parameters": {"type": "object", "properties": {
+            "reason": {"type": "string"}
+        }, "required": ["reason"]}
+    },
+]
+
+def _tool_schema_openai(tools):
+    """Convert tool list to OpenAI/DeepSeek function calling format."""
+    return [{"type": "function", "function": {
+        "name": t["name"],
+        "description": t["description"],
+        "parameters": t["parameters"]
+    }} for t in tools]
+
+def _tool_schema_google(tools):
+    """Convert tool list to Google Gemini function declaration format."""
+    def clean_schema(schema):
+        """Google doesn't support 'enum' inside properties directly — embed as description."""
+        if not isinstance(schema, dict):
+            return schema
+        out = {}
+        for k, v in schema.items():
+            if k == "enum":
+                continue  # handled by adding to description
+            out[k] = clean_schema(v)
+        return out
+
+    declarations = []
+    for t in tools:
+        params = t["parameters"].copy()
+        declarations.append({
+            "name": t["name"],
+            "description": t["description"],
+            "parameters": clean_schema(params)
+        })
+    return [{"functionDeclarations": declarations}]
+
+
+def execute_tool(name, args, cards, cols, read_only_columns, my_card_column):
+    """Execute an Aegis tool call and return the result string."""
+    def check_r(r, label):
+        if r.status_code >= 400:
+            return f"❌ {label} FAILED: HTTP {r.status_code} — {r.text[:250]}"
+        return f"✅ {label} OK"
+
+    if name == "create_card":
+        col = args.get("column", "")
+        if col in read_only_columns:
+            return f"❌ BLOCKED: '{col}' is read-only."
+        r = requests.post(f"{api_url}/cards", json=args, headers={"X-Aegis-Agent": "true"})
+        if r.status_code < 400:
+            new_id = r.json().get("id", "?")
+            return f"✅ Card #{new_id} created in '{col}'."
+        return f"❌ create_card failed: {r.status_code} — {r.text[:200]}"
+
+    elif name == "update_card":
+        cid = args.get("card_id")
+        target = next((c for c in cards if c.get("id") == cid), None)
+        if target and target.get("column") in read_only_columns:
+            return f"❌ BLOCKED: Card #{cid} is in a read-only column."
+        r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
+
+        # Report presence when agent claims/assigns a card
+        if r.status_code < 400:
+            assignee = args.get("assignee")
+            column = args.get("column")
+            if assignee or column:
+                _report_presence(card_id=cid, activity="working")
+
+        return check_r(r, f"update_card #{cid}")
+
+    elif name == "delete_card":
+        cid = args.get("card_id")
+        target = next((c for c in cards if c.get("id") == cid), None)
+        if target and target.get("column") in read_only_columns:
+            return f"❌ BLOCKED: Card #{cid} is in a read-only column."
+        r = requests.delete(f"{api_url}/cards/{cid}", headers={"X-Aegis-Agent": "true"})
+        return check_r(r, f"delete_card #{cid}")
+
+    elif name == "post_comment":
+        cid = args.get("card_id")
+        r = requests.post(f"{api_url}/cards/{cid}/comments",
+                          json={"author": agent_name, "content": args.get("content", "")})
+        return check_r(r, f"post_comment on #{cid}")
+
+    elif name == "bulk_update_cards":
+        updates = args.get("updates", [])
+        valid = [u for u in updates if not next((c for c in cards if c.get("id") == u.get("card_id") and c.get("column") in read_only_columns), None)]
+        blocked = len(updates) - len(valid)
+        if not valid:
+            return "❌ All updates blocked (read-only)."
+        r = requests.patch(f"{api_url}/cards/bulk", json={"updates": valid}, headers={"X-Aegis-Agent": "true"})
+        if r.status_code < 400:
+            updated = r.json().get("updated", [])
+            return f"✅ Bulk updated {len(updated)} cards." + (f" ({blocked} blocked.)" if blocked else "")
+        return f"❌ bulk_update_cards failed: {r.status_code}"
+
+    elif name == "bulk_delete_cards":
+        ids = args.get("card_ids", [])
+        r = requests.delete(f"{api_url}/cards/bulk", json={"card_ids": ids}, headers={"X-Aegis-Agent": "true"})
+        if r.status_code < 400:
+            return f"✅ Bulk deleted {len(ids)} cards."
+        return f"❌ bulk_delete_cards failed: {r.status_code}"
+
+    elif name == "create_column":
+        r = requests.post(f"{api_url}/columns", json=args)
+        return check_r(r, "create_column")
+
+    elif name == "delete_column":
+        r = requests.delete(f"{api_url}/columns/{args.get('column_id')}")
+        return check_r(r, "delete_column")
+
+    elif name == "notify":
+        msg = args.get("message", "")
+        mood = args.get("mood", "info")
+        prefix = {"info": "📢", "warning": "⚠️", "error": "🛑"}.get(mood, "📢")
+        print(f"[{agent_name}] {prefix} NOTIFY: {msg}")
+        return f"Notification sent: {msg}"
+
+    elif name in ("list_dir", "list_files"):
+        try:
+            return f"DIR {args.get('path', '.')}: {os.listdir(args.get('path', '.'))}"
+        except Exception as e:
+            return f"❌ list_dir error: {e}"
+
+    elif name == "read_file":
+        p = args.get("path", "")
+        try:
+            content = open(p, "r", encoding="utf-8").read()
+            out = content[:4000]
+            if len(content) > 4000:
+                out += f"\n... [TRUNCATED — {len(content)} chars total. Use search_file for targeted lookups.]"
+            return f"FILE {p} ({len(content)} chars):\n{out}"
+        except Exception as e:
+            return f"❌ read_file error: {e}"
+
+    elif name == "search_file":
+        p = args.get("path", "")
+        q = args.get("query", "")
+        try:
+            matches = [f"L{i}: {ln.rstrip()[:200]}" for i, ln in enumerate(open(p, encoding="utf-8"), 1) if q.lower() in ln.lower()]
+            if matches:
+                return f"SEARCH '{q}' in {p}: {len(matches)} hits\n" + "\n".join(matches[:40])
+            return f"SEARCH '{q}' in {p}: no matches."
+        except Exception as e:
+            return f"❌ search_file error: {e}"
+
+    elif name == "write_file":
+        p = args.get("path", "")
+        try:
+            open(p, "w", encoding="utf-8").write(args.get("content", ""))
+            return f"✅ Wrote {p}"
+        except Exception as e:
+            return f"❌ write_file error: {e}"
+
+    elif name == "git_commit":
+        import subprocess
+        msg = args.get("message", "Automated commit")
+        files = args.get("files", ["."])
+        for f in (files if isinstance(files, list) else [files]):
+            subprocess.run(["git", "add", f], capture_output=True)
+        r = subprocess.run(["git", "commit", "-m", f"[Aegis: {agent_name}] {msg}"],
+                           capture_output=True, text=True)
+        return f"✅ COMMIT: {r.stdout.strip()}" if r.returncode == 0 else f"❌ git_commit: {r.stderr[:200]}"
+
+    elif name == "git_push":
+        import subprocess
+        remote = args.get("remote", "origin")
+        branch = args.get("branch", "")
+        cmd = ["git", "push", remote] + ([branch] if branch else [])
+        r = subprocess.run(cmd, capture_output=True, text=True)
+        return f"✅ PUSH OK" if r.returncode == 0 else f"❌ git_push: {r.stderr[:200]}"
+
+    elif name in ("done", "wait"):
+        return f"{name.upper()}: {args.get('reason', '')}"
+
+    return f"⚠️ Unknown tool: {name}"
+
+
+def run_agentic_loop(system_prompt, board_context, cards, cols, read_only_columns,
+                     my_card_column, max_steps=50):
+    """
+    Native tool-calling agentic loop.
+    Sends system_prompt + board_context once, then enters a multi-turn
+    conversation where the LLM natively calls tools until it signals done/wait.
+    Returns (observations, terminal_action) where terminal_action is 'done'|'wait'|None.
+    """
+    if not service:
+        print(f"[{agent_name}] ❌ No LLM service configured.")
+        return [], None
+
+    observations = []
+    terminal_action = None
+    step = 0
+
+    # ── ANTHROPIC ────────────────────────────────────────────────────────────
+    if service == "anthropic" and anthropic_key:
+        m = model or "claude-sonnet-4-5"
+        headers = {
+            "x-api-key": anthropic_key,
+            "anthropic-version": "2023-06-01",
+            "anthropic-beta": "interleaved-thinking-2025-05-14",
+            "content-type": "application/json"
+        }
+        # Convert tool schema to Anthropic format
+        ant_tools = [{"name": t["name"], "description": t["description"],
+                      "input_schema": t["parameters"]} for t in AEGIS_TOOLS]
+
+        messages = [{"role": "user", "content": board_context}]
+
+        while step < max_steps:
+            payload = {
+                "model": m,
+                "max_tokens": 16384,
+                "system": system_prompt,
+                "tools": ant_tools,
+                "messages": messages,
+                "temperature": 1,  # Required for extended thinking
+                "thinking": {
+                    "type": "enabled",
+                    "budget_tokens": 10000  # Gives the model room to reason before each tool call
+                }
+            }
+            try:
+                resp = requests.post("https://api.anthropic.com/v1/messages",
+                                     headers=headers, json=payload, timeout=180)
+                if resp.status_code != 200:
+                    print(f"[{agent_name}] ❌ Anthropic API {resp.status_code}: {resp.text[:300]}")
+                    break
+                data = resp.json()
+            except Exception as e:
+                print(f"[{agent_name}] ❌ Anthropic request failed: {e}")
+                break
+
+            # Append assistant message to thread (includes thinking blocks)
+            messages.append({"role": "assistant", "content": data.get("content", [])})
+
+            # Process content blocks
+            tool_results = []
+            has_tool_use = False
+            stop_reason = data.get("stop_reason", "")
+
+            for block in data.get("content", []):
+                if block.get("type") == "thinking" and block.get("thinking"):
+                    # Extended thinking — show the model's reasoning
+                    thinking_text = block["thinking"][:300]
+                    print(f"[{agent_name}] 🧠 THINKING: {thinking_text}")
+                elif block.get("type") == "text" and block.get("text"):
+                    print(f"[{agent_name}] 💡 THOUGHT: {block['text'][:200]}")
+                elif block.get("type") == "tool_use":
+                    has_tool_use = True
+                    tool_name = block["name"]
+                    tool_args = block.get("input", {})
+                    tool_id = block["id"]
+                    step += 1
+                    print(f"[{agent_name}] ⚡ TOOL ({step}): {tool_name} {json.dumps(tool_args)[:120]}")
+
+                    if tool_name in ("done", "wait"):
+                        terminal_action = tool_name
+                        reason = tool_args.get("reason", "")
+                        print(f"[{agent_name}] {'✅ DONE' if tool_name == 'done' else '💤 WAIT'}: {reason}")
+                        observations.append(f"{tool_name.upper()}: {reason}")
+                        tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
+                                             "content": f"{tool_name.upper()}: {reason}"})
+                        break
+                    else:
+                        result = execute_tool(tool_name, tool_args, cards, cols,
+                                              read_only_columns, my_card_column)
+                        print(f"[{agent_name}] 📤 RESULT: {result[:150]}")
+                        observations.append(f"{tool_name}: {result}")
+                        tool_results.append({"type": "tool_result", "tool_use_id": tool_id,
+                                             "content": result})
+
+            if tool_results:
+                messages.append({"role": "user", "content": tool_results})
+
+            if terminal_action or not has_tool_use or stop_reason == "end_turn":
+                break
+
+
+        return observations, terminal_action
+
+    # ── OPENAI / DEEPSEEK ─────────────────────────────────────────────────────
+    elif service in ("openai", "deepseek"):
+        key = openai_key if service == "openai" else deepseek_key
+        base = "https://api.openai.com/v1" if service == "openai" else "https://api.deepseek.com"
+        m = model or ("gpt-4o" if service == "openai" else "deepseek-chat")
+        oai_tools = _tool_schema_openai(AEGIS_TOOLS)
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": board_context}
+        ]
+
+        while step < max_steps:
+            try:
+                resp = requests.post(f"{base}/chat/completions",
+                    headers={"Authorization": f"Bearer {key}"},
+                    json={"model": m, "tools": oai_tools, "tool_choice": "auto",
+                          "messages": messages, "max_tokens": 16384},
+                    timeout=120)
+                if resp.status_code != 200:
+                    print(f"[{agent_name}] ❌ API {resp.status_code}: {resp.text[:300]}")
+                    break
+                data = resp.json()
+            except Exception as e:
+                print(f"[{agent_name}] ❌ Request failed: {e}")
+                break
+
+            choice = data["choices"][0]
+            msg = choice["message"]
+            messages.append(msg)
+
+            if msg.get("content"):
+                print(f"[{agent_name}] 💡 THOUGHT: {msg['content'][:200]}")
+
+            tool_calls = msg.get("tool_calls") or []
+            if not tool_calls:
+                break  # No more tool calls — LLM is done
+
+            for tc in tool_calls:
+                fn = tc["function"]
+                tool_name = fn["name"]
+                try:
+                    tool_args = json.loads(fn.get("arguments", "{}"))
+                except Exception:
+                    tool_args = {}
+                step += 1
+                print(f"[{agent_name}] ⚡ TOOL ({step}): {tool_name} {json.dumps(tool_args)[:120]}")
+
+                if tool_name in ("done", "wait"):
+                    terminal_action = tool_name
+                    reason = tool_args.get("reason", "")
+                    print(f"[{agent_name}] {'✅ DONE' if tool_name == 'done' else '💤 WAIT'}: {reason}")
+                    observations.append(f"{tool_name.upper()}: {reason}")
+                    messages.append({"role": "tool", "tool_call_id": tc["id"],
+                                     "content": f"{tool_name.upper()}: {reason}"})
+                else:
+                    result = execute_tool(tool_name, tool_args, cards, cols,
+                                         read_only_columns, my_card_column)
+                    print(f"[{agent_name}] 📤 RESULT: {result[:150]}")
+                    observations.append(f"{tool_name}: {result}")
+                    messages.append({"role": "tool", "tool_call_id": tc["id"], "content": result})
+
+            if terminal_action:
+                break
+
+        return observations, terminal_action
+
+    # ── GOOGLE GEMINI ─────────────────────────────────────────────────────────
     elif service == "google" and google_key:
         m = model or "gemini-2.0-flash"
-        try:
-            res = requests.post(f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={google_key}", 
-                json={"system_instruction": {"parts": [{"text": system_prompt}]}, "contents": [{"parts":[{"text": user_text}]}], "generationConfig": {"responseMimeType": "application/json", "maxOutputTokens": 4096}})
-            
-            if res.status_code != 200:
-                print(f"[{agent_name}] Google API Error {res.status_code}: {res.text[:200]}")
-                return None
-                
-            data = res.json()
-            if "candidates" not in data:
-                print(f"[{agent_name}] Google API response missing 'candidates': {json.dumps(data)[:200]}")
-                return None
-                
-            content = data["candidates"][0]["content"]["parts"][0]["text"]
-            return parse_json(content)
-        except Exception as e:
-            print(f"[{agent_name}] Google API Request Failed: {e}")
-            return None
-    elif service == "anthropic" and anthropic_key:
-        m = model or "claude-3-5-sonnet-latest"
-        res = requests.post("https://api.anthropic.com/v1/messages", headers={"x-api-key": anthropic_key, "anthropic-version": "2023-06-01"}, json={"model": m, "max_tokens": 1000, "system": system_prompt, "messages": [{"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]})
-        content = res.json()["content"][0]["text"]
-        return parse_json(content)
-    elif service == "deepseek" and deepseek_key:
-        m = model or "deepseek-chat"
-        res = requests.post("https://api.deepseek.com/chat/completions", headers={"Authorization": f"Bearer {deepseek_key}"}, json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": user_text}], "response_format": {"type": "json_object"}})
-        content = res.json()["choices"][0]["message"]["content"]
-        return parse_json(content)
+        g_tools = _tool_schema_google(AEGIS_TOOLS)
+
+        contents = [{"role": "user", "parts": [{"text": board_context}]}]
+
+        while step < max_steps:
+            payload = {
+                "system_instruction": {"parts": [{"text": system_prompt}]},
+                "contents": contents,
+                "tools": g_tools,
+                "generationConfig": {"maxOutputTokens": 16384}
+            }
+            try:
+                resp = requests.post(
+                    f"https://generativelanguage.googleapis.com/v1beta/models/{m}:generateContent?key={google_key}",
+                    json=payload, timeout=120)
+                if resp.status_code != 200:
+                    print(f"[{agent_name}] ❌ Gemini API {resp.status_code}: {resp.text[:300]}")
+                    break
+                data = resp.json()
+            except Exception as e:
+                print(f"[{agent_name}] ❌ Gemini request failed: {e}")
+                break
+
+            candidate = data.get("candidates", [{}])[0]
+            content = candidate.get("content", {})
+            parts = content.get("parts", [])
+            contents.append({"role": "model", "parts": parts})
+
+            function_calls = [p for p in parts if "functionCall" in p]
+            text_parts = [p for p in parts if "text" in p]
+
+            for tp in text_parts:
+                print(f"[{agent_name}] 💡 THOUGHT: {tp['text'][:200]}")
+
+            if not function_calls:
+                break  # Model done
+
+            tool_responses = []
+            for fc_part in function_calls:
+                fc = fc_part["functionCall"]
+                tool_name = fc["name"]
+                tool_args = fc.get("args", {})
+                step += 1
+                print(f"[{agent_name}] ⚡ TOOL ({step}): {tool_name} {json.dumps(tool_args)[:120]}")
+
+                if tool_name in ("done", "wait"):
+                    terminal_action = tool_name
+                    reason = tool_args.get("reason", "")
+                    print(f"[{agent_name}] {'✅ DONE' if tool_name == 'done' else '💤 WAIT'}: {reason}")
+                    observations.append(f"{tool_name.upper()}: {reason}")
+                    tool_responses.append({"functionResponse": {"name": tool_name,
+                                           "response": {"result": f"{tool_name.upper()}: {reason}"}}})
+                else:
+                    result = execute_tool(tool_name, tool_args, cards, cols,
+                                         read_only_columns, my_card_column)
+                    print(f"[{agent_name}] 📤 RESULT: {result[:150]}")
+                    observations.append(f"{tool_name}: {result}")
+                    tool_responses.append({"functionResponse": {"name": tool_name,
+                                           "response": {"result": result}}})
+
+            contents.append({"role": "user", "parts": tool_responses})
+
+            if terminal_action:
+                break
+
+        return observations, terminal_action
+
+    # ── MINIMAX (chat fallback — no native tool calling) ─────────────────────
     elif service == "minimax" and minimax_key:
+        # MiniMax doesn't support native tool calling — use JSON fallback
         m = model or "MiniMax-Text-01"
-        res = requests.post(
-            "https://api.minimaxi.chat/v1/chat/completions",
-            headers={"Authorization": f"Bearer {minimax_key}", "Content-Type": "application/json"},
-            json={"model": m, "messages": [{"role": "system", "content": system_prompt}, {"role": "user", "content": f"Please output ONLY raw JSON. {user_text}"}]}
-        )
-        if res.status_code != 200:
-            print(f"[{agent_name}] MiniMax API Error {res.status_code}: {res.text[:200]}")
-            return None
-        content = res.json()["choices"][0]["message"]["content"]
-        return parse_json(content)
+        tool_docs = "\n".join(f"- {t['name']}: {t['description']}" for t in AEGIS_TOOLS)
+        full_prompt = f"{system_prompt}\n\nAvailable tools:\n{tool_docs}\n\nRespond with JSON: {{\"tool\": \"name\", \"args\": {{...}}}}"
+        obs = []
+        for step in range(max_steps):
+            resp = requests.post("https://api.minimaxi.chat/v1/chat/completions",
+                headers={"Authorization": f"Bearer {minimax_key}"},
+                json={"model": m, "messages": [
+                    {"role": "system", "content": full_prompt},
+                    {"role": "user", "content": board_context + ("\n\nPrevious: " + str(obs[-3:]) if obs else "")}
+                ]})
+            if resp.status_code != 200:
+                print(f"[{agent_name}] ❌ MiniMax {resp.status_code}")
+                break
+            content = resp.json()["choices"][0]["message"]["content"]
+            try:
+                parsed = json.loads(content.strip().strip("```json").strip("```"))
+                tool_name = parsed.get("tool", "done")
+                tool_args = parsed.get("args", {})
+            except Exception:
+                break
+            result = execute_tool(tool_name, tool_args, cards, cols, read_only_columns, my_card_column)
+            obs.append(f"{tool_name}: {result}")
+            if tool_name in ("done", "wait"):
+                return obs, tool_name
+        return obs, None
 
-    print(f"[{agent_name}] ERROR: Unsupported service '{service}' or missing API key.")
-    return None
+    print(f"[{agent_name}] ❌ No supported service configured.")
+    return [], None
 
 
 
-console.print(Panel(f"🎯 [bold cyan]GOAL:[/bold cyan] {goal}", title=f"🚀 {agent_name} BOOT", border_style="blue"))
+
+
+
+if mode != "one-shot":
+    console.print(Panel(f"🎯 [bold cyan]GOAL:[/bold cyan] {goal}", title=f"🚀 {agent_name} BOOT", border_style="blue"))
 
 # Startup delay block
 try:
@@ -161,11 +708,25 @@ reader_thread = threading.Thread(target=stdin_reader, daemon=True)
 reader_thread.start()
 
 # Store original root to revert context if card changes
+# On startup, fetch the configured work_dir and change to it
 original_cwd = os.getcwd()
+if instance_id:
+    try:
+        _startup_conf = requests.get(f"{api_url}/instances/{instance_id}/config", timeout=5).json().get("config", {})
+        _work_dir = _startup_conf.get("work_dir", "")
+        if _work_dir and os.path.isdir(_work_dir):
+            os.chdir(_work_dir)
+            original_cwd = _work_dir
+            print(f"[{agent_name}] 📂 Working directory: {_work_dir}")
+    except Exception:
+        pass
 
 # Track consecutive re-pulses to prevent infinite continue loops
 consecutive_repulses = 0
 MAX_CONSECUTIVE_REPULSES = 2
+
+# Module-level skill cache — fetched once per session, cached here
+_skill_cache = None
 
 while True:
     try:
@@ -175,8 +736,28 @@ while True:
                 conf = requests.get(f"{api_url}/instances/{instance_id}/config").json().get("config", {})
                 if "goals" in conf: goal = conf["goals"]
                 if "pulse_interval" in conf: pulse_interval = int(conf["pulse_interval"])
+                if "work_dir" in conf:
+                    wd = conf["work_dir"]
+                    if wd and os.path.isdir(wd) and os.path.abspath(wd) != os.path.abspath(original_cwd):
+                        os.chdir(wd)
+                        original_cwd = wd
+                # Configurable step and repulse limits
+                if "max_steps" in conf:
+                    try: MAX_STEPS_CFG = int(conf["max_steps"])
+                    except: MAX_STEPS_CFG = 50
+                else:
+                    MAX_STEPS_CFG = 50
+                if "max_repulse_tries" in conf:
+                    try: MAX_CONSECUTIVE_REPULSES = int(conf["max_repulse_tries"])
+                    except: MAX_CONSECUTIVE_REPULSES = 5
+                else:
+                    MAX_CONSECUTIVE_REPULSES = 5
             except Exception:
-                pass
+                MAX_STEPS_CFG = 50
+                MAX_CONSECUTIVE_REPULSES = 5
+        else:
+            MAX_STEPS_CFG = 50
+            MAX_CONSECUTIVE_REPULSES = 5
 
         print(f"\n[{agent_name}] 📡 PULSE: Fetching board state & instructions...")
         cards = requests.get(f"{api_url}/cards").json()
@@ -189,6 +770,34 @@ while True:
         
     system_prompt = raw_prompt.replace("{agent_name}", agent_name).replace("{goal}", goal)
 
+    # ─── INJECT EQUIPPED SKILLS (knowledge injection) ───
+    if _skill_cache is None:
+        equipped_skills = []
+        try:
+            if instance_id:
+                conf = requests.get(f"{api_url}/instances/{instance_id}/config", timeout=5).json().get("config", {})
+                equipped_skills = conf.get("skills", [])
+            if not equipped_skills:
+                equipped_skills = ["aegis-board-mastery"]  # Default core skill
+        except Exception:
+            equipped_skills = ["aegis-board-mastery"]
+
+        skill_texts = []
+        for skill_id in equipped_skills:
+            try:
+                skill_resp = requests.get(f"{api_url}/skills/{skill_id}/content", timeout=5)
+                if skill_resp.status_code == 200:
+                    skill_content = skill_resp.json().get("content", "")
+                    if skill_content:
+                        skill_texts.append(f"\n━━━ EQUIPPED SKILL: {skill_id} ━━━\n{skill_content}")
+                        print(f"[{agent_name}] 🧩 SKILL LOADED: {skill_id}")
+            except Exception as e:
+                print(f"[{agent_name}] ⚠️ Failed to load skill {skill_id}: {e}")
+        _skill_cache = "\n".join(skill_texts)
+    
+    if _skill_cache:
+        system_prompt += _skill_cache
+
     if not isinstance(cards, list) or not isinstance(cols, list) or not system_prompt:
         print(f"[{agent_name}] ❌ API Error: Invalid state format received. Waiting...")
         time.sleep(pulse_interval)
@@ -196,12 +805,27 @@ while True:
 
     # Build read-only column set — agents must not write to these
     read_only_columns = set()
-    github_columns = {}  # column_name -> mode (write, read_write, read)
+    github_columns = {}  # column_name -> {mode, resource_type}
     for col in cols:
         if col.get("integration_type") and col.get("integration_mode") == "read":
             read_only_columns.add(col["name"])
         if col.get("integration_type") == "github":
-            github_columns[col["name"]] = col.get("integration_mode", "read")
+            # Parse integration_filters to get resource_type
+            filters_str = col.get("integration_filters")
+            resource_type = "issue"
+            if filters_str:
+                try:
+                    if isinstance(filters_str, str):
+                        filters = json.loads(filters_str)
+                    else:
+                        filters = filters_str
+                    resource_type = filters.get("resource_type", "issue")
+                except (json.JSONDecodeError, TypeError):
+                    pass
+            github_columns[col["name"]] = {
+                "mode": col.get("integration_mode", "read"),
+                "resource_type": resource_type
+            }
     if read_only_columns:
         ro_note = (
             f"\n\n⚠️ READ-ONLY COLUMNS: {', '.join(sorted(read_only_columns))} "
@@ -222,15 +846,29 @@ while True:
         )
         system_prompt += gh_note
     else:
-        # List available GitHub-integrated columns
-        writeable_gh = [c for c, m in github_columns.items() if m in ("write", "read_write")]
+        # List available GitHub-integrated columns with their resource types
+        writeable_gh = [c for c, info in github_columns.items() if info.get("mode") in ("write", "read_write")]
+        pr_columns = [c for c, info in github_columns.items() if info.get("resource_type") == "pull_request"]
+        issue_columns = [c for c, info in github_columns.items() if info.get("resource_type") == "issue"]
+
+        # Build column description
+        col_descriptions = []
+        for col_name, info in github_columns.items():
+            rt = info.get("resource_type", "issue")
+            mode = info.get("mode", "read")
+            col_descriptions.append(f"{col_name} ({rt}, {mode})")
+
         if writeable_gh:
             gh_note = (
                 f"\n\n📥 GITHUB INTEGRATIONS: The following columns have GitHub integration: "
                 f"{', '.join(sorted(github_columns.keys()))}. "
-                f"Write-enabled columns: {', '.join(sorted(writeable_gh))}. "
-                f"When using GitHub tools, specify the column via the 'column' parameter to use the correct integration."
+                f"Details: {', '.join(col_descriptions)}. "
             )
+            if pr_columns:
+                gh_note += f"PR columns: {', '.join(sorted(pr_columns))} support merge, approve, and branch operations. "
+            if issue_columns:
+                gh_note += f"Issue columns: {', '.join(sorted(issue_columns))} support issue creation and comment operations. "
+            gh_note += "When using GitHub tools, specify the column via the 'column' parameter to use the correct integration."
         else:
             gh_note = (
                 f"\n\n⚠️ GITHUB READ-ONLY: GitHub integrations exist but are read-only: "
@@ -245,6 +883,7 @@ while True:
     for c in cards:
         if c.get("assignee") == agent_name and c.get("status") in ["assigned", "running"]:
             my_card_id = c["id"]
+            my_card_column = c.get("column")
     target_dir = original_cwd
     if my_card_id:
         for col in cols:
@@ -276,16 +915,38 @@ while True:
         
         board_context = f"--- FOCUS CARD ---\n[#{focus.get('id')}] {focus.get('title')}\n"
         board_context += f"Priority: {focus.get('priority', 'normal')} | Column: {focus.get('column')}\n"
+        
+        # Inject Column Guardrails & Context
+        for col in cols:
+            if col.get("name") == focus.get("column"):
+                if col.get("function"): board_context += f"Column Function (Your objective here): {col.get('function')}\n"
+                if col.get("exit_pass"): board_context += f"Exit Condition [Pass] (When done): {col.get('exit_pass')}\n"
+                if col.get("exit_fail"): board_context += f"Exit Condition [Fail] (If errors): {col.get('exit_fail')}\n"
+                break
+        
         # Surface structured external metadata (GitHub labels, assignees, etc.)
         meta = focus.get("metadata") or {}
         if meta.get("source"):
             src_line = f"[Source: {meta['source'].upper()}"
+            # Show resource_type (issue vs pull_request)
+            if meta.get("resource_type"):
+                src_line += f" | Type: {meta['resource_type'].replace('_', ' ').title()}"
             if meta.get("github_number"):
                 src_line += f" #{meta['github_number']}"
             if meta.get("action_required"):
                 src_line += " | ACTION REQUIRED"
             src_line += f" | State: {meta.get('state', 'open')}]"
             board_context += src_line + "\n"
+
+            # Show PR-specific metadata
+            if meta.get("resource_type") == "pull_request":
+                if meta.get("head_branch") and meta.get("base_branch"):
+                    board_context += f"PR: {meta['head_branch']} → {meta['base_branch']}\n"
+                if meta.get("draft"):
+                    board_context += "PR: DRAFT\n"
+                if meta.get("mergeable"):
+                    board_context += "PR: MERGEABLE\n"
+
             if meta.get("labels"):
                 board_context += f"Labels: {', '.join(meta['labels'])}\n"
             if meta.get("assignees"):
@@ -327,6 +988,9 @@ while True:
                 f"{last_comment}\n  Desc: {c.get('description', '')[:120]}\n"
             )
 
+    # ─── INJECT WORKING DIRECTORY INFO ───
+    board_context += f"\n\n--- WORKSPACE ---\nWorking Directory: {os.getcwd()}\n(File tools like read_file, list_dir, search_file operate relative to this path.)\n"
+
     # ─── INJECT SCRATCHPAD MEMORY ───
     if os.path.exists("scratchpad.md"):
         try:
@@ -357,449 +1021,25 @@ while True:
             "asked you to do so in the chat. Use the `notify` action to reply directly to the user.\n"
         )
 
-    print(f"[{agent_name}] 🧠 THINKING: Consulting LLM...")
+    print(f"[{agent_name}] 🧠 THINKING: Consulting LLM (native tool-calling)...")
 
-    # Internal ReAct Loop (Max 20 steps per pulse — agents exit early via done/wait)
-    observations = []
-    MAX_STEPS = 20
-    consecutive_errors = 0
-    MAX_CONSECUTIVE_ERRORS = 3
+    # Report presence: agent is thinking/working
+    _report_presence(activity="thinking")
 
-    for step in range(MAX_STEPS):
-        try:
-            if not service:
-                 raise Exception("No active service or API key configured.")
+    # ─── NATIVE TOOL-CALLING AGENTIC LOOP ───
+    # Board state + system prompt sent once. LLM natively calls tools in a
+    # multi-turn conversation thread until it signals done() or wait().
+    observations, terminal_action = run_agentic_loop(
+        system_prompt=system_prompt,
+        board_context=board_context,
+        cards=cards,
+        cols=cols,
+        read_only_columns=read_only_columns,
+        my_card_column=my_card_column,
+        max_steps=MAX_STEPS_CFG,
+    )
 
-            # Build the cumulative context for this pulse
-            current_context = board_context
-            if observations:
-                current_context += "\n\n--- OBSERVATIONS FROM PREVIOUS STEPS ---\n"
-                for i, obs in enumerate(observations):
-                    current_context += f"Step {i+1}: {obs}\n"
-            
-            res = prompt_llm(system_prompt, current_context)
-            if not res:
-                raise Exception("Empty or malformed response from LLM")
-                
-            if not isinstance(res, list):
-                res = [res] # Normalize single dict to list
 
-            step_observations = []
-            should_break = False
-
-            for action_block in res:
-                if not isinstance(action_block, dict):
-                    continue
-                res_lower = {k.lower(): v for k, v in action_block.items()}
-                action = str(res_lower.get("action", "wait")).lower()
-                args = res_lower.get("args", {})
-                thought = res_lower.get("thought", "")
-                
-                if thought:
-                    print(f"[{agent_name}] 💡 THOUGHT: {thought}")
-                
-                print(f"[{agent_name}] ⚡ ACTION (Step {step+1}): {action} {args}")
-                
-                def check_res(r, act):
-                    if r.status_code >= 400:
-                        msg = f"❌ API REJECTED {act}: {r.status_code} - {r.text[:200]}"
-                        print(f"[{agent_name}] {msg}")
-                        return msg
-                    return f"✅ SUCCESS: {act}"
-
-                obs = ""
-                if action == "create_card":
-                    # Validate column exists
-                    col_name = args.get("column", "")
-                    valid_cols = [c["name"] for c in cols]
-                    if col_name and col_name not in valid_cols:
-                        obs = f"❌ INVALID COLUMN '{col_name}'. Valid columns: {valid_cols}"
-                        print(f"[{agent_name}] {obs}")
-                    else:
-                        r = requests.post(f"{api_url}/cards", json=args)
-                        obs = check_res(r, "create_card")
-                        if r.status_code < 400:
-                            try: obs += f" (Card #{r.json().get('id')})"
-                            except: pass
-                elif action == "update_card":
-                    cid = args.pop("card_id", None)
-                    if not cid:
-                        obs = "❌ update_card requires card_id"
-                    else:
-                        if isinstance(cid, str): cid = cid.strip("# ")
-                        # Pre-flight: block writes to read-only columns
-                        target = next((c for c in cards if c.get("id") == int(cid)), None)
-                        if target and target.get("column") in read_only_columns:
-                            obs = f"❌ BLOCKED: Card #{cid} is in read-only column '{target['column']}'"
-                            print(f"[{agent_name}] {obs}")
-                        else:
-                            r = requests.patch(f"{api_url}/cards/{cid}", json=args, headers={"X-Aegis-Agent": "true"})
-                            obs = check_res(r, "update_card")
-                            if r.status_code in [403, 404]:
-                                # Phantom/Locked: Remove from local pulse context to break infinite loops
-                                cards = [c for c in cards if c.get("id") != int(cid)]
-                                obs += " (Card removed from local view)"
-                elif action == "delete_card":
-                    cid = args.get("card_id")
-                    if not cid:
-                        obs = "❌ delete_card requires card_id"
-                    else:
-                        if isinstance(cid, str): cid = cid.strip("# ")
-                        # Pre-flight: block deletes on read-only columns
-                        target = next((c for c in cards if c.get("id") == int(cid)), None)
-                        if target and target.get("column") in read_only_columns:
-                            obs = f"❌ BLOCKED: Card #{cid} is in read-only column '{target['column']}'"
-                            print(f"[{agent_name}] {obs}")
-                        else:
-                            r = requests.delete(f"{api_url}/cards/{cid}", headers={"X-Aegis-Agent": "true"})
-                            obs = check_res(r, "delete_card")
-                            if r.status_code in [200, 403, 404]:
-                                # If deleted successfully, locked, or already gone: prune local view to break loops
-                                cards = [c for c in cards if c.get("id") != int(cid)]
-                                obs += " (Card removed from local view)"
-                elif action == "bulk_delete_cards":
-                    cids = args.get("card_ids", [])
-                    if not isinstance(cids, list):
-                        obs = "❌ bulk_delete_cards requires an array of card_ids"
-                    elif not cids:
-                        obs = "❌ no card_ids provided"
-                    else:
-                        cids = [int(str(c).strip("# ")) for c in cids]
-                        
-                        # Pre-flight: block deletes on read-only columns
-                        blocked_ids = []
-                        valid_ids = []
-                        for cid in cids:
-                            target = next((c for c in cards if c.get("id") == cid), None)
-                            if target and target.get("column") in read_only_columns:
-                                blocked_ids.append(cid)
-                            else:
-                                valid_ids.append(cid)
-                                
-                        if blocked_ids:
-                            obs = f"❌ BLOCKED: Cards {blocked_ids} are in read-only columns."
-                            print(f"[{agent_name}] {obs}")
-                        
-                        if valid_ids:
-                            r = requests.delete(f"{api_url}/cards/bulk", json={"card_ids": valid_ids}, headers={"X-Aegis-Agent": "true"})
-                            res_data = r.json() if r.status_code < 400 else {}
-                            if r.status_code < 400 and res_data.get("success"):
-                                deleted = res_data.get("deleted", [])
-                                errs = res_data.get("errors", [])
-                                obs += f"\nBulk Delete Success: {len(deleted)} cards removed."
-                                if errs: obs += f" Errors: {errs}"
-                                cards = [c for c in cards if c.get("id") not in deleted]
-                            else:
-                                obs += f"\nBulk Delete Failed: HTTP {r.status_code} - {r.text}"
-                elif action == "bulk_update_cards":
-                    updates = args.get("updates", [])
-                    if not isinstance(updates, list):
-                        obs = "❌ bulk_update_cards requires an array of updates"
-                    elif not updates:
-                        obs = "❌ no updates provided"
-                    else:
-                        valid_updates = []
-                        blocked_ids = []
-                        for u in updates:
-                            cid = u.get("card_id")
-                            if not cid: continue
-                            cid = int(str(cid).strip("# "))
-                            u["card_id"] = cid
-                            
-                            target = next((c for c in cards if c.get("id") == cid), None)
-                            if target and target.get("column") in read_only_columns:
-                                blocked_ids.append(cid)
-                            else:
-                                valid_updates.append(u)
-                                
-                        if blocked_ids:
-                            obs = f"❌ BLOCKED Updates: Cards {blocked_ids} are in read-only columns."
-                            print(f"[{agent_name}] {obs}")
-                            
-                        if valid_updates:
-                            r = requests.patch(f"{api_url}/cards/bulk", json={"updates": valid_updates}, headers={"X-Aegis-Agent": "true"})
-                            res_data = r.json() if r.status_code < 400 else {}
-                            if r.status_code < 400 and res_data.get("success"):
-                                updated = res_data.get("updated", [])
-                                errs = res_data.get("errors", [])
-                                obs += f"\nBulk Update Success: {len(updated)} cards updated."
-                                if errs: obs += f" Errors: {errs}"
-                            else:
-                                obs += f"\nBulk Update Failed: HTTP {r.status_code} - {r.text}"
-                elif action == "post_comment":
-                    cid = args.get("card_id")
-                    content = args.get("content")
-                    if cid and content:
-                        if isinstance(cid, str): cid = cid.strip("# ")
-                        r = requests.post(f"{api_url}/cards/{cid}/comments", json={"author": agent_name, "content": content})
-                        obs = check_res(r, "post_comment")
-                elif action == "create_column":
-                    r = requests.post(f"{api_url}/columns", json=args)
-                    obs = check_res(r, "create_column")
-                elif action == "delete_column":
-                    cid = args.get("column_id")
-                    if cid: 
-                        r = requests.delete(f"{api_url}/columns/{cid}")
-                        obs = check_res(r, "delete_column")
-                elif action == "list_dir":
-                    p = args.get("path", ".")
-                    try:
-                        dir_res = os.listdir(p)
-                        obs = f"FILE LIST: {dir_res}"
-                        print(f"[{agent_name}] 📁 LIST_DIR: {dir_res}")
-                    except Exception as e:
-                        obs = f"❌ LIST_DIR ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-                elif action == "read_file":
-                    p = args.get("path")
-                    if p:
-                        try:
-                            with open(p, "r", encoding="utf-8") as rf:
-                                file_content = rf.read()
-                            obs = f"READ {p}: {file_content[:500]}..."
-                            print(f"[{agent_name}] 📄 READ_FILE: read {len(file_content)} characters")
-                        except Exception as e:
-                            obs = f"❌ READ_FILE ERROR: {e}"
-                            print(f"[{agent_name}] {obs}")
-                elif action == "write_file":
-                    p = args.get("path")
-                    c = args.get("content")
-                    if p and c is not None:
-                        try:
-                            with open(p, "w", encoding="utf-8") as wf:
-                                wf.write(c)
-                            obs = f"✅ SAVED FILE: {p}"
-                            print(f"[{agent_name}] 💾 WRITE_FILE: Saved {p}")
-                        except Exception as e:
-                            obs = f"❌ WRITE_FILE ERROR: {e}"
-                            print(f"[{agent_name}] {obs}")
-                elif action == "search_terminal":
-                    query = args.get("query", "")
-                    limit = args.get("limit", 50)
-                    if not query:
-                        obs = "❌ search_terminal requires a 'query' argument"
-                    else:
-                        try:
-                            r = requests.get(f"{api_url}/instances/{instance_id}/search_logs", params={"query": query, "limit": limit})
-                            obs = check_res(r, "search_terminal")
-                            if r.status_code < 400:
-                                logs = r.json().get("logs", [])
-                                if not logs:
-                                    obs = f"🔍 TERMINAL SEARCH [{query}]: No matches found."
-                                else:
-                                    formatted = "\\n".join([f"[{l.get('timestamp', '')}] [{l.get('tag', '').upper()}] {l.get('content', '')}" for l in logs])
-                                    obs = f"🔍 TERMINAL SEARCH [{query}]:\\n{formatted}"
-                                print(f"[{agent_name}] 🔍 SEARCH_TERMINAL: Found {len(logs)} matches")
-                        except Exception as e:
-                            obs = f"❌ SEARCH_TERMINAL FATAL: {e}"
-                            print(f"[{agent_name}] {obs}")
-
-                # --- GitHub API Tools (via Aegis proxy) ---
-                # ─── Git CLI Tools ────────────────────────────────────────────
-                elif action == "git_clone":
-                    repo_url = args.get("repo_url", "")
-                    dest = args.get("dest", "repo")
-                    try:
-                        import subprocess
-                        result = subprocess.run(
-                            ["git", "clone", "--depth", "1", repo_url, dest],
-                            capture_output=True, text=True, timeout=120
-                        )
-                        if result.returncode == 0:
-                            obs = f"✅ CLONED {repo_url} → {dest}"
-                            print(f"[{agent_name}] 📥 GIT_CLONE: {obs}")
-                        else:
-                            obs = f"❌ GIT_CLONE ERROR: {result.stderr[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ GIT_CLONE ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "git_branch":
-                    branch_name = args.get("branch_name", "")
-                    checkout = args.get("checkout", True)
-                    cwd = args.get("cwd", ".")
-                    try:
-                        import subprocess
-                        cmd = ["git", "checkout", "-b", branch_name] if checkout else ["git", "branch", branch_name]
-                        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=30)
-                        if result.returncode == 0:
-                            obs = f"✅ BRANCH CREATED: {branch_name}"
-                            print(f"[{agent_name}] 🌿 GIT_BRANCH: {obs}")
-                        else:
-                            obs = f"❌ GIT_BRANCH ERROR: {result.stderr[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ GIT_BRANCH ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "git_commit":
-                    message = args.get("message", "Automated commit")
-                    files = args.get("files", ["."])
-                    cwd = args.get("cwd", ".")
-                    try:
-                        import subprocess
-                        # Stage files
-                        for f in (files if isinstance(files, list) else [files]):
-                            subprocess.run(["git", "add", f], cwd=cwd, capture_output=True, timeout=15)
-                        # Commit with agent attribution
-                        commit_msg = f"[Aegis: {agent_name}] {message}"
-                        result = subprocess.run(
-                            ["git", "commit", "-m", commit_msg],
-                            capture_output=True, text=True, cwd=cwd, timeout=30
-                        )
-                        if result.returncode == 0:
-                            obs = f"✅ COMMITTED: {commit_msg}"
-                            print(f"[{agent_name}] 📝 GIT_COMMIT: {obs}")
-                        else:
-                            obs = f"❌ GIT_COMMIT ERROR: {result.stderr[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ GIT_COMMIT ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "git_push":
-                    remote = args.get("remote", "origin")
-                    branch = args.get("branch", "")
-                    cwd = args.get("cwd", ".")
-                    try:
-                        import subprocess
-                        cmd = ["git", "push", remote]
-                        if branch:
-                            cmd.append(branch)
-                        result = subprocess.run(cmd, capture_output=True, text=True, cwd=cwd, timeout=60)
-                        if result.returncode == 0:
-                            obs = f"✅ PUSHED to {remote}/{branch or 'HEAD'}"
-                            print(f"[{agent_name}] 🚀 GIT_PUSH: {obs}")
-                        else:
-                            obs = f"❌ GIT_PUSH ERROR: {result.stderr[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ GIT_PUSH ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                # ─── GitHub API Tools (via Aegis proxy) ───────────────────────
-                elif action == "create_pr":
-                    title = args.get("title", "")
-                    body = args.get("body", "")
-                    head = args.get("head", "")
-                    base = args.get("base", "main")
-                    gh_column = args.get("column", my_card_column)
-                    gh_column = args.get("column", my_card_column)  # Use agent's card column if not specified
-                    try:
-                        r = requests.post(f"{api_url}/github/pulls",
-                            headers={"X-Aegis-Agent": "true"},
-                            json={"title": title, "body": body, "head": head, "base": base, "column": gh_column})
-                        if r.status_code < 400:
-                            data = r.json()
-                            obs = f"✅ PR CREATED: #{data.get('pr_number')} — {data.get('url', '')}"
-                            print(f"[{agent_name}] 🔀 CREATE_PR: {obs}")
-                        else:
-                            obs = f"❌ CREATE_PR ERROR: {r.text[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ CREATE_PR ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "merge_pr":
-                    pr_number = args.get("pr_number")
-                    merge_method = args.get("merge_method", "squash")
-                    commit_message = args.get("commit_message", "")
-                    try:
-                        r = requests.post(f"{api_url}/github/pulls/merge",
-                            headers={"X-Aegis-Agent": "true"},
-                            json={"pr_number": pr_number, "merge_method": merge_method, "commit_message": commit_message})
-                        if r.status_code < 400:
-                            obs = f"✅ PR #{pr_number} MERGED ({merge_method})"
-                            print(f"[{agent_name}] ✅ MERGE_PR: {obs}")
-                        else:
-                            obs = f"❌ MERGE_PR ERROR: {r.text[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ MERGE_PR ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "list_prs":
-                    state = args.get("state", "open")
-                    gh_column = args.get("column", my_card_column)
-                    try:
-                        r = requests.get(f"{api_url}/github/pulls", params={"state": state, "column": gh_column})
-                        prs = r.json() if r.status_code < 400 else []
-                        obs = f"PULL REQUESTS ({state}): " + json.dumps(prs[:10], indent=2)
-                        print(f"[{agent_name}] 📋 LIST_PRS: {len(prs)} PRs found")
-                    except Exception as e:
-                        obs = f"❌ LIST_PRS ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "list_branches":
-                    gh_column = args.get("column", my_card_column)
-                    try:
-                        r = requests.get(f"{api_url}/github/branches", params={"column": gh_column})
-                        branches = r.json() if r.status_code < 400 else []
-                        obs = f"BRANCHES: " + json.dumps(branches[:20], indent=2)
-                        print(f"[{agent_name}] 🌿 LIST_BRANCHES: {len(branches)} branches found")
-                    except Exception as e:
-                        obs = f"❌ LIST_BRANCHES ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "create_branch_remote":
-                    branch_name = args.get("branch_name", "")
-                    base = args.get("base", "main")
-                    gh_column = args.get("column", my_card_column)
-                    try:
-                        r = requests.post(f"{api_url}/github/branches",
-                            headers={"X-Aegis-Agent": "true"},
-                            json={"branch_name": branch_name, "base": base, "column": gh_column})
-                        if r.status_code < 400:
-                            obs = f"✅ REMOTE BRANCH CREATED: {branch_name} (from {base})"
-                            print(f"[{agent_name}] 🌿 CREATE_BRANCH_REMOTE: {obs}")
-                        else:
-                            obs = f"❌ CREATE_BRANCH_REMOTE ERROR: {r.text[:300]}"
-                            print(f"[{agent_name}] {obs}")
-                    except Exception as e:
-                        obs = f"❌ CREATE_BRANCH_REMOTE ERROR: {e}"
-                        print(f"[{agent_name}] {obs}")
-
-                elif action == "done":
-                    reason = args.get('reason', 'Task complete')
-                    print(f"[{agent_name}] ✅ DONE: {reason}")
-                    obs = f"DONE: {reason}"
-                    should_break = True
-                elif action == "wait":
-                    reason = args.get('reason', 'None')
-                    print(f"[{agent_name}] 💤 WAIT: {reason}")
-                    obs = f"WAITING: {reason}"
-                    should_break = True
-                elif action == "notify":
-                    msg = args.get("message", "")
-                    mood = args.get("mood", "info")
-                    prefix = {"info": "📢", "warning": "⚠️", "error": "🛑"}.get(mood, "📢")
-                    print(f"[{agent_name}] {prefix} NOTIFY: {msg}")
-                    obs = f"NOTIFIED: {msg}"
-
-                if obs:
-                    step_observations.append(obs)
-
-            if should_break:
-                break
-
-            observations.extend(step_observations)
-
-            # Small delay between ReAct steps to be nice to the API
-            if step < MAX_STEPS - 1:
-                time.sleep(1)
-
-        except Exception as e:
-            consecutive_errors += 1
-            error_msg = f"❌ ERROR (Step {step+1}, attempt {consecutive_errors}/{MAX_CONSECUTIVE_ERRORS}): {e}"
-            print(f"[{agent_name}] {error_msg}")
-            observations.append(error_msg)
-            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
-                print(f"[{agent_name}] 🛑 Too many consecutive errors. Breaking out of ReAct loop.")
-                break
-            # Sleep briefly and retry instead of dying
-            time.sleep(2)
-            continue
 
     # ─── AUTO-SAVE SCRATCHPAD (Persistent Memory) ───
     if observations:
@@ -855,6 +1095,27 @@ while True:
                 if eval_res and isinstance(eval_res, dict) and eval_res.get("action") == "continue":
                     consecutive_repulses += 1
                     print(f"[{agent_name}] 🔄 Self-eval: MORE WORK — {eval_res.get('reason', '')} (re-pulse {consecutive_repulses}/{MAX_CONSECUTIVE_REPULSES})")
+                    # ─── FLUSH CONTEXT TO SCRATCHPAD BEFORE RE-PULSE ───
+                    # Observations reset when we loop back to the top — save them now so the
+                    # next pulse picks them up via scratchpad injection and doesn't start over.
+                    try:
+                        import datetime
+                        scratchpad = ""
+                        if os.path.exists("scratchpad.md"):
+                            with open("scratchpad.md", "r", encoding="utf-8") as rf:
+                                scratchpad = rf.read()
+                        carry_block = f"\n\n## CONTINUING WORK @ {datetime.datetime.now().isoformat()}\n"
+                        carry_block += f"**Reason:** {eval_res.get('reason', '')}\n"
+                        carry_block += f"### What I already did this session:\n"
+                        for i, obs in enumerate(observations):
+                            carry_block += f"- {obs[:200]}\n"
+                        carry_block += f"\n⚠️ Do NOT redo the above. Continue from where I left off.\n"
+                        scratchpad = (scratchpad + carry_block)[-8000:]
+                        with open("scratchpad.md", "w", encoding="utf-8") as wf:
+                            wf.write(scratchpad)
+                        print(f"[{agent_name}] 💾 Flushed {len(observations)} observations to scratchpad for next pulse.")
+                    except Exception as se:
+                        print(f"[{agent_name}] ⚠️ Failed to flush context: {se}")
                     continue  # Skip the sleep and loop back to the top
                 else:
                     reason = eval_res.get("reason", "No pending work") if eval_res else "Eval failed"
@@ -865,6 +1126,9 @@ while True:
     else:
         consecutive_repulses = 0
 
+    # Report presence: agent is idle/sleeping
+    _report_presence(activity="idle")
+
     # Send pulse websocket event so UI can show countdown
     clean_id = (instance_id or "").strip()
     if clean_id:
@@ -872,7 +1136,7 @@ while True:
             requests.post(f"{api_url}/instances/{clean_id}/pulse", json={"interval": pulse_interval})
         except Exception:
             pass
-        
+
     console.print(f"\n[bold green][{agent_name}] ✅ Pulse complete.[/bold green]")
     
     if mode == "one-shot":

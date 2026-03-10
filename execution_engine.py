@@ -40,281 +40,8 @@ INSTANCES_DIR.mkdir(exist_ok=True)
 # AGENT PROCESS STATE
 # ═══════════════════════════════════════════════════════════════════════════════════
 
-class AgentProcess:
-    """Tracks a single running agent/instance process with full metadata."""
-
-    def __init__(self, agent_id: str, pid: int, process,
-                 card_id: Optional[int] = None, color: str = "#6366f1",
-                 instance_id: Optional[str] = None,
-                 instance_name: Optional[str] = None,
-                 icon: str = "🤖"):
-        self.agent_id = agent_id          # template id (e.g. openclaw-core)
-        self.instance_id = instance_id    # unique instance id (e.g. openclaw-core-a1b2)
-        self.instance_name = instance_name  # user-chosen name (e.g. Frontend-Coder)
-        self.pid = pid
-        self.process = process
-        self.status = "running"
-        self.paused = False
-        self.card_id = card_id
-        self.color = color
-        self.icon = icon
-        self.started_at = datetime.now().isoformat()
-        self.exit_code: Optional[int] = None
-        self.logs: list[str] = []
-        self.activity: str = "idle" # Current phase (Thinking, Acting, Waiting)
-
-    def to_dict(self) -> dict:
-        return {
-            "agent_id": self.agent_id,
-            "instance_id": self.instance_id,
-            "instance_name": self.instance_name,
-            "pid": self.pid,
-            "status": self.status,
-            "paused": self.paused,
-            "activity": self.activity,
-            "card_id": self.card_id,
-            "color": self.color,
-            "icon": self.icon,
-            "started_at": self.started_at,
-            "exit_code": self.exit_code,
-            "log_count": len(self.logs),
-        }
-
-
-# ═══════════════════════════════════════════════════════════════════════════════════
-# EXECUTION ADAPTERS
-# ═══════════════════════════════════════════════════════════════════════════════════
-
-class ExecutionAdapter(ABC):
-    """Base class for agent execution strategies."""
-
-    @abstractmethod
-    async def create_process(self, agent_id: str, agent_config: dict,
-                             card: dict, env: dict,
-                             instance_dir: Optional[Path] = None) -> Optional[asyncio.subprocess.Process]:
-        ...
-
-    @abstractmethod
-    async def kill_process(self, agent_proc: AgentProcess) -> bool:
-        ...
-
-
-class SubprocessAdapter(ExecutionAdapter):
-    """Runs agents as bare-metal subprocesses."""
-
-    async def create_process(self, agent_id, agent_config, card, env,
-                             instance_dir=None):
-        command = agent_config.get("binary", "")
-        if not command:
-            exec_config = agent_config.get("execution", {})
-            command = exec_config.get("command", "")
-        if not command:
-            logger.error(f"No command configured for agent '{agent_id}'")
-            return None
-
-        is_cli_agent = agent_config.get("cli_agent", False)
-
-        # Instance dir takes priority over config working_dir
-        if instance_dir and instance_dir.exists():
-            working_dir = instance_dir
-        else:
-            working_dir = agent_config.get("execution", {}).get("working_dir", ".")
-            working_dir = Path(working_dir).resolve()
-
-        # Cross-platform command adjustments
-        if os.name == "nt" and command.startswith("./"):
-            parts = command.split(" ", 1)
-            exe = parts[0].replace("/", "\\")
-            if not any(exe.endswith(ext) for ext in [".exe", ".bat", ".cmd"]):
-                exe += ".exe"
-            command = exe + (" " + parts[1] if len(parts) > 1 else "")
-
-        # Use sys.executable instead of "python" to ensure we use the same environment
-        if command.startswith("python "):
-            command = command.replace("python ", f'"{sys.executable}" ', 1)
-
-        # CLI agents: resolve npx/global binaries, skip worker.py sync
-        if is_cli_agent:
-
-            # On Windows, try to find the CLI as a .cmd script (npm global installs)
-            if os.name == "nt":
-                cmd_base = command.split()[0]
-                cmd_path = shutil.which(cmd_base) or shutil.which(cmd_base + ".cmd")
-                if cmd_path:
-                    command = command.replace(cmd_base, f'"{cmd_path}"', 1)
-
-            logger.info(f"CLI agent starting: command={command}, cwd={working_dir}")
-        elif working_dir and working_dir.exists():
-             # Auto-sync worker.py from template on every start (standard workers only)
-             template_worker = TEMPLATES_DIR / agent_id / "worker.py"
-             instance_worker = working_dir / "worker.py"
-             if template_worker.exists():
-                 try:
-                     shutil.copy2(str(template_worker), str(instance_worker))
-                     logger.info(f"Auto-synced worker.py from template '{agent_id}' to {working_dir}")
-                 except Exception as e:
-                     logger.warning(f"Failed to auto-sync worker.py: {e}")
-
-             worker_exists = instance_worker.exists()
-             logger.info(f"Subprocess starting: command={command}, cwd={working_dir}, worker_exists={worker_exists}")
-             if not worker_exists:
-                 logger.error(f"CRITICAL: worker.py MISSING in {working_dir}")
-        else:
-             logger.warning(f"Subprocess starting with NO CWD or non-existent CWD: {working_dir}")
-
-        # CLI agents need stdin for interactive operation
-        needs_stdin = is_cli_agent or agent_config.get("execution", {}).get("interactive", False)
-
-        process = await asyncio.create_subprocess_shell(
-            command,
-            stdin=asyncio.subprocess.PIPE if needs_stdin else asyncio.subprocess.PIPE,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            cwd=str(working_dir) if working_dir and working_dir.exists() else None,
-            env=env
-        )
-        return process
-
-    async def kill_process(self, agent_proc):
-        try:
-            if os.name == 'nt':
-                # On Windows, create_subprocess_shell leaves orphan processes if only the shell is killed.
-                # Use taskkill /T (tree) /F (force) to ensure everything dies.
-                try:
-                    proc = await asyncio.create_subprocess_exec(
-                        "taskkill", "/F", "/T", "/PID", str(agent_proc.process.pid),
-                        stdout=asyncio.subprocess.PIPE,
-                        stderr=asyncio.subprocess.PIPE
-                    )
-                    await proc.wait()
-                    return True
-                except Exception as e:
-                    logger.debug(f"Taskkill failed (maybe already dead): {e}")
-            
-            agent_proc.process.terminate()
-            try:
-                await asyncio.wait_for(agent_proc.process.wait(), timeout=5.0)
-            except asyncio.TimeoutError:
-                agent_proc.process.kill()
-                await agent_proc.process.wait()
-            return True
-        except Exception as e:
-            logger.error(f"Failed to terminate subprocess for '{agent_proc.agent_id}': {e}")
-            return False
-
-
-class DockerAdapter(ExecutionAdapter):
-    """Runs agents inside isolated Docker containers."""
-
-    def __init__(self):
-        self._docker_available = shutil.which("docker") is not None
-        self._containers: dict[int, str] = {}  # card_id -> container_name
-
-    async def create_process(self, agent_id, agent_config, card, env,
-                             instance_dir=None):
-        if not self._docker_available:
-            logger.warning("CRITICAL SECURITY WARNING: Docker is not available. Falling back to SubprocessAdapter! Agents will execute code directly on the host OS. Proceed with extreme caution.")
-            fallback = SubprocessAdapter()
-            return await fallback.create_process(agent_id, agent_config, card, env, instance_dir)
-
-        image = agent_config.get("docker_image", "python:3.11-slim")
-        if not image:
-            logger.error(f"No docker_image configured for agent '{agent_id}'")
-            return None
-
-        card_id = card.get("id", 0)
-        container_name = f"aegis-{agent_id}-{card_id}"
-
-        try:
-            from main import CONFIG
-            mcp_workspaces = CONFIG.get("mcp", {}).get("workspaces", [])
-        except ImportError:
-            mcp_workspaces = []
-
-        volume_flags = []
-        if instance_dir and instance_dir.exists():
-            # Sync worker.py before mounting
-            template_worker = TEMPLATES_DIR / agent_id / "worker.py"
-            instance_worker = instance_dir / "worker.py"
-            if template_worker.exists():
-                try:
-                    import shutil
-                    shutil.copy2(str(template_worker), str(instance_worker))
-                except Exception as e:
-                    logger.warning(f"Failed to auto-sync worker.py: {e}")
-            volume_flags.extend(["-v", f"{instance_dir.resolve()}:/workspace"])
-
-        for ws in mcp_workspaces:
-            path = ws.get("path", "")
-            if path:
-                volume_flags.extend(["-v", f"{path}:/workspace/mcp_{ws.get('name', 'ws')}:ro"])
-
-        env_flags = []
-        for k, v in env.items():
-            if v:
-                # Docker API requires host.docker.internal to route back to host localhost
-                if k == "AEGIS_API_URL":
-                    v = v.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
-                env_flags.extend(["-e", f"{k}={v}"])
-
-        # Inject MCP Server URL so any MCP-aware agent can auto-discover Aegis tools
-        api_url = env.get("AEGIS_API_URL", "http://localhost:42069")
-        mcp_host = api_url.replace("localhost", "host.docker.internal").replace("127.0.0.1", "host.docker.internal")
-        mcp_base = mcp_host.split("/api")[0].rstrip("/")
-        env_flags.extend(["-e", f"AEGIS_MCP_URL={mcp_base}/mcp/sse"])
-
-        cmd = [
-            "docker", "run", "--rm",
-            "--name", container_name,
-            "--add-host", "host.docker.internal:host-gateway",  # Linux compat
-            *env_flags,
-            *volume_flags,
-            image,
-            "python", "-u", "/workspace/worker.py" # default command
-        ]
-        
-        # If agent config specifies a custom command relative to workspace
-        exec_cmd = agent_config.get("execution", {}).get("command", "")
-        if exec_cmd:
-             # Just replace python worker.py with their command
-             cmd = cmd[:-3] + exec_cmd.split()
-
-        # Enable stdin for interactive agents (claude-code, etc.)
-        needs_stdin = agent_config.get("execution", {}).get("interactive", False)
-        stdin_flag = asyncio.subprocess.PIPE if needs_stdin else asyncio.subprocess.DEVNULL
-
-        process = await asyncio.create_subprocess_exec(
-            *cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-            stdin=stdin_flag,
-        )
-        self._containers[card_id] = container_name
-        return process
-
-    async def kill_process(self, agent_proc):
-        card_id = agent_proc.card_id or 0
-        container_name = self._containers.get(card_id)
-        if container_name:
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    "docker", "kill", container_name,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE
-                )
-                await proc.wait()
-                del self._containers[card_id]
-                return True
-            except Exception as e:
-                logger.error(f"Failed to kill Docker container for '{agent_proc.agent_id}': {e}")
-                return False
-        # Fallback to process termination
-        try:
-            agent_proc.process.terminate()
-            await agent_proc.process.wait()
-            return True
-        except Exception:
-            return False
+from core.models import AgentProcess
+from core.adapters import ExecutionAdapter, SubprocessAdapter, DockerAdapter
 
 
 # ═══════════════════════════════════════════════════════════════════════════════════
@@ -506,6 +233,17 @@ class ExecutionEngine:
                 icon=env.get("AEGIS_AGENT_ICON", "🤖")
             )
             agent_proc.is_cli = merged_config.get("cli_agent", False)
+            # Fetch wrapper preference early
+            _show_wrap = True
+            if agent_proc.is_cli and instance_id:
+                try:
+                    _t_inst = next((i for i in load_instances() if i["instance_id"] == instance_id), None)
+                    if _t_inst:
+                        _show_wrap = str(_t_inst.get("config", {}).get("show_cli_wrapper", "true")).lower() == "true"
+                except Exception: pass
+                
+            # Set wrapper visibility for CLI agents
+            agent_proc.show_wrapper = _show_wrap if agent_proc.is_cli else True
             self.active[key] = agent_proc
 
             # Start log streaming
@@ -536,7 +274,13 @@ class ExecutionEngine:
             # maintains conversation history per working-directory, so subsequent
             # pulses use `--continue` to resume the conversation with full context.
             # Each individual invocation can do full multi-step reasoning with tools.
-            if merged_config.get("cli_agent"):
+            #
+            # SAFEGUARD: If someone sets `cli_agent: true` but uses `python -u worker.py`
+            # as the command, skip the CLI pulse loop. The worker.py script has its own
+            # internal pulse loop and running both causes dual-execution and crashes.
+            _cmd_check = merged_config.get("execution", {}).get("command", "")
+            _is_worker_cmd = "worker.py" in _cmd_check
+            if merged_config.get("cli_agent") and not _is_worker_cmd:
                 # Read config from the instance metadata
                 _cli_config = {}
                 try:
@@ -550,6 +294,7 @@ class ExecutionEngine:
                 _cli_goals = _cli_config.get("goals", "Process tasks from the Aegis board.")
                 _cli_pulse = int(_cli_config.get("pulse_interval", 120))
                 _cli_startup_delay = str(_cli_config.get("startup_delay", "false")).lower() == "true"
+                _show_cli_wrapper = agent_proc.show_wrapper
                 _api_url = env.get("AEGIS_API_URL", "http://localhost:42069/api")
 
                 # Resolve the CLI binary (e.g. claude, gemini)
@@ -573,7 +318,7 @@ class ExecutionEngine:
                 _is_claude = "claude" in _base_command.lower()
 
                 async def _cli_pulse_loop(_key, _proc, _goals, _pulse, _startup_delay,
-                                          _api, _cmd, _cwd, _env, _is_claude_cli):
+                                          _api, _cmd, _cwd, _env, _is_claude_cli, _show_wrapper=True):
                     """Autonomous pulse loop: spawns one-shot CLI processes per pulse."""
                     import urllib.request, urllib.error
                     boot_wait = 5.0
@@ -600,12 +345,38 @@ class ExecutionEngine:
                         "Do not wait for user permission to act; use your tools to make progress independently."
                     )
 
+                    # Aegis REST API cheat-sheet for CLI agents
+                    api_reference = (
+                        "\n\n=== AEGIS REST API REFERENCE (Base: http://localhost:42069/api) ===\n"
+                        "All endpoints accept/return JSON. Use curl or your HTTP tools.\n\n"
+                        "CARDS:\n"
+                        "  GET    /api/cards                          - List all cards\n"
+                        "  POST   /api/cards                          - Create card {title, column, description?, priority?, assignee?, tags?}\n"
+                        '         Example: curl -X POST http://localhost:42069/api/cards -H "Content-Type: application/json" -d \'{"title":"Fix bug","column":"To-Do","priority":"high"}\'\n'
+                        "  PATCH  /api/cards/{id}                     - Update card {column?, title?, description?, assignee?, priority?, status?, tags?}\n"
+                        '         Example: curl -X PATCH http://localhost:42069/api/cards/5 -H "Content-Type: application/json" -H "X-Aegis-Agent: true" -d \'{"column":"In-Progress","assignee":"MyName"}\'\n'
+                        "  DELETE /api/cards/{id}                     - Delete card\n"
+                        "  GET    /api/cards/{id}/context              - Smart context (focus card + related cards + board directory)\n"
+                        "  POST   /api/cards/{id}/comments            - Add comment {author, content}\n\n"
+                        "BULK OPS:\n"
+                        '  DELETE /api/cards/bulk                     - Bulk delete {card_ids: [1,2,3]}\n'
+                        '  PATCH  /api/cards/bulk                     - Bulk update {updates: [{card_id:1, column:"Done"}, ...]}\n\n'
+                        "COLUMNS:\n"
+                        "  GET    /api/columns                        - List all columns\n"
+                        "  POST   /api/columns                        - Create column {name}\n\n"
+                        "IMPORTANT: Always include header 'X-Aegis-Agent: true' on PATCH/DELETE card requests.\n"
+                        "IMPORTANT: Use column NAMES (not IDs) when setting a card's column.\n"
+                        "=== END API REFERENCE ===\n"
+                    )
+
                     pulse_count = 0
                     while _proc.status == "running":
                         pulse_count += 1
                         try:
                             # --- Stage 1: Fetch board state ---
-                            async def _emit(_text):
+                            async def _emit(_text, _wrapper=True):
+                                if _wrapper and not _show_wrapper:
+                                    return  # Skip wrapper messages when disabled
                                 _proc.logs.append(_text)
                                 if self.broadcaster:
                                     await self.broadcaster({
@@ -618,14 +389,56 @@ class ExecutionEngine:
                             await _emit(f"📡 PULSE: Fetching board state (pulse #{pulse_count})...")
 
                             board_ctx = ""
+                            cards_data = None
+                            cols_data = None
                             try:
                                 cards_data = await asyncio.to_thread(_fetch_json, f"{_api}/cards")
                                 cols_data = await asyncio.to_thread(_fetch_json, f"{_api}/columns")
                                 if cards_data and cols_data:
-                                    col_names = ", ".join(c.get("name", "?") for c in cols_data)
-                                    board_ctx = f"\n\nCurrent Board State:\nColumns: {col_names}\nCards:\n"
-                                    for c in cards_data[:15]:
-                                        board_ctx += f"  - [#{c.get('id')}] {c.get('title', '?')} | Col: {c.get('column', '?')} | Assignee: {c.get('assignee', 'None')}\n"
+                                    # Rich board context matching standard workers
+                                    board_ctx = "\n\n--- BOARD STATE ---\n"
+
+                                    # Column summary with guardrails
+                                    board_ctx += "COLUMNS:\n"
+                                    read_only_cols = set()
+                                    for col in cols_data:
+                                        col_line = f"  [{col.get('id')}] {col.get('name', '?')}"
+                                        if col.get('is_locked'):
+                                            col_line += " [LOCKED]"
+                                        if col.get('integration_type') and col.get('integration_mode') == 'read':
+                                            col_line += " [READ-ONLY]"
+                                            read_only_cols.add(col.get('name', ''))
+                                        board_ctx += col_line + "\n"
+                                        # Column guardrails
+                                        if col.get('function'):
+                                            board_ctx += f"    Function: {col['function']}\n"
+                                        if col.get('exit_pass'):
+                                            board_ctx += f"    Exit [Pass]: {col['exit_pass']}\n"
+                                        if col.get('exit_fail'):
+                                            board_ctx += f"    Exit [Fail]: {col['exit_fail']}\n"
+
+                                    if read_only_cols:
+                                        board_ctx += f"\n⚠️ READ-ONLY: {', '.join(sorted(read_only_cols))} — do NOT create/update/delete cards in these columns.\n"
+
+                                    board_ctx += f"\nCARDS ({len(cards_data)} total):\n"
+                                    for c in cards_data:
+                                        locked = " [LOCKED]" if c.get("is_locked") else ""
+                                        board_ctx += (
+                                            f"  [#{c.get('id')}]{locked} {c.get('title', '?')} | "
+                                            f"Col: {c.get('column', '?')} | "
+                                            f"Assignee: {c.get('assignee', 'None')} | "
+                                            f"Priority: {c.get('priority', 'normal')}\n"
+                                        )
+                                        desc = c.get('description', '')
+                                        if desc:
+                                            board_ctx += f"    Desc: {desc[:200]}\n"
+                                        comments = c.get('comments', [])
+                                        if comments:
+                                            last = comments[-1]
+                                            board_ctx += f"    Last Comment [{last.get('author', '?')}]: {str(last.get('content', ''))[:100]}\n"
+
+                                    board_ctx += "\n⚠️ LOCKED CARDS: If you see [LOCKED], do NOT edit, update, or delete that card.\n"
+
                                     await _emit(f"📋 Board loaded: {len(cards_data)} cards across {len(cols_data)} columns")
                                 else:
                                     await _emit("⚠️ Could not fetch board state, proceeding with goal only")
@@ -634,14 +447,19 @@ class ExecutionEngine:
                                 await _emit("⚠️ Board fetch failed, proceeding with goal only")
 
                             # --- Stage 2: Build the prompt ---
-                            prompt_text = (
-                                f"[Aegis System Pulse #{pulse_count}]\n"
-                                f"Goal: {_goals}\n"
-                                f"System Instructions: {robust_instruction}\n"
-                            )
-                            if pulse_count > 1:
-                                prompt_text += "This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
+                            if _show_wrapper:
+                                prompt_text = (
+                                    f"[Aegis System Pulse #{pulse_count}]\n"
+                                    f"Your Name: {_proc.instance_name or _proc.instance_id}\n"
+                                    f"Goal: {_goals}\n"
+                                    f"System Instructions: {robust_instruction}\n"
+                                )
+                                if pulse_count > 1:
+                                    prompt_text += "This is your autonomous pulse. Review the current board state, pick up any unassigned tasks, and continue working on your goal.\n"
+                            else:
+                                prompt_text = f"{_goals}\n\n{robust_instruction}\n"
                             prompt_text += board_ctx
+                            prompt_text += api_reference
 
                             # Escape the prompt for shell usage
                             safe_prompt = prompt_text.replace('"', '\\"').replace('\n', '\\n')
@@ -720,7 +538,7 @@ class ExecutionEngine:
                 asyncio.create_task(_cli_pulse_loop(
                     key, agent_proc, _cli_goals,
                     _cli_pulse, _cli_startup_delay, _api_url,
-                    _base_command, _cli_cwd, env, _is_claude
+                    _base_command, _cli_cwd, env, _is_claude, _show_cli_wrapper
                 ))
 
             return agent_proc.to_dict()
@@ -881,20 +699,147 @@ class ExecutionEngine:
 
     async def inject_stdin(self, agent_id: str, text: str, newline: bool = False) -> dict:
         """Write text to a running agent's stdin pipe. 
-        If newline is True, appends \\n and logs the injection as a discrete event."""
+        If newline is True, appends \\n and logs the injection as a discrete event.
+        For CLI agents, non-TTY stdin buffers until EOF, so we instead spawn a discrete
+        one-shot process with the `-p` flag."""
         agent_proc = self.active.get(agent_id)
         if not agent_proc or agent_proc.status != "running":
             return {"error": f"Agent '{agent_id}' is not running"}
 
         try:
+            # Handle Node.js non-TTY pipe buffering for CLI agents
+            if getattr(agent_proc, 'is_cli', False):
+                logger.info(f"Routing stdin to CLI one-shot for '{agent_id}'")
+                entry = f"[CHAT] {text}" if getattr(agent_proc, 'show_wrapper', True) else text
+                agent_proc.logs.append(entry)
+                if self.broadcaster:
+                    await self.broadcaster({
+                        "type": "log_entry",
+                        "card_id": agent_proc.card_id,
+                        "entry": entry
+                    })
+
+                # Fire off a background task to run the user query via CLI
+                async def _run_cli_chat():
+                    try:
+                        # Build a lightweight direct-message prompt (no goal/system prompt)
+                        chat_prompt = (
+                            f"[Direct Message from User]\n"
+                            f"The user sent you this message directly via the Aegis terminal. "
+                            f"Respond to their request. You have access to the Aegis Kanban API at http://localhost:42069/api "
+                            f"(GET /api/cards, POST /api/cards, PATCH /api/cards/{{id}}, DELETE /api/cards/{{id}}, "
+                            f"POST /api/cards/{{id}}/comments, GET /api/columns). "
+                            f"Include header 'X-Aegis-Agent: true' on PATCH/DELETE requests.\n\n"
+                            f"User Message: {text}"
+                        )
+                        safe_prompt = chat_prompt.replace('"', '\\"').replace('\n', '\\n')
+                        
+                        # Resolve the proper CLI command (claude or gemini) directly from the registry template bounds
+                        # rather than parsing the unpredictable transport args
+                        from execution_engine import load_instances
+                        _inst_md = next((i for i in load_instances() if i["instance_id"] == agent_id), {})
+                        _tmp_id = _inst_md.get("template_id", "claude-code")
+                        cmd_base = "gemini" if "gemini" in _tmp_id.lower() else "claude"
+                        
+                        if os.name == "nt":
+                            cmd_path = __import__("shutil").which(cmd_base) or __import__("shutil").which(cmd_base + ".cmd")
+                            if cmd_path: cmd_base = f'"{cmd_path}"'
+                            
+                        is_claude = "claude" in cmd_base.lower()
+                        if is_claude:
+                            cli_cmd = f'{cmd_base} -p "{safe_prompt}" --continue'
+                        else:
+                            cli_cmd = f'{cmd_base} "{safe_prompt}"'
+
+                        # Get instance cwd if defined
+                        from execution_engine import load_instances, INSTANCES_DIR
+                        inst_meta = next((i for i in load_instances() if i["instance_id"] == agent_id), None)
+                        
+                        wk_dir = "."
+                        if inst_meta:
+                            wk_dir = inst_meta.get("config", {}).get("work_dir", ".")
+                            if not Path(wk_dir).exists():
+                                wk_dir = str(INSTANCES_DIR / agent_id)
+                                
+                        # Carry over environment mapping
+                        cli_env = os.environ.copy()
+                        if inst_meta:
+                            for k, v in inst_meta.get("env_vars", {}).items():
+                                if v: cli_env[k] = str(v)
+
+                            # Handle dynamic API mapping
+                            agent_registry = json.loads(Path("agent_registry.json").read_text(encoding="utf-8"))
+                            reg_entry = next((a for a in agent_registry if a["id"] == inst_meta["template_id"]), None)
+                            if reg_entry and reg_entry.get("cli_agent") and reg_entry.get("api_key_env"):
+                                t_env = reg_entry["api_key_env"]
+                                key = inst_meta["env_vars"].get("api_key", "")
+                                if key: cli_env[t_env] = key
+
+                        proc = await asyncio.create_subprocess_shell(
+                            cli_cmd,
+                            stdout=asyncio.subprocess.PIPE,
+                            stderr=asyncio.subprocess.PIPE,
+                            cwd=wk_dir,
+                            env=cli_env
+                        )
+
+                        # Collect full response while streaming
+                        chat_response_parts = []
+
+                        async def _stream_chat(stream):
+                            while True:
+                                chunk = await stream.read(4096)
+                                if not chunk: break
+                                decoded = chunk.decode(errors="replace")
+                                chat_response_parts.append(decoded)
+                                agent_proc.logs.append(decoded)
+                                if self.broadcaster:
+                                    await self.broadcaster({
+                                        "type": "agent_log",
+                                        "agent_id": agent_proc.agent_id,
+                                        "instance_id": agent_proc.instance_id,
+                                        "entry": decoded
+                                    })
+                        await asyncio.gather(
+                            _stream_chat(proc.stdout),
+                            _stream_chat(proc.stderr),
+                            proc.wait()
+                        )
+
+                        # Emit a NOTIFY entry so the UI triggers a chat bubble
+                        full_response = "".join(chat_response_parts).strip()
+                        if full_response:
+                            # Clean up: take last meaningful paragraph as the bubble text
+                            lines = [l.strip() for l in full_response.split("\n") if l.strip()]
+                            # Filter out tool/thinking noise — grab the last substantial line
+                            bubble_text = lines[-1] if lines else full_response[:200]
+                            if len(bubble_text) > 200:
+                                bubble_text = bubble_text[:197] + "..."
+                            notify_entry = f"📢 NOTIFY: {bubble_text}"
+                            agent_proc.logs.append(notify_entry)
+                            if self.broadcaster:
+                                await self.broadcaster({
+                                    "type": "agent_log",
+                                    "agent_id": agent_proc.agent_id,
+                                    "instance_id": agent_proc.instance_id,
+                                    "entry": notify_entry
+                                })
+
+                    except Exception as loop_e:
+                        logger.error(f"Failed to proxy CLI chat: {loop_e}")
+
+                asyncio.create_task(_run_cli_chat())
+                return {"success": True}
+
+            # Standard Python Agents
             if agent_proc.process.stdin:
                 payload = text + "\n" if newline else text
                 agent_proc.process.stdin.write(payload.encode())
                 await agent_proc.process.stdin.drain()
 
                 if newline:
-                    # Log the discrete injection
-                    entry = f"[INJECT] {text}"
+                    # Log the discrete injection (skip prefix if wrapper disabled)
+                    entry = f"[INJECT] {text}" if getattr(agent_proc, 'show_wrapper', True) else text
                     agent_proc.logs.append(entry)
 
                     if self.broadcaster:
@@ -940,6 +885,27 @@ class ExecutionEngine:
                 
         agent_proc = self.active.get(agent_id)
         return agent_proc.logs[-tail:] if agent_proc else []
+
+    async def update_presence(self, agent_id: str, card_id: Optional[int], activity: str) -> dict:
+        """Update agent presence (card working on, activity status) and broadcast via WebSocket."""
+        agent_proc = self.active.get(agent_id)
+        if not agent_proc:
+            return {"error": f"Agent '{agent_id}' not found", "status": "not_found"}
+
+        # Update presence
+        agent_proc.card_id = card_id
+        presence_data = {
+            "type": "agent_presence",
+            "agent_id": agent_id,
+            "card_id": card_id,
+            "activity": activity,
+            "timestamp": datetime.now().isoformat()
+        }
+
+        if self.broadcaster:
+            await self.broadcaster(presence_data)
+
+        return {"status": "updated", "presence": presence_data}
 
     # ─── Log Streaming ────────────────────────────────────────────────────────
 
@@ -1195,7 +1161,13 @@ def create_instance(template_id: str, instance_name: str,
     except Exception as e:
         return {"error": f"Failed to copy template: {e}"}
 
-    # Build instance metadata
+    # Build instance metadata — auto-equip core skills
+    instance_config = config or {}
+    if "skills" not in instance_config:
+        instance_config["skills"] = []
+    if "aegis-board-mastery" not in instance_config["skills"]:
+        instance_config["skills"].append("aegis-board-mastery")
+
     instance = {
         "instance_id": instance_id,
         "template_id": template_id,
@@ -1208,7 +1180,7 @@ def create_instance(template_id: str, instance_name: str,
         "service": service,
         "model": model,
         "env_vars": env_vars or {},
-        "config": config or {},
+        "config": instance_config,
     }
 
     # Persist

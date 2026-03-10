@@ -1,5 +1,6 @@
 /* Aegis Workers Module — Instance-based sidebar with per-instance settings */
 let instancesData = [];
+window.instancesData = instancesData;  // Expose for websocket.js animation triggers
 let registryData = [];
 
 async function ensureRegistryLoaded() {
@@ -83,6 +84,14 @@ async function saveInstanceAsProfile() {
         model = document.getElementById('instSettingsModelCustom').value.trim();
     }
     const config = collectConfigValues('editConfigSection');
+
+    // Gather skills if not a CLI agent
+    const template = registryData.find(a => a.id === inst.template_id);
+    if (template && !template.cli_agent) {
+        const skillsBoxes = document.querySelectorAll('#instSettingsSkillsList input[type="checkbox"]:checked');
+        config.skills = Array.from(skillsBoxes).map(cb => cb.value);
+    }
+
     const icon = document.getElementById('instSettingsIcon').value || '🤖';
     const color = document.getElementById('instSettingsColor').value || '#6366f1';
 
@@ -172,6 +181,31 @@ function updateIconPreview(mode) {
     }
 }
 
+// Character type picker
+const CHARACTER_TYPES = ['robot', 'cat', 'dog', 'bear', 'bunny', 'fox', 'owl', 'penguin', 'star'];
+
+function renderCharacterPicker(mode) {
+    const grid = document.getElementById(`characterGrid-${mode}`);
+    if (!grid) return;
+
+    const selected = document.getElementById(`${mode === 'create' ? 'worker' : 'instSettings'}CharType`)?.value || 'robot';
+
+    grid.innerHTML = CHARACTER_TYPES.map(char => `
+        <button class="char-pick-btn ${selected === char ? 'selected' : ''}"
+            onclick="selectCharacterType('${char}', '${mode}')"
+            style="width:40px;height:40px;padding:4px;border:2px solid ${selected === char ? 'var(--primary)' : 'var(--border)'};border-radius:8px;background:var(--bg-dark);cursor:pointer;">
+            ${CHARACTER_SVGS[char] || CHARACTER_SVGS.robot}
+        </button>
+    `).join('');
+}
+
+function selectCharacterType(charType, mode) {
+    const prefix = mode === 'create' ? 'worker' : 'instSettings';
+    const input = document.getElementById(`${prefix}CharType`);
+    if (input) input.value = charType;
+    renderCharacterPicker(mode);
+}
+
 async function deleteProfile(profileId) {
     if (!confirm('Delete this profile?')) return;
     try {
@@ -190,11 +224,10 @@ function createFromProfile(profileId) {
     openCreateWorkerModal();
 
     // Select the template
-    const templateIdx = registryData.findIndex(a => a.id === profile.template_id);
-    if (templateIdx !== -1) {
-        const tpl = registryData[templateIdx];
-        // Note: Creating worker needs a registry item context, but index is usually enough for the UI
-        selectTemplateForCreation(templateIdx);
+    const typeSelect = document.getElementById('workerAgentType');
+    if (typeSelect) {
+        typeSelect.value = profile.template_id;
+        onAgentTypeChange();
     }
 
     // Fill the rest
@@ -202,14 +235,32 @@ function createFromProfile(profileId) {
     document.getElementById('workerIcon').value = profile.icon || '🤖';
     document.getElementById('workerColor').value = profile.color || '#6366f1';
 
+    if (profile.service) {
+        const serviceSelect = document.getElementById('workerService');
+        if (serviceSelect) {
+            serviceSelect.value = profile.service;
+            onServiceChange('create');
+        }
+    }
+
     if (profile.model) {
         const modelSelect = document.getElementById('workerModelSelect');
         if (modelSelect) {
             modelSelect.value = profile.model;
-            // Trigger change to show custom model input if needed
-            modelSelect.dispatchEvent(new Event('change'));
+            if (!Array.from(modelSelect.options).some(o => o.value === profile.model)) {
+                modelSelect.value = 'custom';
+                document.getElementById('workerModelCustom').value = profile.model;
+                document.getElementById('workerModelCustom').style.display = 'block';
+            }
+            onModelSelectChange('create');
         }
     }
+
+    // Load available skills and check the saved ones
+    setTimeout(() => {
+        loadAvailableSkills('createSettingsSkillsList', profile.config?.skills || []);
+        renderConfigSchema(profile.template_id, 'createConfigSection', profile.config || {});
+    }, 100);
 }
 
 function renderInstancesSidebar() {
@@ -234,7 +285,7 @@ function renderInstancesSidebar() {
 
         const iconHtml = inst.icon && (inst.icon.startsWith('http') || inst.icon.startsWith('/assets/'))
             ? `<img src="${inst.icon}" class="agent-avatar-img" style="border-color: ${color}">`
-            : `<div class="agent-avatar" style="border-color: ${color}">${inst.icon || '🤖'}</div>`;
+            : `<div class="agent-avatar agent-char-svg" style="border-color: ${color}; width:36px; height:36px;">${CHARACTER_SVGS[inst.character_type] || CHARACTER_SVGS.robot}</div>`;
 
         return `
             <div class="agent-sidebar-card ${isRunning ? 'active' : ''}"
@@ -269,6 +320,17 @@ function renderInstancesSidebar() {
                 <!-- Inline Mini Terminal -->
                 <div class="mini-terminal-container" onclick="viewInstanceLogs('${inst.instance_id}')" title="Click to open full terminal">
                     <div id="mini-term-${inst.instance_id}" style="width: 100%; height: 100%;"></div>
+                </div>
+
+                <!-- Inline Mini Chat -->
+                <div class="mini-chat-container" onclick="event.stopPropagation()">
+                    <textarea class="mini-chat-input" id="mini-chat-${inst.instance_id}"
+                        placeholder="Message ${escapeHtml(inst.instance_name)}..."
+                        rows="1"
+                        onkeydown="if(event.key==='Enter'&&!event.shiftKey){event.preventDefault();sendMiniChat('${inst.instance_id}')}"
+                        oninput="this.style.height='auto';this.style.height=Math.min(this.scrollHeight,60)+'px'"
+                    ></textarea>
+                    <button class="mini-chat-send" onclick="sendMiniChat('${inst.instance_id}')" title="Send">➤</button>
                 </div>
                 
                 <div class="agent-sidebar-actions">
@@ -385,7 +447,17 @@ async function handleAgentDrop(e, targetId) {
 
 // ─── Instance Actions ───────────────────────────────────────────────────
 
+// Track instances being started/stopped to prevent double-clicks
+const instancesInTransition = new Set();
+
 async function startInstance(instanceId) {
+    if (instancesInTransition.has(instanceId)) {
+        showToast('Already starting...');
+        return;
+    }
+    instancesInTransition.add(instanceId);
+    updateAgentButtonState(instanceId, true);
+
     showToast('Starting...');
     try {
         const res = await fetch(`/api/instances/${instanceId}/start`, { method: 'POST' });
@@ -393,14 +465,43 @@ async function startInstance(instanceId) {
         if (res.ok) { showToast(`✅ Started`); await loadInstances(); }
         else { showToast(`⚠️ ${d.detail || 'Start failed'}`); }
     } catch (e) { showToast('Start failed'); }
+    finally {
+        instancesInTransition.delete(instanceId);
+        updateAgentButtonState(instanceId, false);
+    }
 }
 
 async function stopInstance(instanceId) {
+    if (instancesInTransition.has(instanceId)) {
+        showToast('Already stopping...');
+        return;
+    }
+    instancesInTransition.add(instanceId);
+    updateAgentButtonState(instanceId, true);
+
     try {
         const res = await fetch(`/api/instances/${instanceId}/stop`, { method: 'POST' });
         if (res.ok) { showToast('⏹ Stopped'); await loadInstances(); }
         else { showToast('Stop failed'); }
     } catch (e) { showToast('Stop failed'); }
+    finally {
+        instancesInTransition.delete(instanceId);
+        updateAgentButtonState(instanceId, false);
+    }
+}
+
+function updateAgentButtonState(instanceId, isLoading) {
+    const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
+    if (!card) return;
+    // Find the start/stop button (first button in actions, not settings)
+    const btns = card.querySelectorAll('.agent-sidebar-actions button');
+    btns.forEach((btn, idx) => {
+        if (idx < 2) { // First two buttons are start/stop
+            btn.disabled = isLoading;
+            btn.style.opacity = isLoading ? '0.5' : '1';
+            btn.style.pointerEvents = isLoading ? 'none' : 'auto';
+        }
+    });
 }
 
 async function deleteWorkerInstance(instanceId) {
@@ -522,6 +623,7 @@ async function sendTerminalMessage() {
         if (res.ok) {
             input.value = '';
             showToast('Message sent to agent');
+            if (typeof loadInstances === 'function') loadInstances();
             // Optimistically add user message to the terminal view
             if (window.terminals.modal) {
                 window.terminals.modal.writeln(`\r\n\x1b[38;5;12m👤 USER: ${message}\x1b[0m`);
@@ -540,12 +642,11 @@ async function sendTerminalMessage() {
     }
 }
 
-async function sendTerminalMessage() {
-    const input = document.getElementById('terminalChatInput');
-    const instanceId = document.getElementById('activeTerminalInstanceId')?.value;
+async function sendMiniChat(instanceId) {
+    const input = document.getElementById(`mini-chat-${instanceId}`);
+    if (!input) return;
     const message = input.value.trim();
-
-    if (!message || !instanceId) return;
+    if (!message) return;
 
     input.disabled = true;
     const originalPlaceholder = input.placeholder;
@@ -560,26 +661,26 @@ async function sendTerminalMessage() {
 
         if (res.ok) {
             input.value = '';
-            showToast('Message sent to agent');
-            // Optimistically add user message to the terminal view
-            const output = document.getElementById('workerTerminalOutput');
-            if (output) {
-                output.textContent += (output.textContent ? '\n' : '') + `👤 USER: ${message}`;
-                output.scrollTop = output.scrollHeight;
+            input.style.height = 'auto';
+            showToast('Message sent');
+            // Write to mini terminal optimistically
+            const mini = window.terminals?.minis?.[instanceId];
+            if (mini?.term) {
+                mini.term.writeln(`\r\n\x1b[38;5;12m👤 ${message}\x1b[0m`);
             }
         } else {
             const d = await res.json();
-            showToast(`⚠️ Failed to send: ${d.detail || 'Unknown error'}`);
+            showToast(`⚠️ ${d.detail || 'Send failed'}`);
         }
     } catch (e) {
-        console.error("Chat send error:", e);
-        showToast('⚠️ Failed to send message');
+        showToast('⚠️ Failed to send');
     } finally {
         input.disabled = false;
         input.placeholder = originalPlaceholder;
         input.focus();
     }
 }
+
 
 // ─── Pulse Countdown Logic ────────────────────────────────────────────────
 let pulseTimers = {};
@@ -606,31 +707,66 @@ window.startPulseCountdown = function (instanceId, secondsCount) {
 
 // ─── Agent Speech Bubbles ─────────────────────────────────────────────────
 const bubbleTimers = {};
+const notificationStore = [];  // Global notification log
+let unreadNotifications = 0;
 
 function showAgentBubble(instanceId, text, mood = 'thought') {
     const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
     if (!card) return;
 
-    // Remove existing bubble
-    const existing = card.querySelector('.agent-speech-bubble');
+    // Remove existing bubble for this agent (replaced by new one)
+    const existing = document.getElementById(`agent-bubble-${instanceId}`);
     if (existing) existing.remove();
     if (bubbleTimers[instanceId]) clearTimeout(bubbleTimers[instanceId]);
 
-    // Truncate to 180 chars (increased for personality)
+    // Truncate to 180 chars
     const truncated = text.length > 180 ? text.substring(0, 177) + '...' : text;
 
     const bubble = document.createElement('div');
+    bubble.id = `agent-bubble-${instanceId}`;
     bubble.className = `agent-speech-bubble bubble-${mood}`;
 
     let prefix = '💡';
     if (mood === 'error') prefix = '🛑';
     if (mood === 'attention') prefix = '⚠️';
+    if (mood === 'notify') prefix = '📢';
 
-    bubble.innerHTML = `<span class="bubble-prefix">${prefix}</span> ${escapeHtml(truncated)}<button class="bubble-dismiss" onclick="event.stopPropagation(); dismissBubble('${instanceId}')">×</button>`;
-    card.appendChild(bubble);
+    // Resolve agent name
+    const agentName = card.querySelector('.agent-name')?.textContent || instanceId;
 
-    // Auto-dismiss after 10s
-    bubbleTimers[instanceId] = setTimeout(() => dismissBubble(instanceId), 10000);
+    bubble.innerHTML = `<span class="bubble-prefix">${prefix}</span> ${escapeHtml(truncated)}<button class="bubble-dismiss" onclick="event.stopPropagation(); dismissBubble('${instanceId}')">&times;</button>`;
+
+    // Append to body to avoid overflow clipping from the sidebar
+    document.body.appendChild(bubble);
+
+    // Calculate fixed position based on the card's location
+    const rect = card.getBoundingClientRect();
+    bubble.style.position = 'fixed';
+    bubble.style.left = `${rect.right + 15}px`;
+    bubble.style.top = `${rect.top + (rect.height / 2)}px`;
+    bubble.style.transform = 'translateY(-50%)';
+    bubble.style.zIndex = '9999';
+
+    // NO auto-dismiss — stays until clicked or replaced
+
+    // Log ONLY notify messages to notification store (not thoughts/errors)
+    if (mood === 'notify') {
+        notificationStore.unshift({
+            id: Date.now(),
+            instanceId,
+            agentName,
+            text: truncated,
+            fullText: text,
+            mood,
+            prefix,
+            timestamp: new Date()
+        });
+        // Cap at 100 notifications
+        if (notificationStore.length > 100) notificationStore.length = 100;
+
+        unreadNotifications++;
+        updateNotificationBadge();
+    }
 }
 
 function dismissBubble(instanceId) {
@@ -638,12 +774,451 @@ function dismissBubble(instanceId) {
         clearTimeout(bubbleTimers[instanceId]);
         delete bubbleTimers[instanceId];
     }
-    const card = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
-    if (card) {
-        const bubble = card.querySelector('.agent-speech-bubble');
-        if (bubble) bubble.remove();
+    const bubble = document.getElementById(`agent-bubble-${instanceId}`);
+    if (bubble) bubble.remove();
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Walking Agent Characters Animation System
+// ═══════════════════════════════════════════════════════════════════════════════
+
+const MOVEMENT_STYLES = ['hop', 'waddle', 'sprint', 'float', 'skip', 'moonwalk', 'teleport'];
+const WORK_STYLES = ['think', 'type', 'look', 'bounce'];
+
+// SVG character templates for each character type
+const CHARACTER_SVGS = {
+    robot: `<svg viewBox="0 0 48 56">
+        <rect class="char-body" x="12" y="16" width="24" height="28" rx="4" fill="#6b7280"/>
+        <rect class="char-head" x="14" y="4" width="20" height="16" rx="3" fill="#9ca3af"/>
+        <circle cx="20" cy="12" r="3" fill="#3b82f6"/>
+        <circle cx="28" cy="12" r="3" fill="#3b82f6"/>
+        <rect class="char-arm char-arm-left" x="4" y="20" width="8" height="16" rx="3" fill="#6b7280"/>
+        <rect class="char-arm char-arm-right" x="36" y="20" width="8" height="16" rx="3" fill="#6b7280"/>
+        <rect class="char-leg char-leg-left" x="14" y="44" width="6" height="12" rx="2" fill="#4b5563"/>
+        <rect class="char-leg char-leg-right" x="28" y="44" width="6" height="12" rx="2" fill="#4b5563"/>
+    </svg>`,
+    cat: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="34" rx="14" ry="16" fill="#f97316"/>
+        <ellipse class="char-head" cx="24" cy="16" rx="12" ry="10" fill="#f97316"/>
+        <polygon class="char-ear-left" points="14,8 18,16 10,16" fill="#f97316"/>
+        <polygon class="char-ear-right" points="34,8 38,16 30,16" fill="#f97316"/>
+        <circle cx="20" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="28" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="21" cy="13" r="1" fill="#fff"/>
+        <circle cx="29" cy="13" r="1" fill="#fff"/>
+        <ellipse cx="24" cy="20" rx="2" ry="1.5" fill="#fb923c"/>
+        <path class="char-arm char-arm-left" d="M8,28 Q4,32 8,40" stroke="#f97316" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M40,28 Q44,32 40,40" stroke="#f97316" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,48 Q16,54 18,56" stroke="#ea580c" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,48 Q32,54 30,56" stroke="#ea580c" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    dog: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="34" rx="14" ry="15" fill="#a16207"/>
+        <ellipse class="char-head" cx="24" cy="16" rx="13" ry="11" fill="#a16207"/>
+        <ellipse class="char-ear-left" cx="12" cy="14" rx="4" ry="8" fill="#854d0e"/>
+        <ellipse class="char-ear-right" cx="36" cy="14" rx="4" ry="8" fill="#854d0e"/>
+        <circle cx="19" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="29" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="20" cy="13" r="1" fill="#fff"/>
+        <circle cx="30" cy="13" r="1" fill="#fff"/>
+        <ellipse cx="24" cy="20" rx="4" ry="3" fill="#1f2937"/>
+        <path class="char-arm char-arm-left" d="M8,28 Q4,34 8,42" stroke="#a16207" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M40,28 Q44,34 40,42" stroke="#a16207" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,48 L16,56" stroke="#854d0e" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,48 L32,56" stroke="#854d0e" stroke-width="5" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    bear: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="35" rx="16" ry="16" fill="#78350f"/>
+        <ellipse class="char-head" cx="24" cy="16" rx="14" ry="12" fill="#78350f"/>
+        <circle cx="10" cy="12" r="5" fill="#78350f"/>
+        <circle cx="38" cy="12" r="5" fill="#78350f"/>
+        <circle cx="18" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="30" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="19" cy="13" r="1" fill="#fff"/>
+        <circle cx="31" cy="13" r="1" fill="#fff"/>
+        <ellipse cx="24" cy="22" rx="5" ry="4" fill="#451a03"/>
+        <path class="char-arm char-arm-left" d="M6,28 Q2,36 6,46" stroke="#78350f" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M42,28 Q46,36 42,46" stroke="#78350f" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M16,50 Q14,56 16,56" stroke="#78350f" stroke-width="6" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M32,50 Q34,56 32,56" stroke="#78350f" stroke-width="6" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    bunny: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="34" rx="12" ry="14" fill="#ec4899"/>
+        <ellipse class="char-head" cx="24" cy="16" rx="10" ry="9" fill="#ec4899"/>
+        <ellipse class="char-ear-left" cx="18" cy="4" rx="4" ry="12" fill="#ec4899" transform="rotate(-10 18 4)"/>
+        <ellipse class="char-ear-right" cx="30" cy="4" rx="4" ry="12" fill="#ec4899" transform="rotate(10 30 4)"/>
+        <ellipse cx="18" cy="4" rx="2" ry="8" fill="#fbcfe8" transform="rotate(-10 18 4)"/>
+        <ellipse cx="30" cy="4" rx="2" ry="8" fill="#fbcfe8" transform="rotate(10 30 4)"/>
+        <circle cx="20" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="28" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="21" cy="13" r="1" fill="#fff"/>
+        <circle cx="29" cy="13" r="1" fill="#fff"/>
+        <ellipse cx="24" cy="19" rx="2" ry="1.5" fill="#f9a8d4"/>
+        <path class="char-arm char-arm-left" d="M10,28 Q6,34 10,42" stroke="#ec4899" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M38,28 Q42,34 38,42" stroke="#ec4899" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,46 Q16,54 18,56" stroke="#db2777" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,46 Q32,54 30,56" stroke="#db2777" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    fox: `<svg viewBox="0 0 48 56">
+        <polygon class="char-body" points="12,48 24,20 36,48" fill="#ea580c"/>
+        <polygon class="char-head" points="24,4 12,20 36,20" fill="#ea580c"/>
+        <polygon points="16,8 20,18 12,16" fill="#ea580c"/>
+        <polygon points="32,8 36,16 28,18" fill="#ea580c"/>
+        <circle cx="20" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="28" cy="14" r="3" fill="#1f2937"/>
+        <circle cx="21" cy="13" r="1" fill="#fff"/>
+        <circle cx="29" cy="13" r="1" fill="#fff"/>
+        <polygon cx="24" cy="18" points="22,18 26,18 24,21" fill="#1f2937"/>
+        <path class="char-arm char-arm-left" d="M14,28 Q8,34 14,44" stroke="#ea580c" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M34,28 Q40,34 34,44" stroke="#ea580c" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,48 L16,56" stroke="#c2410c" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,48 L32,56" stroke="#c2410c" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    owl: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="34" rx="14" ry="16" fill="#475569"/>
+        <ellipse class="char-head" cx="24" cy="14" rx="12" ry="10" fill="#475569"/>
+        <circle cx="18" cy="12" r="6" fill="#fbbf24"/>
+        <circle cx="30" cy="12" r="6" fill="#fbbf24"/>
+        <circle cx="18" cy="12" r="3" fill="#1f2937"/>
+        <circle cx="30" cy="12" r="3" fill="#1f2937"/>
+        <polygon points="22,18 26,22 24,18" fill="#fb923c"/>
+        <path class="char-arm char-arm-left" d="M8,28 Q4,36 8,46" stroke="#475569" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M40,28 Q44,36 40,46" stroke="#475569" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,50 L16,56" stroke="#f59e0b" stroke-width="4" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,50 L32,56" stroke="#f59e0b" stroke-width="4" fill="none" stroke-linecap="round"/>
+    </svg>`,
+    penguin: `<svg viewBox="0 0 48 56">
+        <ellipse class="char-body" cx="24" cy="34" rx="12" ry="18" fill="#1e293b"/>
+        <ellipse class="char-head" cx="24" cy="14" rx="10" ry="8" fill="#1e293b"/>
+        <ellipse cx="24" cy="32" rx="8" ry="12" fill="#e2e8f0"/>
+        <circle cx="20" cy="12" r="3" fill="#fff"/>
+        <circle cx="28" cy="12" r="3" fill="#fff"/>
+        <circle cx="20" cy="12" r="2" fill="#1e293b"/>
+        <circle cx="28" cy="12" r="2" fill="#1e293b"/>
+        <polygon points="24,16 22,20 26,20" fill="#f97316"/>
+        <path class="char-arm char-arm-left" d="M10,26 Q4,32 10,42" stroke="#1e293b" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-arm char-arm-right" d="M38,26 Q44,32 38,42" stroke="#1e293b" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-left" d="M18,50 Q16,56 18,56" stroke="#f97316" stroke-width="5" fill="none" stroke-linecap="round"/>
+        <path class="char-leg char-leg-right" d="M30,50 Q32,56 30,56" stroke="#f97316" stroke-width="5" fill="none" stroke-linecap="round"/>
+    </svg>`
+};
+
+// CoStar special character
+const COSTAR_CHARACTER_SVG = `<svg viewBox="0 0 56 64">
+    <polygon class="char-body" points="28,4 52,20 52,44 28,60 4,44 4,20" fill="#a855f7"/>
+    <polygon class="char-body-inner" points="28,12 44,22 44,42 28,52 12,42 12,22" fill="#7c3aed"/>
+    <circle cx="22" cy="26" r="5" fill="#fde047"/>
+    <circle cx="34" cy="26" r="5" fill="#fde047"/>
+    <circle cx="22" cy="26" r="2" fill="#1f2937"/>
+    <circle cx="34" cy="26" r="2" fill="#1f2937"/>
+    <path d="M22,36 Q28,42 34,36" stroke="#fde047" stroke-width="2" fill="none" stroke-linecap="round"/>
+    <line class="char-arm char-arm-left" x1="8" y1="24" x2="4" y2="16" stroke="#a855f7" stroke-width="4" stroke-linecap="round"/>
+    <line class="char-arm char-arm-right" x1="48" y1="24" x2="52" y2="16" stroke="#a855f7" stroke-width="4" stroke-linecap="round"/>
+    <line class="char-leg char-leg-left" x1="20" y1="58" x2="16" y2="64" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>
+    <line class="char-leg char-leg-right" x1="36" y1="58" x2="40" y2="64" stroke="#7c3aed" stroke-width="4" stroke-linecap="round"/>
+</svg>`;
+
+class AgentAnimator {
+    constructor() {
+        this.characters = new Map(); // instanceId -> character element
+        this.positions = new Map();  // instanceId -> {x, y}
+        this.movingTo = new Map();   // instanceId -> cardId being traveled to
+        this.overlay = null;
+        this.ensureOverlay();
+    }
+
+    ensureOverlay() {
+        if (!this.overlay) {
+            this.overlay = document.createElement('div');
+            this.overlay.className = 'board-character-overlay';
+            this.overlay.id = 'agent-character-overlay';
+            document.body.appendChild(this.overlay);
+        }
+    }
+
+    // Create or get character element for an agent
+    getCharacter(instanceId, characterType = 'robot', isCoStar = false) {
+        if (this.characters.has(instanceId)) {
+            return this.characters.get(instanceId);
+        }
+
+        const charEl = document.createElement('div');
+        charEl.className = `agent-character char-${characterType}`;
+        charEl.id = `agent-char-${instanceId}`;
+        charEl.innerHTML = isCoStar ? COSTAR_CHARACTER_SVG : (CHARACTER_SVGS[characterType] || CHARACTER_SVGS.robot);
+        charEl.style.display = 'none';
+
+        this.overlay.appendChild(charEl);
+        this.characters.set(instanceId, charEl);
+        return charEl;
+    }
+
+    // Get a random movement style
+    randomMovementStyle() {
+        return MOVEMENT_STYLES[Math.floor(Math.random() * MOVEMENT_STYLES.length)];
+    }
+
+    // Get a random working style
+    randomWorkStyle() {
+        return WORK_STYLES[Math.floor(Math.random() * WORK_STYLES.length)];
+    }
+
+    // Get element position on screen
+    getElementPosition(el) {
+        const rect = el.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width / 2 - 24, // Center character (half of 48px width)
+            y: rect.top + rect.height / 2 - 28  // Center character (half of 56px height)
+        };
+    }
+
+    // Animate character to a card
+    animateToCard(instanceId, cardElement, characterType, callback, isCoStar = false) {
+        const charEl = this.getCharacter(instanceId, characterType, isCoStar);
+        const targetPos = this.getElementPosition(cardElement);
+
+        // Get current position or start from sidebar
+        let startPos = this.positions.get(instanceId);
+        if (!startPos) {
+            const sidebarCard = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
+            if (sidebarCard) {
+                startPos = this.getElementPosition(sidebarCard);
+            } else {
+                // Default starting position for CoStar
+                const fab = document.getElementById('costarFabContainer');
+                if (fab) {
+                    const fabRect = fab.getBoundingClientRect();
+                    startPos = { x: fabRect.left - 30, y: fabRect.top };
+                } else {
+                    startPos = { x: 50, y: window.innerHeight - 150 };
+                }
+            }
+        }
+
+        // Pick random movement style
+        const movementStyle = this.randomMovementStyle();
+        charEl.className = `agent-character char-${characterType} moving-${movementStyle}`;
+        if (isCoStar) charEl.classList.add('costar-character');
+
+        // Position at start
+        charEl.style.display = 'block';
+        charEl.style.left = `${startPos.x}px`;
+        charEl.style.top = `${startPos.y}px`;
+        charEl.style.transform = 'translate(0, 0)';
+
+        // Animate to target
+        const duration = 600 + Math.random() * 400; // 600-1000ms
+        const startTime = performance.now();
+
+        const animate = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+
+            // Easing function (ease-out)
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            const currentX = startPos.x + (targetPos.x - startPos.x) * eased;
+            const currentY = startPos.y + (targetPos.y - startPos.y) * eased;
+
+            charEl.style.left = `${currentX}px`;
+            charEl.style.top = `${currentY}px`;
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                // Arrived at target
+                this.positions.set(instanceId, targetPos);
+
+                // Switch to working animation
+                const workStyle = this.randomWorkStyle();
+                charEl.className = `agent-character char-${characterType} working-${workStyle}`;
+                if (isCoStar) charEl.classList.add('costar-character');
+
+                if (callback) callback();
+            }
+        };
+
+        requestAnimationFrame(animate);
+    }
+
+    // Return character to starting position (sidebar or FAB)
+    returnToStart(instanceId, characterType, isCoStar = false) {
+        const charEl = this.characters.get(instanceId);
+        if (!charEl) return;
+
+        const sidebarCard = document.querySelector(`.agent-sidebar-card[data-instance-id="${instanceId}"]`);
+        let targetPos;
+
+        if (sidebarCard) {
+            targetPos = this.getElementPosition(sidebarCard);
+        } else if (isCoStar) {
+            const fab = document.getElementById('costarFabContainer');
+            if (fab) {
+                const fabRect = fab.getBoundingClientRect();
+                targetPos = { x: fabRect.left - 30, y: fabRect.top };
+            }
+        }
+
+        if (!targetPos) return;
+
+        const currentPos = this.positions.get(instanceId);
+        if (!currentPos) {
+            charEl.style.display = 'none';
+            return;
+        }
+
+        // Pick random movement style for return
+        const movementStyle = this.randomMovementStyle();
+        charEl.className = `agent-character char-${characterType} moving-${movementStyle}`;
+        if (isCoStar) charEl.classList.add('costar-character');
+
+        const duration = 400 + Math.random() * 300;
+        const startTime = performance.now();
+
+        const animate = (currentTime) => {
+            const elapsed = currentTime - startTime;
+            const progress = Math.min(elapsed / duration, 1);
+            const eased = 1 - Math.pow(1 - progress, 3);
+
+            const currentX = currentPos.x + (targetPos.x - currentPos.x) * eased;
+            const currentY = currentPos.y + (targetPos.y - currentPos.y) * eased;
+
+            charEl.style.left = `${currentX}px`;
+            charEl.style.top = `${currentY}px`;
+
+            if (progress < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                charEl.style.display = 'none';
+                this.positions.delete(instanceId);
+            }
+        };
+
+        requestAnimationFrame(animate);
+    }
+
+    // Get character type from agent config
+    getCharacterType(instanceId) {
+        if (instanceId === 'costar') return 'star';
+        const inst = instancesData?.find(i => i.instance_id === instanceId);
+        return inst?.config?.character_type || inst?.character_type || 'robot';
+    }
+
+    // Handle agent activity - animate to card
+    handleAgentActivity(instanceId, cardId) {
+        const characterType = this.getCharacterType(instanceId);
+        console.log('[Animator] handleAgentActivity:', instanceId, 'cardId:', cardId, 'charType:', characterType);
+
+        // Handle null/undefined cardId - return to start position
+        if (cardId === null || cardId === undefined) {
+            console.log('[Animator] No card - returning to start');
+            this.returnToStart(instanceId, characterType);
+            return;
+        }
+
+        const cardElement = document.querySelector(`.card[data-id="${cardId}"]`);
+        console.log('[Animator] Looking for card:', `.card[data-id="${cardId}"]`, 'found:', !!cardElement);
+
+        if (cardElement) {
+            console.log('[Animator] Found card, animating...');
+            this.animateToCard(instanceId, cardElement, characterType, () => {
+                // Character arrived - will show working animation
+            });
+        } else {
+            console.log('[Animator] Card element not found in DOM');
+        }
+    }
+
+    // Handle agent pulse (going to sleep) - return to start
+    handleAgentPulse(instanceId) {
+        const characterType = this.getCharacterType(instanceId);
+        this.returnToStart(instanceId, characterType);
     }
 }
+
+// Global instance
+let agentAnimator = null;
+
+function getAgentAnimator() {
+    if (!agentAnimator) {
+        agentAnimator = new AgentAnimator();
+    }
+    return agentAnimator;
+}
+
+// Expose to global scope for websocket.js and other modules
+window.getAgentAnimator = getAgentAnimator;
+
+// Initialize animator on load
+document.addEventListener('DOMContentLoaded', () => {
+    getAgentAnimator();
+});
+
+// ─── Notification Center ──────────────────────────────────────────────────
+function updateNotificationBadge() {
+    const badge = document.getElementById('notifBadge');
+    if (!badge) return;
+    if (unreadNotifications > 0) {
+        badge.textContent = unreadNotifications > 99 ? '99+' : unreadNotifications;
+        badge.style.display = 'flex';
+    } else {
+        badge.style.display = 'none';
+    }
+}
+
+function toggleNotificationPanel() {
+    const panel = document.getElementById('notificationPanel');
+    if (!panel) return;
+    const isOpen = panel.classList.toggle('open');
+    if (isOpen) {
+        unreadNotifications = 0;
+        updateNotificationBadge();
+        renderNotificationList();
+    }
+}
+
+function renderNotificationList() {
+    const list = document.getElementById('notifList');
+    if (!list) return;
+    if (notificationStore.length === 0) {
+        list.innerHTML = '<div class="notif-empty">No notifications yet</div>';
+        return;
+    }
+    list.innerHTML = notificationStore.map(n => {
+        const ago = _timeAgo(n.timestamp);
+        return `<div class="notif-item notif-${n.mood}">
+            <div class="notif-header">
+                <span class="notif-agent">${n.prefix} ${escapeHtml(n.agentName)}</span>
+                <span class="notif-time">${ago}</span>
+            </div>
+            <div class="notif-body">${escapeHtml(n.fullText.length > 300 ? n.fullText.substring(0, 297) + '...' : n.fullText)}</div>
+        </div>`;
+    }).join('');
+}
+
+function clearAllNotifications() {
+    notificationStore.length = 0;
+    unreadNotifications = 0;
+    updateNotificationBadge();
+    renderNotificationList();
+}
+
+function _timeAgo(date) {
+    const s = Math.floor((Date.now() - date.getTime()) / 1000);
+    if (s < 60) return 'just now';
+    if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+    if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+    return `${Math.floor(s / 86400)}d ago`;
+}
+
+// Close notification panel when clicking outside
+document.addEventListener('click', (e) => {
+    const panel = document.getElementById('notificationPanel');
+    const btn = document.getElementById('notifBellBtn');
+    if (panel && panel.classList.contains('open') && !panel.contains(e.target) && !btn?.contains(e.target)) {
+        panel.classList.remove('open');
+    }
+});
 
 // ─── Service & Model Definitions ──────────────────────────────────────────
 // Populated from GET /api/models at startup — single source of truth is main.py
@@ -962,8 +1537,7 @@ async function openCreateWorkerModal() {
 
     // Trigger service updates to populate models
     onServiceChange('create');
-    initEmojiGrid('emojiGrid-create', 'create');
-    updateIconPreview('create');
+    renderCharacterPicker('create');
 
     // Toggle form based on agent type
     onAgentTypeChange();
@@ -1067,9 +1641,13 @@ async function createWorkerInstance() {
         config.skills = Array.from(skillsBoxes).map(cb => cb.value);
     }
 
-    const icon = document.getElementById('workerIcon').value || (template?.icon || '🤖');
+    const icon = document.getElementById('workerIcon')?.value || (template?.icon || '🤖');
     const color = document.getElementById('workerColor').value || '#6366f1';
+    const character_type = document.getElementById('workerCharType').value || 'robot';
     const saveProfile = document.getElementById('saveAsProfile').checked;
+
+    // Add character_type to config
+    config.character_type = character_type;
 
     const payload = {
         template_id: templateId,
@@ -1079,7 +1657,8 @@ async function createWorkerInstance() {
         env_vars: env_vars,
         config: config,
         icon: icon,
-        color: color
+        color: color,
+        character_type: character_type
     };
 
     if (saveProfile) {
@@ -1161,11 +1740,17 @@ async function openInstanceSettings(instanceId) {
     // Render config schema with saved values
     renderConfigSchema(inst.template_id, 'editConfigSection', inst.config || {});
 
-    document.getElementById('instSettingsIcon').value = inst.icon || '🤖';
-    document.getElementById('instSettingsColor').value = inst.color || '#6366f1';
+    // Icon and character settings (may not exist if removed from HTML)
+    const iconInput = document.getElementById('instSettingsIcon');
+    if (iconInput) iconInput.value = inst.icon || '🤖';
 
-    initEmojiGrid('emojiGrid-edit', 'edit');
-    updateIconPreview('edit');
+    const colorInput = document.getElementById('instSettingsColor');
+    if (colorInput) colorInput.value = inst.color || '#6366f1';
+
+    const charTypeInput = document.getElementById('instSettingsCharType');
+    if (charTypeInput) charTypeInput.value = inst.config?.character_type || inst.character_type || 'robot';
+
+    renderCharacterPicker('edit');
 
     document.getElementById('instanceSettingsModal').classList.add('active');
 }
@@ -1197,8 +1782,12 @@ async function saveInstanceSettings() {
 
     const icon = document.getElementById('instSettingsIcon').value;
     const color = document.getElementById('instSettingsColor').value;
+    const character_type = document.getElementById('instSettingsCharType').value;
 
-    const updateData = { instance_name, service, model, enabled, config, icon, color };
+    // Add character_type to config
+    config.character_type = character_type;
+
+    const updateData = { instance_name, service, model, enabled, config, icon, color, character_type };
     // Only include env_vars if a new API key was actually entered
     if (Object.keys(env_vars).length > 0) {
         updateData.env_vars = env_vars;
@@ -1470,9 +2059,10 @@ function renderMarketplaceSkills() {
                 <div class="skill-desc" style="font-size:0.85rem; color:var(--text-secondary); line-height:1.5; flex-grow: 1; display:-webkit-box; -webkit-line-clamp:4; line-clamp:4; -webkit-box-orient:vertical; overflow:hidden;">${s.description}</div>
 
                 <div style="margin-top:auto; padding-top:1rem; border-top:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
-                    <div style="display:flex; gap: 0.5rem; font-size: 0.75rem; color: var(--text-muted);">
+                    <div style="display:flex; gap: 0.5rem; font-size: 0.75rem; color: var(--text-muted); align-items:center;">
                         <span title="Downloads">⬇️ ${s.stats?.downloads || 0}</span>
                         <span title="Stars">⭐ ${s.stats?.stars || 0}</span>
+                        <a href="https://github.com/claudeshq/clawhub/tree/main/skills/${s.id}" target="_blank" onclick="event.stopPropagation()" style="color:var(--text-secondary); text-decoration:none; display:flex; align-items:center; margin-left: 0.25rem;" onmouseover="this.style.color='var(--primary)'" onmouseout="this.style.color='var(--text-secondary)'" title="View on GitHub"><svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .33.225.69.84.57A12.015 12.015 0 0024 12c0-6.63-5.37-12-12-12z"/></svg></a>
                     </div>
                     ${installedSkillsSet.has(s.name.toLowerCase()) || installedSkillsSet.has(s.id.toLowerCase())
                 ? `<button class="danger" id="btn-uninstall-${s.id}" onclick="event.stopPropagation(); uninstallMarketplaceSkill('${s.id}', '${s.name}')" style="font-size:0.8rem; padding:0.4rem 0.8rem; border-radius:6px; font-weight:500; z-index:2; position:relative; background: var(--danger);">Uninstall</button>`
@@ -1589,5 +2179,360 @@ async function uninstallMarketplaceSkill(skillId, skillName) {
             btn.disabled = false;
             btn.textContent = 'Retry Uninstall';
         }
+    }
+}
+
+// CoStar AI Functions
+let COSTAR_MODELS = {
+    anthropic: [
+        { id: 'claude-opus-4-6', name: 'Claude Opus 4.6' },
+        { id: 'claude-sonnet-4-6', name: 'Claude Sonnet 4.6' },
+        { id: 'claude-haiku-4-5-20251001', name: 'Claude Haiku 4.5' }
+    ],
+    openai: [
+        { id: 'gpt-5', name: 'GPT-5' },
+        { id: 'gpt-5-mini', name: 'GPT-5 Mini' },
+        { id: 'gpt-5-nano', name: 'GPT-5 Nano' },
+        { id: 'o3', name: 'o3' },
+        { id: 'o3-mini', name: 'o3-mini' }
+    ],
+    deepseek: [
+        { id: 'deepseek-reasoner', name: 'DeepSeek R1' },
+        { id: 'deepseek-chat', name: 'DeepSeek V3' }
+    ],
+    minimax: [
+        { id: 'MiniMax-M2.5', name: 'MiniMax M2.5' }
+    ]
+};
+
+async function fetchCostarModelsFromGist() {
+    try {
+        const res = await fetch('https://api.github.com/gists/fb52fa0001830ef78c9d34d820dcb1bc');
+        if (!res.ok) return;
+        const gist = await res.json();
+        const dbFile = gist.files['model-database.json'];
+        if (dbFile && dbFile.content) {
+            const db = JSON.parse(dbFile.content);
+            if (db && db.models) {
+                const newModels = {};
+                for (const [id, model] of Object.entries(db.models)) {
+                    if (model.provider) {
+                        const provider = model.provider.toLowerCase();
+                        if (!newModels[provider]) newModels[provider] = [];
+                        newModels[provider].push({
+                            id: model.id || id,
+                            name: model.name || id
+                        });
+                    }
+                }
+                if (Object.keys(newModels).length > 0) {
+                    for (const provider of Object.keys(newModels)) {
+                        COSTAR_MODELS[provider] = newModels[provider];
+                    }
+                }
+            }
+        }
+    } catch (e) {
+        console.warn('Failed to fetch CoStar models from Gist:', e);
+    }
+}
+
+let costarConfig = { enabled: false, api_key: '', model: 'claude-sonnet-4-6', service: 'anthropic', rate_limit: 10 };
+
+async function openCoStarModal() {
+    document.getElementById('coStarModal').classList.add('active');
+    await loadCoStarConfig();
+    updateCoStarModels();
+}
+
+async function loadCoStarConfig() {
+    await fetchCostarModelsFromGist();
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        const costar = config.costar || {};
+        costarConfig = {
+            enabled: costar.enabled || false,
+            api_key: costar.api_key || '',
+            model: costar.model || 'claude-sonnet-4-6',
+            service: costar.service || 'anthropic',
+            rate_limit: costar.rate_limit || 10
+        };
+
+        // Initialize UI State
+        const fab = document.getElementById('costarFabContainer');
+        if (fab) {
+            fab.style.display = costarConfig.enabled ? 'block' : 'none';
+        }
+
+        document.getElementById('coStarEnabled').checked = costarConfig.enabled;
+        document.getElementById('coStarApiKey').value = costarConfig.api_key;
+        document.getElementById('coStarService').value = costarConfig.service;
+        document.getElementById('coStarRateLimit').value = costarConfig.rate_limit;
+        updateCoStarModels();
+        document.getElementById('coStarModel').value = costarConfig.model;
+        await refreshCoStarMemoryCount();
+    } catch (e) { console.error('Failed to load CoStar config:', e); }
+}
+
+function toggleCoStarEnabled() {
+    costarConfig.enabled = document.getElementById('coStarEnabled').checked;
+}
+
+function updateCoStarModels() {
+    const service = document.getElementById('coStarService').value;
+    const modelSelect = document.getElementById('coStarModel');
+    const models = COSTAR_MODELS[service] || [];
+    modelSelect.innerHTML = models.map(m => '<option value="' + m.id + '">' + m.name + '</option>').join('');
+
+    // Check if the current costarConfig.model exists in the new list
+    if (models.find(m => m.id === costarConfig.model)) {
+        modelSelect.value = costarConfig.model;
+    } else {
+        modelSelect.value = models[0]?.id || '';
+        costarConfig.model = modelSelect.value;
+    }
+}
+
+async function regenerateCoStarKey() {
+    const key = 'sk-costar-' + Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+    document.getElementById('coStarApiKey').value = key;
+    showToast('New API key generated');
+}
+
+async function saveCoStarConfig() {
+    const config = {
+        costar: {
+            enabled: document.getElementById('coStarEnabled').checked,
+            api_key: document.getElementById('coStarApiKey').value.trim(),
+            model: document.getElementById('coStarModel').value,
+            service: document.getElementById('coStarService').value,
+            rate_limit: parseInt(document.getElementById('coStarRateLimit').value) || 10
+        }
+    };
+    try {
+        const res = await fetch('/api/config', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(config) });
+        if (res.ok) {
+            // Reload CoStar broker config without page reload
+            await fetch('/api/costar/reload', { method: 'POST' });
+            showToast('CoStar configuration saved');
+
+            // Update UI state
+            costarConfig = config.costar;
+            const fab = document.getElementById('costarFabContainer');
+            if (fab) {
+                fab.style.display = costarConfig.enabled ? 'block' : 'none';
+                if (!costarConfig.enabled) {
+                    document.getElementById('costarChatWidget').classList.remove('active');
+                }
+            }
+
+            closeModal('coStarModal');
+        } else {
+            const d = await res.json();
+            showToast('Failed to save: ' + (d.detail || 'Unknown error'));
+        }
+    } catch (e) { showToast('Failed to save configuration'); }
+}
+
+async function refreshCoStarMemoryCount() {
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        const apiKey = config.costar?.api_key;
+        if (!apiKey) { document.getElementById('coStarMemoryCount').textContent = '0'; return; }
+        const statusRes = await fetch('/api/costar/status', { headers: { 'X-Aegis-Admin-Key': apiKey } });
+        if (statusRes.ok) {
+            const status = await statusRes.json();
+            document.getElementById('coStarMemoryCount').textContent = status.memory_count || 0;
+        } else { document.getElementById('coStarMemoryCount').textContent = '0'; }
+    } catch (e) { document.getElementById('coStarMemoryCount').textContent = '0'; }
+}
+
+async function clearCoStarMemory() {
+    try {
+        const res = await fetch('/api/config');
+        const config = await res.json();
+        const apiKey = config.costar?.api_key;
+        if (!apiKey) { showToast('No CoStar API key configured'); return; }
+        const res2 = await fetch('/api/costar/clear_memory', { method: 'POST', headers: { 'X-Aegis-Admin-Key': apiKey } });
+        if (res2.ok) { showToast('CoStar memory cleared'); await refreshCoStarMemoryCount(); }
+        else { showToast('Failed to clear memory'); }
+    } catch (e) { showToast('Failed to clear memory'); }
+}
+
+async function testCoStarConnection() {
+    const btn = document.getElementById('coStarTestBtn');
+    const result = document.getElementById('coStarTestResult');
+    btn.disabled = true;
+    btn.textContent = 'Testing...';
+    result.style.display = 'none';
+    try {
+        const apiKey = document.getElementById('coStarApiKey').value.trim();
+        if (!apiKey) { result.textContent = 'Please enter an API key first'; result.style.color = '#f59e0b'; result.style.display = 'block'; return; }
+        const res = await fetch('/api/costar/chat', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Aegis-Admin-Key': apiKey },
+            body: JSON.stringify({ message: 'Hello! Just testing the connection. Reply with OK if you can hear me.' })
+        });
+        const data = await res.json();
+        if (res.ok && (data.response || data.intent)) { result.textContent = 'Connection successful! CoStar is responding.'; result.style.color = '#22c55e'; }
+        else { result.textContent = (data.error || 'Connection failed'); result.style.color = '#ef4444'; }
+    } catch (e) { result.textContent = 'Connection error: ' + e.message; result.style.color = '#ef4444'; }
+    finally { btn.disabled = false; btn.textContent = 'Test Connection'; result.style.display = 'block'; }
+}
+
+// ─── CoStar UI Chat Widget ────────────────────────────────────────────
+let coStarChatContext = null;
+
+function toggleCoStarChat() {
+    const widget = document.getElementById('costarChatWidget');
+    if (widget.classList.contains('active')) {
+        widget.classList.remove('active');
+    } else {
+        widget.classList.add('active');
+        document.getElementById('costarChatInput').focus();
+        document.getElementById('costarFabBadge').style.display = 'none';
+
+        // Auto scroll to latest on open
+        const feed = document.getElementById('costarChatFeed');
+        feed.scrollTop = feed.scrollHeight;
+    }
+}
+
+function handleCoStarInputKey(e) {
+    if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        submitCoStarMessage();
+    }
+}
+
+function appendCoStarMessage(role, text) {
+    const feed = document.getElementById('costarChatFeed');
+    const msgDiv = document.createElement('div');
+    msgDiv.className = `costar-message ${role}`;
+
+    const contentDiv = document.createElement('div');
+    contentDiv.className = 'costar-msg-content';
+
+    // Convert basic markdown-like structures (bold, code blocks, newlines)
+    let formattedText = text
+        .replace(/\\*\\*(.*?)\\*\\*/g, '<strong>$1</strong>')
+        .replace(/`(.*?)`/g, '<code>$1</code>')
+        .replace(/\\n/g, '<br/>');
+
+    contentDiv.innerHTML = formattedText;
+    msgDiv.appendChild(contentDiv);
+
+    feed.appendChild(msgDiv);
+    feed.scrollTop = feed.scrollHeight;
+    return msgDiv;
+}
+
+async function submitCoStarMessage() {
+    const input = document.getElementById('costarChatInput');
+    const text = input.value.trim();
+    if (!text) return;
+
+    if (!costarConfig || !costarConfig.enabled || !costarConfig.api_key) {
+        showToast("CoStar is not properly configured.", "error");
+        return;
+    }
+
+    // Append user message immediately
+    appendCoStarMessage('user', text);
+    input.value = '';
+
+    // Show typing indicator
+    const thinkingDiv = document.createElement('div');
+    thinkingDiv.className = 'costar-thinking';
+    thinkingDiv.textContent = 'CoStar is thinking...';
+    document.getElementById('costarChatFeed').appendChild(thinkingDiv);
+    document.getElementById('costarChatFeed').scrollTop = document.getElementById('costarChatFeed').scrollHeight;
+
+    try {
+        const payload = {
+            message: text,
+            context: coStarChatContext || null,
+        };
+
+        const res = await fetch('/api/costar/chat', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'X-Aegis-Admin-Key': costarConfig.api_key
+            },
+            body: JSON.stringify(payload)
+        });
+
+        thinkingDiv.remove();
+
+        if (res.ok) {
+            const data = await res.json();
+
+            // Build response text
+            let botText = "";
+            if (data.intent) {
+                botText += `[Intent Resolved: **${data.intent}**]<br/>`;
+            }
+            if (data.actions && data.actions.length > 0) {
+                botText += `<br/>*Actions Executed:*<br/>`;
+                data.actions.forEach(a => {
+                    botText += `- ${a.action} (${a.status})<br/>`;
+                });
+            }
+            if (data.results && data.results.length > 0) {
+                botText += `<br/>*Results:*<br/>`;
+                data.results.forEach(r => {
+                    // very basic formatting for the raw object
+                    botText += `<code>${JSON.stringify(r).substring(0, 100)}...</code><br/>`;
+                });
+            }
+
+            if (data.response) {
+                botText += `<br/>${data.response}`;
+            }
+
+            if (!botText) botText = "Done.";
+
+            // Render it
+            appendCoStarMessage('bot', botText);
+
+            if (data.memory_updated) {
+                refreshCoStarMemoryCount();
+            }
+
+            // Animate CoStar character to cards being acted upon
+            if (data.actions && window.getAgentAnimator) {
+                const animator = getAgentAnimator();
+                data.actions.forEach(action => {
+                    if ((action.action === 'create_card' || action.action === 'update_card' || action.action === 'delete_card') && action.card_id) {
+                        const cardElement = document.querySelector(`.card[data-id="${action.card_id}"]`);
+                        if (cardElement) {
+                            animator.animateToCard('costar', cardElement, 'star', () => {
+                                // After arriving, return after a delay
+                                setTimeout(() => {
+                                    animator.returnToStart('costar', 'star', true);
+                                }, 2000);
+                            }, true);
+                        }
+                    }
+                });
+            }
+
+            // Provide visual pip if chat is hidden
+            const widget = document.getElementById('costarChatWidget');
+            if (!widget.classList.contains('active')) {
+                const badge = document.getElementById('costarFabBadge');
+                badge.style.display = 'flex';
+            }
+
+        } else {
+            const err = await res.json();
+            appendCoStarMessage('bot', `**Error:** ${err.detail || 'Internal error'}`);
+        }
+    } catch (e) {
+        thinkingDiv.remove();
+        appendCoStarMessage('bot', `**Connection Error:** ${e.message}`);
     }
 }

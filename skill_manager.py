@@ -170,8 +170,8 @@ class SkillManager:
             skill_name = skill["name"]
             is_core = False
             
-            # Label calculator as core dynamically for UI
-            if skill_name.lower() == "calculator":
+            # Label core knowledge skills dynamically for UI
+            if skill_name.lower() == "calculator" or skill_id == "aegis-board-mastery":
                 is_core = True
                 
             all_tools.append({

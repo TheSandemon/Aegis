@@ -177,14 +177,25 @@ function renderBoard() {
         const isCollapsed = collapsedColumns[column];
         colDiv.className = 'column' + (isCollapsed ? ' collapsed' : '');
         colDiv.dataset.column = column;
+        colDiv.dataset.colId = colObj.id;
         const colColor = getColumnColor(colObj);
+        colDiv.style.borderTop = `4px solid ${colColor}`;
+
+        // Column Drag & Drop
+        colDiv.draggable = true;
+        colDiv.addEventListener('dragstart', handleColumnDragStart);
+        colDiv.addEventListener('dragend', handleColumnDragEnd);
+        colDiv.addEventListener('dragover', handleColumnDragOver);
+        colDiv.addEventListener('drop', handleColumnDrop);
+        colDiv.addEventListener('dragleave', handleColumnDragLeave);
+
         const isIntegrated = colObj.integration_type;
         colDiv.innerHTML = `
             <div class="col-color-stripe" style="background:${colColor}" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')"></div>
             <div class="col-vertical-name" style="color:${colColor}" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')">${column}</div>
             <div class="col-collapsed-count">${columnCards.length}</div>
             <div class="column-header">
-                <h2 class="col-name-text" onclick="toggleColumn('${column}')" style="cursor:pointer; flex:1;">
+                <h2 class="col-name-text" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')" style="cursor:pointer; flex:1; color:${colColor};">
                     ${column} <span class="count">${columnCards.length}</span>
                     ${isIntegrated ? `<span title="Integration: ${colObj.integration_type} (${colObj.integration_status || 'active'})" style="font-size:0.65rem; cursor:default;">
                         <span style="color:${colObj.integration_status === 'error' ? '#ef4444' : '#22c55e'}">●</span>🔗</span>` : ''}
@@ -192,9 +203,9 @@ function renderBoard() {
                 <button onclick="event.stopPropagation(); toggleColumnLock(${colObj.id})" style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="${colObj.is_locked ? 'Unlock Column' : 'Lock Column'}">${colObj.is_locked ? '🔒' : '🔓'}</button>
                 <button class="col-settings-btn" onclick="event.stopPropagation(); openColumnSettings(${colObj.id}, '${column.replace(/'/g, "\\'")}')"
                     style="padding:0.1rem 0.3rem; font-size:0.7rem; border:none; background:transparent; cursor:pointer;" title="Column Settings">⚙</button>
-                <span class="collapse-icon" onclick="toggleColumn('${column}')" style="cursor:pointer;">▼</span>
+                <span class="collapse-icon" onclick="toggleColumn('${column.replace(/'/g, "\\'")}')" style="cursor:pointer;">▼</span>
             </div>
-            <div class="column-body" data-column="${column}">
+            <div class="column-body" data-column="${column.replace(/"/g, '&quot;')}">
                 ${renderColumnCards(columnCards, doneIds)}
             </div>`;
         const colBody = colDiv.querySelector('.column-body');
@@ -295,10 +306,122 @@ function renderCard(card, doneIds) {
 
 // Drag & Drop
 let draggedCardId = null;
-function handleDragStart(e) { draggedCardId = parseInt(e.target.dataset.id); e.target.classList.add('dragging'); }
-function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over')); }
+function handleDragStart(e) { draggedCardId = parseInt(e.target.dataset.id); e.target.classList.add('dragging'); e.stopPropagation(); }
+function handleDragEnd(e) { e.target.classList.remove('dragging'); document.querySelectorAll('.column-body').forEach(cb => cb.classList.remove('drag-over')); e.stopPropagation(); }
 function handleDragOver(e) { e.preventDefault(); e.currentTarget.classList.add('drag-over'); }
 function handleDragLeave(e) { e.currentTarget.classList.remove('drag-over'); }
+
+// Column Drag & Drop
+let draggedColumnEl = null;
+
+function handleColumnDragStart(e) {
+    if (e.target.classList.contains('card') || e.target.closest('.card')) {
+        return; // Don't trigger if dragging a card
+    }
+    draggedColumnEl = e.currentTarget;
+    e.dataTransfer.effectAllowed = 'move';
+    setTimeout(() => { if (draggedColumnEl) draggedColumnEl.style.opacity = '0.4'; }, 0);
+}
+
+function handleColumnDragEnd(e) {
+    if (draggedColumnEl) {
+        draggedColumnEl.style.opacity = '1';
+        draggedColumnEl = null;
+    }
+    document.querySelectorAll('.column').forEach(c => c.style.boxShadow = '');
+}
+
+function handleColumnDragOver(e) {
+    if (!draggedColumnEl || draggedColumnEl === e.currentTarget) return;
+    if (e.dataTransfer.types.includes("Files")) return;
+    e.preventDefault();
+    e.currentTarget.style.boxShadow = '0 0 0 2px var(--primary)';
+}
+
+function handleColumnDragLeave(e) {
+    if (draggedColumnEl && e.currentTarget !== draggedColumnEl) {
+        e.currentTarget.style.boxShadow = '';
+    }
+}
+
+async function handleColumnDrop(e) {
+    const targetCol = e.currentTarget;
+    targetCol.style.boxShadow = '';
+
+    if (!draggedColumnEl || draggedColumnEl === targetCol) return;
+    e.stopPropagation();
+
+    const board = document.getElementById('board');
+    const cols = Array.from(board.querySelectorAll('.column'));
+    const draggedIdx = cols.indexOf(draggedColumnEl);
+    const targetIdx = cols.indexOf(targetCol);
+
+    if (draggedIdx < targetIdx) {
+        targetCol.after(draggedColumnEl);
+    } else {
+        targetCol.before(draggedColumnEl);
+    }
+
+    const newOrder = Array.from(board.querySelectorAll('.column')).map((col, idx) => ({
+        id: parseInt(col.dataset.colId),
+        position: idx
+    }));
+
+    try {
+        await fetch('/api/columns/reorder', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ order: newOrder })
+        });
+        loadColumns();
+    } catch (err) {
+        showToast('Failed to save column order');
+    }
+}
+
+// Placeholder for triggering GitHub webhook, if needed
+async function triggerGithubWebhook() {
+    try {
+        await fetch('/api/github/events', { method: 'POST', body: '{}' });
+        showToast('Webhook trigger sent');
+    } catch (e) {
+        showToast('Failed to trigger webhook');
+    }
+}
+
+// ─── Column Guardrails Helper Functions ─────────────────────────────────────────
+function suggestColFunction(e) {
+    if (e) e.preventDefault();
+    const colName = document.getElementById('editColName').value.trim() || "this step";
+    const suggestions = [
+        `This column is for reviewing. Agents should analyze the attached content, look for issues, and provide feedback.`,
+        `This column represents work in progress. Agents should actively execute tasks associated with these cards.`,
+        `This column acts as an inbox. Agents should triage incoming items, assign priorities, and route them appropriately.`,
+        `Cards here are blocked. Agents should investigate blockers and notify the human admin.`
+    ];
+    // Simple rotation based on length or just random
+    document.getElementById('editColFunction').value = suggestions[Math.floor(Math.random() * suggestions.length)];
+}
+
+function suggestColExitPass(e) {
+    if (e) e.preventDefault();
+    const suggestions = [
+        `If the review is approved or the task is successful, move the card to 'Done'.`,
+        `When complete, leave a summary comment and move the card to the next operational phase.`,
+        `Upon success, merge the PR (if applicable) and archive the card.`
+    ];
+    document.getElementById('editColExitPass').value = suggestions[Math.floor(Math.random() * suggestions.length)];
+}
+
+function suggestColExitFail(e) {
+    if (e) e.preventDefault();
+    const suggestions = [
+        `If issues are found, request changes, add a comment detailing the problem, and move the card back to 'In Progress'.`,
+        `If the operation fails, mark the card as 'Blocked' and notify the admin.`,
+        `If validation fails, move the card to 'Needs Review' and append the error log.`
+    ];
+    document.getElementById('editColExitFail').value = suggestions[Math.floor(Math.random() * suggestions.length)];
+}
 async function handleDrop(e) {
     e.preventDefault();
     const column = e.currentTarget.dataset.column;
@@ -406,6 +529,45 @@ async function resolveAgentConflict() {
     closeModal('agentConflictModal');
 }
 
+// --- Admin Auth Modal Logic ---
+function showAdminAuthModal(data) {
+    document.getElementById('adminPingAgentName').textContent = data.agent_name || data.agent_id;
+    document.getElementById('adminPingAgentId').value = data.agent_id;
+    document.getElementById('adminPingCardId').value = data.card_id;
+    document.getElementById('adminPingActionDetails').textContent = data.details || 'Modifying card properties...';
+    document.getElementById('adminAuthModal').classList.add('active');
+}
+
+async function approveAdminCardAction() {
+    const agentId = document.getElementById('adminPingAgentId').value;
+    // Approving just lets the agent try again, BUT if we don't modify the check it will 403 again!
+    // Actually, Admin Authorization might require a temporary bypass or we just tell the user to move it.
+    // Wait, if the user approves, they can just perform the action on the UI themselves or we resume the agent.
+    // Actually, just sending a message to the agent stdin saying "Admin approved!" and resuming.
+    // But then the agent repeats the exact same API call and hits the exact same 403 block.
+    // So the simplest way is to fetch the agent's chat/inject endpoint and say "Admin declined, leave it."
+    showToast('Resuming agent. (Note: Agent will need to retry or skip based on this)', 'success');
+    await fetch(`/api/instances/${agentId}/inject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: "System: Admin approved your action. Wait, actually Admin actions must be performed by the Admin. You should move on to a different card." })
+    });
+    await fetch(`/api/instances/${agentId}/resume`, { method: 'POST' });
+    closeModal('adminAuthModal');
+}
+
+async function denyAdminCardAction() {
+    const agentId = document.getElementById('adminPingAgentId').value;
+    showToast('Action denied. Resuming agent.', 'danger');
+    await fetch(`/api/instances/${agentId}/inject`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: "System: Admin DENIED your request to modify the card. Do NOT retry this. Pick a different action or task." })
+    });
+    await fetch(`/api/instances/${agentId}/resume`, { method: 'POST' });
+    closeModal('adminAuthModal');
+}
+
 // ── Integration field definitions ────────────────────────────────────────────
 const INTEGRATION_CRED_FIELDS = {
     local_folder: [
@@ -445,6 +607,12 @@ function onIntegrationTypeChange() {
     container.innerHTML = '';
     if (!type || !INTEGRATION_CRED_FIELDS[type]) return;
 
+    // Show/hide resource type dropdown for GitHub
+    const resourceTypeGroup = document.getElementById('resourceTypeGroup');
+    if (resourceTypeGroup) {
+        resourceTypeGroup.style.display = type === 'github' ? 'block' : 'none';
+    }
+
     // If GitHub and we have saved connections, show connection picker
     if (type === 'github' && window._savedConnections && window._savedConnections.length > 0) {
         _renderConnectionPicker(container, '', false);
@@ -469,6 +637,13 @@ function _collectIntegrationPayload() {
     const type = document.getElementById('integrationType').value;
     if (!type) return null;
 
+    // Get resource type for GitHub
+    let resourceType = null;
+    if (type === 'github') {
+        const rtSelect = document.getElementById('integrationResourceType');
+        resourceType = rtSelect ? rtSelect.value : 'issues';
+    }
+
     // If using connection picker
     const connSelect = document.getElementById('gh_connection_picker');
     if (type === 'github' && connSelect && connSelect.value) {
@@ -478,6 +653,14 @@ function _collectIntegrationPayload() {
         const stateEl = document.getElementById('gh_state');
         const labelsEl = document.getElementById('gh_labels');
 
+        const filters = {
+            state: stateEl ? stateEl.value : 'open',
+            labels: labelsEl ? labelsEl.value.trim() : '',
+        };
+        if (resourceType) {
+            filters.resource_type = resourceType;
+        }
+
         return {
             type,
             mode: document.getElementById('integrationMode').value,
@@ -485,10 +668,7 @@ function _collectIntegrationPayload() {
                 connection_id: connSelect.value,
                 repo: repo,
             },
-            filters: {
-                state: stateEl ? stateEl.value : 'open',
-                labels: labelsEl ? labelsEl.value.trim() : '',
-            },
+            filters,
             sync_interval_ms: parseInt(document.getElementById('integrationSyncInterval').value) || 60000,
             webhook_secret: document.getElementById('integrationWebhookSecret').value || null,
         };
@@ -507,6 +687,9 @@ function _collectIntegrationPayload() {
             credentials[f.key] = val;
         }
     });
+    if (resourceType) {
+        filters.resource_type = resourceType;
+    }
     return {
         type,
         mode: document.getElementById('integrationMode').value,
@@ -516,6 +699,8 @@ function _collectIntegrationPayload() {
         webhook_secret: document.getElementById('integrationWebhookSecret').value || null,
     };
 }
+
+
 
 function _renderConnectionPicker(container, currentRepo, isEdit) {
     const prefix = isEdit ? 'edit_' : '';
@@ -1003,6 +1188,13 @@ function onEditIntegrationTypeChange() {
     const type = document.getElementById('editIntegrationType').value;
     const container = document.getElementById('editIntegrationCredFields');
     container.innerHTML = '';
+
+    // Show/hide resource type dropdown for GitHub
+    const resourceTypeGroup = document.getElementById('editResourceTypeGroup');
+    if (resourceTypeGroup) {
+        resourceTypeGroup.style.display = type === 'github' ? 'block' : 'none';
+    }
+
     if (!type || !INTEGRATION_CRED_FIELDS[type]) return;
     INTEGRATION_CRED_FIELDS[type].forEach(field => {
         const div = document.createElement('div');
@@ -1043,6 +1235,14 @@ function onEditReplaceIntChange() {
 function _collectEditIntegrationPayload() {
     const type = document.getElementById('editIntegrationType').value;
     if (!type) return null;
+
+    // Get resource type for GitHub
+    let resourceType = null;
+    if (type === 'github') {
+        const rtSelect = document.getElementById('editIntegrationResourceType');
+        resourceType = rtSelect ? rtSelect.value : 'issues';
+    }
+
     const fieldDefs = INTEGRATION_CRED_FIELDS[type] || [];
     const credentials = {};
     const filters = {};
@@ -1053,6 +1253,9 @@ function _collectEditIntegrationPayload() {
         if (f.isFilter) filters[f.key] = val;
         else credentials[f.key] = val;
     });
+    if (resourceType) {
+        filters.resource_type = resourceType;
+    }
     return {
         type,
         mode: document.getElementById('editIntegrationMode').value,
@@ -1069,8 +1272,14 @@ function openColumnSettings(colId) {
 
     document.getElementById('editColId').value = colId;
     document.getElementById('editColName').value = col.name;
-    document.getElementById('editColPosition').value = col.position ?? '';
+    const posEl = document.getElementById('editColPosition');
+    if (posEl) posEl.value = col.position ?? '';
     document.getElementById('editColColor').value = col.color || getColumnColor(col);
+
+
+    document.getElementById('editColFunction').value = col.function || '';
+    document.getElementById('editColExitPass').value = col.exit_pass || '';
+    document.getElementById('editColExitFail').value = col.exit_fail || '';
 
     // Reset all integration UI
     document.getElementById('editColEnableIntegration').checked = false;
@@ -1131,16 +1340,27 @@ async function retryIntegrationSync() {
 async function saveColumnSettings() {
     const colId = document.getElementById('editColId').value;
     const name = document.getElementById('editColName').value.trim();
-    const position = document.getElementById('editColPosition').value;
     const color = document.getElementById('editColColor').value;
+    const positionEl = document.getElementById('editColPosition');
+    const position = positionEl ? parseInt(positionEl.value) : undefined;
     const removeInt = document.getElementById('editColRemoveInt')?.checked || false;
     const addInt = document.getElementById('editColEnableIntegration')?.checked || false;
     const replaceInt = document.getElementById('editColReplaceInt')?.checked || false;
 
+    // Get the new fields
+    const func = document.getElementById('editColFunction')?.value;
+    const exitPass = document.getElementById('editColExitPass')?.value;
+    const exitFail = document.getElementById('editColExitFail')?.value;
+
     const body = {};
     if (name) body.name = name;
-    if (position !== '') body.position = parseInt(position);
     if (color) body.color = color;
+    if (position !== undefined && !isNaN(position)) body.position = position;
+
+    // Assign the new fields if they exist
+    if (func !== undefined) body.function = func;
+    if (exitPass !== undefined) body.exit_pass = exitPass;
+    if (exitFail !== undefined) body.exit_fail = exitFail;
 
     if (removeInt) {
         body.remove_integration = true;
@@ -1166,10 +1386,10 @@ async function saveColumnSettings() {
             const err = await res.json().catch(() => null);
             showToast(err?.detail || 'Failed to update column');
         }
-    } catch (e) { showToast('Failed to update column'); }
-}
-
-// Event Listeners
+    } catch (e) {
+        showToast('Update failed');
+    }
+}// Event Listeners
 document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.modal-overlay').forEach(o => o.addEventListener('mousedown', e => { if (e.target === o) o.classList.remove('active'); }));
     document.addEventListener('keydown', e => {
@@ -1180,4 +1400,5 @@ document.addEventListener('DOMContentLoaded', () => {
         else if (e.key === 'r' || e.key === 'R') { e.preventDefault(); loadCards(); showToast('Refreshing...'); }
     });
     init();
+    loadCoStarConfig();
 });

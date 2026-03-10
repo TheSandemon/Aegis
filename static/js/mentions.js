@@ -186,13 +186,7 @@
     // ─── Auto-attach to known inputs + observe DOM for dynamic ones ───────────
 
     function attachAll() {
-        const ids = ['cardDescription', 'detailDescription'];
-        ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) attachMentionPicker(el);
-        });
-        // Attach to any textarea with data-mention="true"
-        document.querySelectorAll('textarea[data-mention]').forEach(attachMentionPicker);
+        document.querySelectorAll('textarea, input[type="text"]').forEach(attachMentionPicker);
     }
 
     // Observe for dynamically added textareas

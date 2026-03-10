@@ -169,10 +169,44 @@ function handleWebSocketMessage(data) {
             cards.push(data.card);
             renderBoard();
             showToast('Card created');
+            // Animate agent character to the new card if assignee matches a running agent
+            if (data.card && data.card.assignee && window.getAgentAnimator) {
+                setTimeout(() => {
+                    const cardEl = document.querySelector(`.card[data-id="${data.card.id}"]`);
+                    if (cardEl) {
+                        const animator = getAgentAnimator();
+                        // Find instance by assignee name
+                        const inst = (window.instancesData || []).find(i => (i.instance_name || i.agent_id) === data.card.assignee);
+                        if (inst) {
+                            const charType = animator.getCharacterType(inst.instance_id);
+                            animator.animateToCard(inst.instance_id, cardEl, charType, () => {
+                                setTimeout(() => animator.returnToStart(inst.instance_id, charType), 3000);
+                            });
+                        }
+                    }
+                }, 300);
+            }
             break;
         case 'card_updated':
+            if (!data.card) break;
             const idx = cards.findIndex(c => c.id === data.card.id);
             if (idx !== -1) { cards[idx] = data.card; renderBoard(); }
+            // Animate agent character to updated card if assignee matches a running agent
+            if (data.card && data.card.assignee && window.getAgentAnimator) {
+                setTimeout(() => {
+                    const cardEl = document.querySelector(`.card[data-id="${data.card.id}"]`);
+                    if (cardEl) {
+                        const animator = getAgentAnimator();
+                        const inst = (window.instancesData || []).find(i => (i.instance_name || i.agent_id) === data.card.assignee);
+                        if (inst) {
+                            const charType = animator.getCharacterType(inst.instance_id);
+                            animator.animateToCard(inst.instance_id, cardEl, charType, () => {
+                                setTimeout(() => animator.returnToStart(inst.instance_id, charType), 3000);
+                            });
+                        }
+                    }
+                }, 300);
+            }
             break;
         case 'card_deleted':
             cards = cards.filter(c => c.id !== data.card_id);
@@ -185,6 +219,7 @@ function handleWebSocketMessage(data) {
             });
             break;
         case 'column_updated':
+            if (!data.column) break;
             const colIdx = columns.findIndex(c => c.id === data.column.id);
             if (colIdx !== -1) { columns[colIdx] = data.column; }
             populateColumnSelects();
@@ -194,7 +229,7 @@ function handleWebSocketMessage(data) {
             if (data.instance_id && data.card_id) {
                 agentCardMap[data.instance_id] = { card_id: data.card_id, color: data.color || 'var(--primary)' };
             }
-            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
+            if (typeof loadInstances === 'function') loadInstances();
             break;
         case 'agent_stopped':
             // Remove card highlight and clean up map entry
@@ -203,13 +238,13 @@ function handleWebSocketMessage(data) {
                 if (stoppedMapping) setCardAgentHighlight(stoppedMapping.card_id, null, false);
             }
             delete agentCardMap[data.instance_id];
-            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
+            if (typeof loadInstances === 'function') loadInstances();
             if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
                 loadActiveRuntimes();
             }
             break;
         case 'agent_status_changed':
-            if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
+            if (typeof loadInstances === 'function') loadInstances();
             if (document.getElementById('tab-runtimes')?.classList.contains('active')) {
                 loadActiveRuntimes();
             }
@@ -294,6 +329,27 @@ function handleWebSocketMessage(data) {
                 }
             }
 
+            // Walking Agent Characters: Trigger animation when agent logs contain card actions
+            if (data.instance_id && window.getAgentAnimator && data.entry) {
+                const actionCardMatch = data.entry.match(/⚡ (?:ACTION|WORKING):[^]*?card[\s#]*?(\d+)/i)
+                    || data.entry.match(/(?:update_card|move_card|create_card|delete_card)[^]*?(?:card_id|#)(\d+)/i)
+                    || data.entry.match(/PATCH.*\/cards\/(\d+)/i)
+                    || data.entry.match(/moved card #?(\d+)/i);
+                if (actionCardMatch) {
+                    const cardId = actionCardMatch[1];
+                    setTimeout(() => {
+                        const cardEl = document.querySelector(`.card[data-id="${cardId}"]`);
+                        if (cardEl) {
+                            const animator = getAgentAnimator();
+                            const charType = animator.getCharacterType(data.instance_id);
+                            animator.animateToCard(data.instance_id, cardEl, charType, () => {
+                                setTimeout(() => animator.returnToStart(data.instance_id, charType), 2500);
+                            });
+                        }
+                    }, 100);
+                }
+            }
+
             // Speech Bubbles: Show thought on THOUGHT, ERROR, ATTENTION, or explicit NOTIFY logs
             if (data.entry && typeof showAgentBubble === 'function') {
                 const id = data.instance_id || data.agent_id;
@@ -321,6 +377,12 @@ function handleWebSocketMessage(data) {
                 triggerConflictWizard(data);
             }
             break;
+        case 'admin_auth_request':
+            showToast(`🛡️ Agent ${data.agent_name} requested Admin Authorization!`, 'attention');
+            if (typeof showAdminAuthModal === 'function') {
+                showAdminAuthModal(data);
+            }
+            break;
         case 'agent_paused':
             if (typeof renderInstancesSidebar === 'function') renderInstancesSidebar();
             showToast(`⏸ ${data.agent_id} paused`);
@@ -342,9 +404,15 @@ function handleWebSocketMessage(data) {
                 const mapping = agentCardMap[data.instance_id];
                 if (mapping) setCardAgentHighlight(mapping.card_id, null, false);
             }
+            // Animate character back to start (going to sleep)
+            if (window.getAgentAnimator) {
+                const animator = getAgentAnimator();
+                animator.handleAgentPulse(data.instance_id);
+            }
             break;
         case 'agent_activity':
             const actId = data.instance_id || data.sender;
+            console.log('[WS] agent_activity:', actId, 'card_id:', data.card_id, 'status:', data.status);
             const actEl = document.getElementById(`activity-${actId}`);
             if (actEl) {
                 let color = "var(--text-secondary)";
@@ -355,6 +423,37 @@ function handleWebSocketMessage(data) {
             // Speech Bubbles: Show thought on activity
             if (data.thought && typeof showAgentBubble === 'function') {
                 showAgentBubble(actId, data.thought);
+            }
+            // Animate character to the card being worked on
+            if (data.card_id && window.getAgentAnimator) {
+                const animator = getAgentAnimator();
+                animator.handleAgentActivity(actId, data.card_id);
+            }
+            break;
+        case 'agent_presence':
+            // Handle real-time presence updates for character animation
+            console.log('[WS] agent_presence:', data.agent_id, 'card_id:', data.card_id, 'activity:', data.activity);
+            const presenceAgentId = data.agent_id;
+            const presenceCardId = data.card_id;
+            const presenceActivity = data.activity;
+            // Update activity indicator
+            const presActEl = document.getElementById(`activity-${presenceAgentId}`);
+            if (presActEl) {
+                let presColor = "var(--text-secondary)";
+                if (presenceActivity === "thinking") presColor = "#c084fc";
+                if (presenceActivity === "working") presColor = "#facc15";
+                if (presenceActivity === "idle") presColor = "var(--text-secondary)";
+                presActEl.innerHTML = `<span style="color: ${presColor}">${presenceActivity}...</span>`;
+            }
+            // Animate character based on presence
+            if (window.getAgentAnimator) {
+                const animator = getAgentAnimator();
+                if (presenceCardId) {
+                    animator.handleAgentActivity(presenceAgentId, presenceCardId);
+                } else {
+                    // No card - return to sidebar/header
+                    animator.handleAgentActivity(presenceAgentId, null);
+                }
             }
             break;
         case 'board_loaded':

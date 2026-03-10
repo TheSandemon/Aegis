@@ -5,10 +5,8 @@
    ═══════════════════════════════════════════════════════════════════════════════ */
 
 const INTEGRATION_TYPE_LABELS = {
-    github: { icon: '🐙', name: 'GitHub Issues' },
-    jira: { icon: '🔵', name: 'Jira' },
-    linear: { icon: '🟣', name: 'Linear' },
-    firestore: { icon: '🔥', name: 'Firebase Firestore' },
+    github: { icon: '🐙', name: 'GitHub' },
+    local_folder: { icon: '📁', name: 'Local Folder' },
 };
 
 const INTEGRATION_MODE_LABELS = {

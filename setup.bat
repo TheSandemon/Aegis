@@ -87,11 +87,12 @@ echo   [OK] Templates generated
 echo.
 
 REM Start the server and open browser
-start "" python main.py
-timeout /t 3 >nul
-start http://localhost:42069
+call venv\Scripts\python.bat main.py
 if %errorlevel% neq 0 (
     echo.
-    echo ERROR: Aegis failed to start or was closed unexpectedly.
+    echo ERROR: Aegis failed to start
     pause
+    exit /b %errorlevel%
 )
+timeout /t 3 >nul
+start http://localhost:42069

@@ -2196,6 +2196,13 @@ let COSTAR_MODELS = {
         { id: 'o3', name: 'o3' },
         { id: 'o3-mini', name: 'o3-mini' }
     ],
+    google: [
+        { id: 'gemini-flash-latest', name: 'Gemini Flash Latest' },
+        { id: 'gemini-2.0-flash-exp', name: 'Gemini 2.0 Flash Exp' },
+        { id: 'gemini-2.0-flash', name: 'Gemini 2.0 Flash' },
+        { id: 'gemini-1.5-pro', name: 'Gemini 1.5 Pro' },
+        { id: 'gemini-1.5-flash', name: 'Gemini 1.5 Flash' }
+    ],
     deepseek: [
         { id: 'deepseek-reasoner', name: 'DeepSeek R1' },
         { id: 'deepseek-chat', name: 'DeepSeek V3' }
@@ -2291,6 +2298,61 @@ function updateCoStarModels() {
     } else {
         modelSelect.value = models[0]?.id || '';
         costarConfig.model = modelSelect.value;
+    }
+}
+
+// Debounce timer for CoStar API key verification
+let costarVerifyDebounceTimer = null;
+
+function debounceVerifyCoStarKey() {
+    clearTimeout(costarVerifyDebounceTimer);
+    costarVerifyDebounceTimer = setTimeout(verifyCoStarApiKey, 500);
+}
+
+async function verifyCoStarApiKey() {
+    const keyStr = document.getElementById('coStarApiKey').value;
+    if (!keyStr || keyStr.length < 10) return;
+
+    const feedbackEl = document.getElementById('feedback-costar-apikey');
+    if (feedbackEl) feedbackEl.innerHTML = ' ⏳ <i>Verifying...</i>';
+
+    try {
+        const res = await fetch('/api/keys/verify', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ api_key: keyStr })
+        });
+        const data = await res.json();
+
+        if (data.valid) {
+            if (feedbackEl) feedbackEl.innerHTML = ' ✅ <span style="color:var(--success);font-size:0.8rem;">Verified</span>';
+
+            // Auto-update service dropdown
+            const serviceStr = data.service;
+            document.getElementById('coStarService').value = serviceStr;
+
+            // Update models for the detected service
+            if (data.models && data.models.length > 0) {
+                COSTAR_MODELS[serviceStr] = data.models;
+            }
+
+            // Update the model dropdown
+            updateCoStarModels();
+
+            // Auto-select the best model
+            const models = COSTAR_MODELS[serviceStr] || [];
+            if (models.length > 0) {
+                // Prefer flash or large models
+                const preferred = models.find(m => m.id.includes('flash') || m.id.includes('large')) || models[0];
+                if (preferred) {
+                    document.getElementById('coStarModel').value = preferred.id;
+                }
+            }
+        } else {
+            if (feedbackEl) feedbackEl.innerHTML = ' ❌ <span style="color:var(--error);font-size:0.8rem;">Invalid key</span>';
+        }
+    } catch (e) {
+        if (feedbackEl) feedbackEl.innerHTML = ' ❌ <span style="color:var(--error);font-size:0.8rem;">Verify failed</span>';
     }
 }
 

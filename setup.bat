@@ -86,8 +86,10 @@ python setup_templates.py
 echo   [OK] Templates generated
 echo.
 
-REM Start the server
-python main.py
+REM Start the server and open browser
+start "" python main.py
+timeout /t 3 >nul
+start http://localhost:42069
 if %errorlevel% neq 0 (
     echo.
     echo ERROR: Aegis failed to start or was closed unexpectedly.

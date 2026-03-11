@@ -179,13 +179,13 @@
             </div>
             <div class="view-nav">
                 <button class="active" data-view="board" onclick="navigateTo('board')">📋 Board</button>
-                <button data-view="telemetry" onclick="navigateTo('telemetry')">📊 Telemetry</button>
                 <button data-view="integrations" onclick="navigateTo('integrations')">🔗 Integrations</button>
                 <button data-view="workspaces" onclick="navigateTo('workspaces')">💾 Workflowspaces</button>
                 <button onclick="openSkillsMarketplaceModal()">🧩 Skills</button>
                 <button onclick="openCoStarModal()" id="costarNavBtn">⭐ CoStar</button>
                 <button onclick="if(window.onboarding) { window.onboarding.currentStep = 1; window.onboarding.open(); }"
                     style="background: var(--primary);">🎓 Tutorial</button>
+                <button data-view="telemetry" disabled title="Telemetry is temporarily disabled" style="opacity: 0.5; cursor: not-allowed; background: var(--bg-dark); color: var(--text-secondary); border: 1px dashed var(--border);">📊 Telemetry</button>
             </div>
         </div>
         <div class="header-actions">
@@ -227,8 +227,8 @@
                 <button onclick="openCreateWorkerModal()" style="font-size:0.75rem;padding:0.25rem 0.5rem;">+
                     Create Worker</button>
             </div>
-            <div id="agentCardsList">
-                <div class="empty-state" style="padding:2rem 1rem;">
+            <div id="agentCardsList" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 1rem; align-items: start;">
+                <div class="empty-state" style="padding:2rem 1rem; grid-column: 1 / -1;">
                     <div class="empty-state-icon" style="font-size:2rem;">X</div>
                     <div class="empty-state-text" style="font-size:0.8rem;">No workers yet.<br>Create one from an
                         installed template.</div>
@@ -706,11 +706,6 @@
                             <label>Color</label>
                             <input type="color" id="workerColor" value="#6366f1"
                                 style="height:40px;width:60px;padding:2px;cursor:pointer;">
-                        </div>
-
-                        <div class="form-group" style="margin-top:0.75rem;">
-                            <label style="font-size:0.8rem;">Character</label>
-                            <div id="characterGrid-create" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem;"></div>
                             <input type="hidden" id="workerCharType" value="robot">
                         </div>
 
@@ -814,17 +809,6 @@
                             <label>Color</label>
                             <input type="color" id="instSettingsColor" value="#6366f1"
                                 style="height:40px;width:60px;padding:2px;cursor:pointer;">
-                        </div>
-
-                        <div class="form-group" style="margin-top:0.75rem;">
-                            <label style="font-size:0.8rem;">Character</label>
-                            <div id="characterGrid-edit" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem;"></div>
-                            <input type="hidden" id="instSettingsCharType" value="robot">
-                        </div>
-
-                        <div class="form-group" style="margin-top:0.75rem;">
-                            <label style="font-size:0.8rem;">Character</label>
-                            <div id="characterGrid-edit" style="display:flex;gap:0.5rem;flex-wrap:wrap;margin-top:0.25rem;"></div>
                             <input type="hidden" id="instSettingsCharType" value="robot">
                         </div>
 
@@ -1036,11 +1020,13 @@
                     <div style="display:flex; gap:0.5rem;">
                         <input type="password" id="coStarApiKey"
                             placeholder="Enter API key or leave empty for auto-generated"
-                            style="flex:1; padding:0.5rem; border-radius:0.25rem; border:1px solid #4b5563; background:var(--bg-dark); color:var(--text-primary);">
+                            style="flex:1; padding:0.5rem; border-radius:0.25rem; border:1px solid #4b5563; background:var(--bg-dark); color:var(--text-primary);"
+                            oninput="debounceVerifyCoStarKey()">
                         <button onclick="regenerateCoStarKey()" class="secondary" title="Generate new key">🔄</button>
                     </div>
+                    <span id="feedback-costar-apikey" style="font-size:0.75rem; margin-top:0.25rem; display:block;"></span>
                     <div style="font-size:0.75rem; color:var(--text-secondary); margin-top:0.25rem;">
-                        Supports Anthropic, OpenAI, DeepSeek, MiniMax keys
+                        Supports Anthropic, OpenAI, Google, DeepSeek, MiniMax keys
                     </div>
                 </div>
 
@@ -1052,6 +1038,7 @@
                             style="width:100%; padding:0.5rem; border-radius:0.25rem; border:1px solid #4b5563; background:var(--bg-dark); color:var(--text-primary);">
                             <option value="anthropic">Anthropic (Claude)</option>
                             <option value="openai">OpenAI</option>
+                            <option value="google">Google (Gemini)</option>
                             <option value="deepseek">DeepSeek</option>
                             <option value="minimax">MiniMax</option>
                         </select>

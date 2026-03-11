@@ -52,12 +52,15 @@ body {
 /* ─── Agent Menu Sidebar ─────────────────────────────────── */
 .agent-menu {
     width: 320px;
+    min-width: 250px;
+    max-width: 800px;
+    resize: horizontal;
     background: var(--bg-column);
     border-right: 1px solid var(--border);
     display: flex;
     flex-direction: column;
-    transition: width 0.3s;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 1rem;
     gap: 1rem;
 }
